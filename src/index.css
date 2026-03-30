@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #f8fafc;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes mapDrift {
+  0%   { transform: translateX(0px); }
+  50%  { transform: translateX(-28px); }
+  100% { transform: translateX(0px); }
+}
+
+.map-drift {
+  animation: mapDrift 22s ease-in-out infinite;
+}

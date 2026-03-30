@@ -1,0 +1,61 @@
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import { useEffect } from 'react';
+import type { Place } from '../types';
+
+delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+});
+
+const createDotIcon = () =>
+  L.divIcon({
+    html: `<div style="width:14px;height:14px;background:#7C3AED;border:2.5px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(124,58,237,0.5)"></div>`,
+    className: '',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+
+function FitBounds({ places }: { places: Place[] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (places.length > 1) {
+      const bounds = L.latLngBounds(places.map(p => [p.lat, p.lng]));
+      map.fitBounds(bounds, { padding: [32, 32] });
+    }
+  }, [map, places]);
+  return null;
+}
+
+interface Props {
+  places: Place[];
+  center?: [number, number];
+  zoom?: number;
+  height?: string;
+}
+
+export default function MapView({ places, center = [20, 10], zoom = 2, height = '300px' }: Props) {
+  return (
+    <MapContainer
+      center={center}
+      zoom={zoom}
+      style={{ height, width: '100%' }}
+      className="rounded-xl z-0"
+      zoomControl={true}
+      attributionControl={false}
+    >
+      <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+      <FitBounds places={places} />
+      {places.map(place => (
+        <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon()}>
+          <Popup>
+            <div className="text-sm font-medium">{place.name}</div>
+            <div className="text-xs text-gray-500">{place.city}, {place.country}</div>
+          </Popup>
+        </Marker>
+      ))}
+    </MapContainer>
+  );
+}
