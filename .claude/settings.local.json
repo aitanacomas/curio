@@ -94,7 +94,11 @@
       "Bash(python3 -m json.tool)",
       "Bash(curl -s -H \"Authorization: Bearer nfc_LNHKioSXd5NFnDqm4dEvJJpC32czfm3X3b1d\" \"https://api.netlify.com/api/v1/sites/1c496334-ec61-4a40-9da9-1aedd7807174/deploys?per_page=3\")",
       "Bash(SITE_ID=\"1c496334-ec61-4a40-9da9-1aedd7807174\" TOKEN=\"nfc_LNHKioSXd5NFnDqm4dEvJJpC32czfm3X3b1d\" ZIP=\"/Users/aitanacomas/Desktop/Social Media App/deploy.zip\" __NEW_LINE_91dd613af16f67b1__ curl -s -X POST \"https://api.netlify.com/api/v1/sites/$SITE_ID/deploys\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/zip\" --data-binary \"@$ZIP\")",
-      "Bash(TOKEN=\"nfc_LNHKioSXd5NFnDqm4dEvJJpC32czfm3X3b1d\" curl -s -H \"Authorization: Bearer $TOKEN\" \"https://api.netlify.com/api/v1/accounts\")"
+      "Bash(TOKEN=\"nfc_LNHKioSXd5NFnDqm4dEvJJpC32czfm3X3b1d\" curl -s -H \"Authorization: Bearer $TOKEN\" \"https://api.netlify.com/api/v1/accounts\")",
+      "Bash(find /Users/aitanacomas/Desktop/Social Media App/src -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) -exec wc -l {} +)",
+      "Bash(grep -E '\\\\.\\(jpg|jpeg|png|gif|webp\\)$')",
+      "Bash(vercel --prod)",
+      "Bash(vercel env:*)"
     ]
   }
 }

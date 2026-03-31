@@ -143,7 +143,7 @@ export async function unfollowUser(followerId: string, followingId: string) {
 }
 
 // ── Update profile ────────────────────────────────────────────────────────────
-export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string }) {
+export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string; avatar_url?: string }) {
   const { error } = await supabase
     .from('profiles')
     .update(updates)

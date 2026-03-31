@@ -1,11 +1,11 @@
-import { lazy, Suspense, useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus } from 'lucide-react';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
-import { getUserPosts, updateProfile, type RealPost } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, type RealPost } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -41,7 +41,7 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
-export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null }) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
@@ -53,6 +53,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
   const [editBio, setEditBio] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCreatorOnboard, setShowCreatorOnboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
@@ -108,27 +111,57 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
 
   // ── Edit Profile Sheet ──────────────────────────────────────────
   if (showEditProfile) {
+    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setAvatarFile(file);
+      setAvatarPreview(URL.createObjectURL(file));
+    };
+
     const handleSave = async () => {
       if (!appUser?.id) return;
       setSaving(true);
       setSaveError('');
-      const error = await updateProfile(appUser.id, {
+
+      let newAvatarUrl: string | null = null;
+      if (avatarFile) {
+        const ext = avatarFile.type.split('/')[1] ?? 'jpg';
+        const path = `${appUser.id}/avatar.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(path, avatarFile, { upsert: true });
+        if (!uploadError) newAvatarUrl = getPublicUrl('avatars', path);
+      }
+
+      const updates: { name?: string; username?: string; bio?: string; avatar_url?: string } = {
         name: editName.trim() || displayUser.name,
         username: editUsername.trim().replace('@', '') || displayUser.username,
         bio: editBio.trim(),
-      });
+      };
+      if (newAvatarUrl) updates.avatar_url = newAvatarUrl;
+
+      const error = await updateProfile(appUser.id, updates);
       setSaving(false);
       if (error) {
         setSaveError('Username may already be taken. Try another.');
       } else {
+        onProfileUpdate?.({
+          name: updates.name!,
+          username: updates.username!,
+          avatar: newAvatarUrl ?? appUser.avatar,
+        });
+        setAvatarFile(null);
+        setAvatarPreview(null);
         setShowEditProfile(false);
       }
     };
 
+    const currentAvatar = avatarPreview ?? (appUser?.avatar || null);
+
     return (
       <div className="bg-white min-h-screen">
         <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
-          <button onClick={() => setShowEditProfile(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+          <button onClick={() => { setShowEditProfile(false); setAvatarFile(null); setAvatarPreview(null); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
             <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
           </button>
           <h2 className="text-base font-bold text-gray-900 flex-1">Edit Profile</h2>
@@ -142,14 +175,21 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
         </div>
         <div className="px-4 pt-6 space-y-5">
           {/* Avatar */}
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
           <div className="flex flex-col items-center gap-3">
-            <div className="relative">
-              <img src={displayUser.avatar} alt={displayUser.name} className="w-20 h-20 rounded-full object-cover object-top" />
-              <button className="absolute bottom-0 right-0 w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center">
+            <div className="relative" onClick={() => fileInputRef.current?.click()}>
+              {currentAvatar ? (
+                <img src={currentAvatar} alt={displayUser.name} className="w-20 h-20 rounded-full object-cover object-top" />
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center">
+                  <span className="text-2xl font-bold text-slate-400">{displayUser.name[0]?.toUpperCase()}</span>
+                </div>
+              )}
+              <div className="absolute bottom-0 right-0 w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center">
                 <Edit3 size={13} strokeWidth={1.5} className="text-white" />
-              </button>
+              </div>
             </div>
-            <button className="text-sm font-semibold text-gray-500">Change photo</button>
+            <button onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-gray-500">Change photo</button>
           </div>
           {/* Fields */}
           <div>

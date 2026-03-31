@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle } from 'lucide-react';
-import { getDiscoverProfiles, getFollowing, followUser, unfollowUser, type DiscoverProfile } from '../lib/supabase';
+import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle, MapPin } from 'lucide-react';
+import { getDiscoverProfiles, getFollowing, followUser, unfollowUser, getUserPosts, type DiscoverProfile, type RealPost } from '../lib/supabase';
 
 interface Props {
   currentUserId: string;
@@ -19,6 +19,7 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [viewingProfile, setViewingProfile] = useState<DiscoverProfile | null>(null);
   const [contactsSupported] = useState(() => 'contacts' in navigator);
   const [contactMatches, setContactMatches] = useState<DiscoverProfile[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>(() => {
@@ -193,6 +194,18 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
   );
   const stillPending = pendingInvites.filter(i => !joinedInvites.includes(i));
 
+  // ── View individual profile ─────────────────────────────────────
+  if (viewingProfile) {
+    return (
+      <UserProfileView
+        profile={viewingProfile}
+        isFollowing={following.has(viewingProfile.id)}
+        onToggleFollow={() => toggleFollow(viewingProfile.id)}
+        onBack={() => setViewingProfile(null)}
+      />
+    );
+  }
+
   return (
     <div className="bg-white min-h-screen">
       {/* Header */}
@@ -306,7 +319,7 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
             <div className="space-y-1">
               {referredProfiles.map(p => (
                 <div key={p.id} className="relative">
-                  <ProfileRow profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} />
+                  <ProfileRow profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} onViewProfile={() => setViewingProfile(p)} />
                   <span className="absolute top-3 right-14 text-[10px] font-medium text-green-600 bg-green-50 rounded-full px-2 py-0.5">Joined</span>
                 </div>
               ))}
@@ -323,7 +336,7 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
                 const profile = profiles.find(p => p.email?.toLowerCase() === invite.email)!;
                 return (
                   <div key={invite.email} className="relative">
-                    <ProfileRow profile={profile} isFollowing={following.has(profile.id)} onToggle={() => toggleFollow(profile.id)} />
+                    <ProfileRow profile={profile} isFollowing={following.has(profile.id)} onToggle={() => toggleFollow(profile.id)} onViewProfile={() => setViewingProfile(profile)} />
                     <span className="absolute top-3 right-14 text-[10px] font-medium text-green-600 bg-green-50 rounded-full px-2 py-0.5">Joined</span>
                   </div>
                 );
@@ -368,7 +381,7 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
             </p>
             <div className="space-y-1">
               {contactMatches.map(p => (
-                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} />
+                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} onViewProfile={() => setViewingProfile(p)} />
               ))}
             </div>
           </div>
@@ -408,7 +421,7 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
           ) : (
             <div className="space-y-1">
               {filtered.map(p => (
-                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} />
+                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} onViewProfile={() => setViewingProfile(p)} />
               ))}
             </div>
           )}
@@ -418,10 +431,10 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
   );
 }
 
-function ProfileRow({ profile, isFollowing, onToggle }: { profile: DiscoverProfile; isFollowing: boolean; onToggle: () => void }) {
+function ProfileRow({ profile, isFollowing, onToggle, onViewProfile }: { profile: DiscoverProfile; isFollowing: boolean; onToggle: () => void; onViewProfile: () => void }) {
   const initials = profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
-    <div className="flex items-center gap-3 py-2.5">
+    <div className="flex items-center gap-3 py-2.5 cursor-pointer" onClick={onViewProfile}>
       {profile.avatarUrl ? (
         <img src={profile.avatarUrl} alt={profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
       ) : (
@@ -434,13 +447,83 @@ function ProfileRow({ profile, isFollowing, onToggle }: { profile: DiscoverProfi
         <p className="text-xs text-gray-400 truncate">@{profile.username}</p>
       </div>
       <button
-        onClick={onToggle}
+        onClick={e => { e.stopPropagation(); onToggle(); }}
         className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${
           isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-slate-900 text-white'
         }`}
       >
         {isFollowing ? <><Check size={12} strokeWidth={2} />Following</> : <>Follow</>}
       </button>
+    </div>
+  );
+}
+
+function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { profile: DiscoverProfile; isFollowing: boolean; onToggleFollow: () => void; onBack: () => void }) {
+  const [posts, setPosts] = useState<RealPost[]>([]);
+  const [following, setFollowing] = useState(isFollowing);
+  const initials = profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    getUserPosts(profile.id).then(setPosts);
+  }, [profile.id]);
+
+  const handleFollow = () => {
+    setFollowing(f => !f);
+    onToggleFollow();
+  };
+
+  return (
+    <div className="bg-white min-h-screen">
+      <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
+        <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+          <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
+        </button>
+        <h2 className="text-base font-bold text-gray-900 flex-1">@{profile.username}</h2>
+      </div>
+
+      {/* Profile header */}
+      <div className="px-4 pt-5 pb-4 border-b border-gray-100">
+        <div className="flex items-center gap-4">
+          {profile.avatarUrl ? (
+            <img src={profile.avatarUrl} alt={profile.name} className="w-16 h-16 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+              <span className="text-xl font-bold text-slate-400">{initials || '?'}</span>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-bold text-gray-900">{profile.name}</p>
+            <p className="text-sm text-gray-400">@{profile.username}</p>
+          </div>
+          <button
+            onClick={handleFollow}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${
+              following ? 'bg-gray-100 text-gray-600' : 'bg-slate-900 text-white'
+            }`}
+          >
+            {following ? <><Check size={13} strokeWidth={2} />Following</> : <>Follow</>}
+          </button>
+        </div>
+      </div>
+
+      {/* Posts grid */}
+      {posts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+          <MapPin size={28} strokeWidth={1.5} className="text-gray-300 mb-3" />
+          <p className="text-sm font-semibold text-gray-900 mb-1">No posts yet</p>
+          <p className="text-xs text-gray-400">When {profile.name.split(' ')[0]} posts, you'll see them here</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-0.5 pt-0.5">
+          {posts.map(post =>
+            post.places.filter(pl => pl.photoUrl).slice(0, 1).map(pl => (
+              <div key={post.id} className="aspect-square bg-gray-100 overflow-hidden">
+                <img src={pl.photoUrl} alt={pl.name} className="w-full h-full object-cover" />
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
