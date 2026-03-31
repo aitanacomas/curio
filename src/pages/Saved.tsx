@@ -980,9 +980,16 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       for (const day of plan.days) {
         for (const item of day.items) {
           if (cancelled) return;
-          // Already complete with proper "Area, City" format → skip
-          if (item.address && item.neighborhood && item.neighborhood.includes(',')) continue;
           if (!item.name || item.name.length < 2) continue;
+          // Skip only if neighborhood is a clean "Area, City" with no state codes, zips, or street names
+          const streetTypeRx = /\b(avenue|ave|street|st|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|place|pl|highway|hwy)\b/i;
+          const hasCleanNeighborhood =
+            item.neighborhood &&
+            item.neighborhood.includes(',') &&
+            !/,\s*[A-Z]{2}(\s*\d{5})?$/.test(item.neighborhood) && // not ", FL" or ", FL 33141"
+            !/\d/.test(item.neighborhood) &&                         // no digits (zip codes, street numbers)
+            !streetTypeRx.test(item.neighborhood.split(',')[0]);     // first part is not a street name
+          if (hasCleanNeighborhood) continue;
 
           try {
             // ── Use searchText API for reliable establishment + neighborhood data ──
