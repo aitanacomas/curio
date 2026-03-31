@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle, MapPin } from 'lucide-react';
-import { getDiscoverProfiles, getFollowing, followUser, unfollowUser, getUserPosts, getFollowCounts, type DiscoverProfile, type RealPost } from '../lib/supabase';
+import { supabase, getDiscoverProfiles, getFollowing, getUserPosts, getFollowCounts, type DiscoverProfile, type RealPost } from '../lib/supabase';
 import ImageCarousel from '../components/ImageCarousel';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -51,11 +51,22 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
     if (following.has(profileId)) {
       setFollowing(prev => { const s = new Set(prev); s.delete(profileId); return s; });
       onFollowChange?.(-1);
-      await unfollowUser(currentUserId, profileId);
+      const { error } = await supabase.from('follows').delete()
+        .eq('follower_id', currentUserId).eq('following_id', profileId);
+      if (error) {
+        // revert on failure
+        setFollowing(prev => new Set(prev).add(profileId));
+        onFollowChange?.(1);
+      }
     } else {
       setFollowing(prev => new Set(prev).add(profileId));
       onFollowChange?.(1);
-      await followUser(currentUserId, profileId);
+      const { error } = await supabase.from('follows').insert({ follower_id: currentUserId, following_id: profileId });
+      if (error) {
+        // revert on failure
+        setFollowing(prev => { const s = new Set(prev); s.delete(profileId); return s; });
+        onFollowChange?.(-1);
+      }
     }
   };
 

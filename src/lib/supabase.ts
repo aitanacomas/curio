@@ -142,6 +142,39 @@ export async function unfollowUser(followerId: string, followingId: string) {
     .eq('following_id', followingId);
 }
 
+export interface FollowProfile {
+  id: string;
+  name: string;
+  username: string;
+  avatarUrl: string | null;
+}
+
+export async function getFollowerProfiles(userId: string): Promise<FollowProfile[]> {
+  const { data } = await supabase
+    .from('follows')
+    .select('follower:profiles!follower_id ( id, name, username, avatar_url )')
+    .eq('following_id', userId);
+  return (data ?? []).map((r: any) => ({
+    id: r.follower.id,
+    name: r.follower.name ?? '',
+    username: r.follower.username ?? '',
+    avatarUrl: r.follower.avatar_url ?? null,
+  }));
+}
+
+export async function getFollowingProfiles(userId: string): Promise<FollowProfile[]> {
+  const { data } = await supabase
+    .from('follows')
+    .select('following:profiles!following_id ( id, name, username, avatar_url )')
+    .eq('follower_id', userId);
+  return (data ?? []).map((r: any) => ({
+    id: r.following.id,
+    name: r.following.name ?? '',
+    username: r.following.username ?? '',
+    avatarUrl: r.following.avatar_url ?? null,
+  }));
+}
+
 export async function getFollowCounts(userId: string): Promise<{ followers: number; following: number }> {
   const [{ count: followers }, { count: following }] = await Promise.all([
     supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),

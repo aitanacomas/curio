@@ -5,7 +5,7 @@ import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, type RealPost } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, type RealPost, type FollowProfile } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -66,6 +66,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [commentText, setCommentText] = useState('');
   const [colCategoryFilter, setColCategoryFilter] = useState<Category | 'all'>('all');
   const [realPosts, setRealPosts] = useState<RealPost[]>([]);
+  const [followerProfiles, setFollowerProfiles] = useState<FollowProfile[]>([]);
+  const [followingProfiles, setFollowingProfiles] = useState<FollowProfile[]>([]);
+  const [loadingFollowList, setLoadingFollowList] = useState(false);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -231,6 +234,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   // ── Followers / Following Modal ─────────────────────────────────
   if (showFollowers) {
     const title = showFollowers === 'followers' ? 'Followers' : 'Following';
+    const list = showFollowers === 'followers' ? followerProfiles : followingProfiles;
+
     return (
       <div className="bg-white min-h-screen">
         <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
@@ -240,22 +245,38 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           <h2 className="text-base font-bold text-gray-900 flex-1">{title}</h2>
         </div>
         <div className="divide-y divide-gray-50">
-          {(isNewUser ? [] : otherUsers).map(u => (
-            <div key={u.id} className="flex items-center gap-3 px-4 py-3.5">
-              <img src={u.avatar} alt={u.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" style={{ objectPosition: u.avatarPosition ?? 'top' }} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  <p className="text-sm font-semibold text-gray-900">{u.name}</p>
-                  {u.verified && <BadgeCheck size={13} className="text-blue-500 fill-blue-500" strokeWidth={1.5} />}
+          {loadingFollowList ? (
+            <div className="space-y-4 px-4 pt-4">
+              {[0,1,2].map(i => (
+                <div key={i} className="flex items-center gap-3 animate-pulse">
+                  <div className="w-11 h-11 rounded-full bg-gray-100 flex-shrink-0" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 bg-gray-100 rounded w-28" />
+                    <div className="h-2.5 bg-gray-100 rounded w-20" />
+                  </div>
                 </div>
-                <p className="text-xs text-gray-400">@{u.username}</p>
-              </div>
-              <button className="text-xs font-bold border border-gray-200 text-gray-700 rounded-full px-3 py-1.5">
-                {showFollowers === 'followers' ? 'Follow back' : 'Following'}
-              </button>
+              ))}
             </div>
-          ))}
-          {isNewUser && (
+          ) : list.length > 0 ? (
+            list.map(u => {
+              const initials = u.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+              return (
+                <div key={u.id} className="flex items-center gap-3 px-4 py-3.5">
+                  {u.avatarUrl ? (
+                    <img src={u.avatarUrl} alt={u.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-semibold text-slate-400">{initials || '?'}</span>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                    <p className="text-xs text-gray-400">@{u.username}</p>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
             <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
               <p className="text-3xl mb-3">{showFollowers === 'followers' ? '👥' : '🔍'}</p>
               <p className="text-sm font-semibold text-gray-900 mb-1">
@@ -264,7 +285,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <p className="text-xs text-gray-400 max-w-[200px]">
                 {showFollowers === 'followers'
                   ? 'Share your posts and people will find you'
-                  : 'Explore curio to find people to follow'}
+                  : 'Find people to follow from your profile'}
               </p>
             </div>
           )}
@@ -641,8 +662,20 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           {[
             { value: isNewUser ? 0 : actualPlacesCount, label: 'Places', action: null },
             { value: isNewUser ? 0 : actualCountriesCount, label: 'Countries', action: null },
-            { value: displayUser.followersCount.toLocaleString(), label: 'Followers', action: () => setShowFollowers('followers') },
-            { value: displayUser.followingCount.toLocaleString(), label: 'Following', action: () => setShowFollowers('following') },
+            { value: displayUser.followersCount.toLocaleString(), label: 'Followers', action: () => {
+              if (isNewUser && appUser) {
+                setLoadingFollowList(true);
+                getFollowerProfiles(appUser.id).then(p => { setFollowerProfiles(p); setLoadingFollowList(false); });
+              }
+              setShowFollowers('followers');
+            }},
+            { value: displayUser.followingCount.toLocaleString(), label: 'Following', action: () => {
+              if (isNewUser && appUser) {
+                setLoadingFollowList(true);
+                getFollowingProfiles(appUser.id).then(p => { setFollowingProfiles(p); setLoadingFollowList(false); });
+              }
+              setShowFollowers('following');
+            }},
           ].map(stat => (
             <button key={stat.label} onClick={stat.action ?? undefined} className="text-center">
               <p className="text-base font-black text-gray-900">{stat.value}</p>
