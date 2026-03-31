@@ -6,7 +6,7 @@ import { feedItems, users, places, collections } from '../data/mockData';
 import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
-import { getFeedPosts, type RealPost } from '../lib/supabase';
+import { getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, type RealPost } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -119,11 +119,25 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
   const [realPosts, setRealPosts] = useState<RealPost[]>([]);
   const [showFindPeople, setShowFindPeople] = useState(false);
+  const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
+  const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
+  const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
 
   // Fetch real posts from Supabase on mount
   useEffect(() => {
-    getFeedPosts().then(setRealPosts);
+    getFeedPosts().then(posts => {
+      setRealPosts(posts);
+      if (posts.length > 0) {
+        getPostLikeCounts(posts.map(p => p.id)).then(setRealPostLikeCounts);
+      }
+    });
   }, []);
+
+  useEffect(() => {
+    if (!appUser || appUser.isDemo) return;
+    getLikedPosts(appUser.id).then(setLikedRealPosts);
+    getSavedPosts(appUser.id).then(setSavedRealPosts);
+  }, [appUser]);
 
   useEffect(() => {
     if (!saveTarget) return;
@@ -808,9 +822,18 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
               <div className="px-4 pt-2 pb-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-4">
-                    <button className="flex items-center gap-1.5">
-                      <Heart size={22} strokeWidth={1.5} className="text-gray-700" />
-                      <span className="text-xs text-gray-500">0</span>
+                    <button
+                      className="flex items-center gap-1.5"
+                      onClick={() => {
+                        if (!appUser || appUser.isDemo) return;
+                        const isLiked = likedRealPosts.has(post.id);
+                        setLikedRealPosts(prev => { const n = new Set(prev); isLiked ? n.delete(post.id) : n.add(post.id); return n; });
+                        setRealPostLikeCounts(prev => ({ ...prev, [post.id]: (prev[post.id] ?? 0) + (isLiked ? -1 : 1) }));
+                        isLiked ? unlikePost(appUser.id, post.id) : likePost(appUser.id, post.id);
+                      }}
+                    >
+                      <Heart size={22} strokeWidth={1.5} className={likedRealPosts.has(post.id) ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
+                      <span className="text-xs text-gray-500">{realPostLikeCounts[post.id] ?? 0}</span>
                     </button>
                     <button className="flex items-center gap-1.5">
                       <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
@@ -818,7 +841,15 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                     </button>
                     <Send size={22} strokeWidth={1.5} className="text-gray-700" />
                   </div>
-                  <button className="px-5 py-1.5 rounded-full border border-gray-900 text-sm font-semibold text-gray-900">Save</button>
+                  <button
+                    className={`px-5 py-1.5 rounded-full border text-sm font-semibold transition-colors ${savedRealPosts.has(post.id) ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-900 text-gray-900 bg-white'}`}
+                    onClick={() => {
+                      if (!appUser || appUser.isDemo) return;
+                      const isSaved = savedRealPosts.has(post.id);
+                      setSavedRealPosts(prev => { const n = new Set(prev); isSaved ? n.delete(post.id) : n.add(post.id); return n; });
+                      isSaved ? unsavePost(appUser.id, post.id) : savePost(appUser.id, post.id);
+                    }}
+                  >{savedRealPosts.has(post.id) ? 'Saved' : 'Save'}</button>
                 </div>
                 {post.caption ? (
                   <p className="text-sm text-gray-700 leading-snug line-clamp-2">{post.caption}</p>

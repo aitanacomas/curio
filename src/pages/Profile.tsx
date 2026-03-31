@@ -6,7 +6,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, type RealPost, type FollowProfile, type RealCollection } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, type RealPost, type FollowProfile, type RealCollection } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -79,8 +79,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
+  const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
+  const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
+  const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
   const [newColName, setNewColName] = useState('');
-  const [newColEmoji, setNewColEmoji] = useState('📍');
+  const [newColEmoji, setNewColEmoji] = useState('');
   const [newColDesc, setNewColDesc] = useState('');
   const [newColCoverFile, setNewColCoverFile] = useState<File | null>(null);
   const [newColCoverPreview, setNewColCoverPreview] = useState<string | null>(null);
@@ -91,6 +94,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     if (appUser && !appUser.isDemo) {
       getUserPosts(appUser.id).then(async posts => {
         setRealPosts(posts);
+        if (posts.length > 0) {
+          getPostLikeCounts(posts.map(p => p.id)).then(setRealPostLikeCounts);
+        }
         // Auto-geocode any places missing lat/lng (in memory + DB)
         const missing = posts.flatMap(p => p.places.filter(pl => pl.lat == null || pl.lng == null));
         if (missing.length === 0) return;
@@ -125,6 +131,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         })));
       });
       getUserCollections(appUser.id).then(setRealCollections);
+      getLikedPosts(appUser.id).then(setLikedRealPosts);
+      getSavedPosts(appUser.id).then(setSavedRealPosts);
       getFollowCounts(appUser.id).then(({ followers, following }) => {
         setRealFollowerCount(followers);
         setRealFollowingCount(following);
@@ -205,6 +213,32 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         </div>
         {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
         <div className="px-4 pt-3 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-4">
+              <button
+                className="flex items-center gap-1.5"
+                onClick={() => {
+                  if (!appUser) return;
+                  const isLiked = likedRealPosts.has(selectedRealPost.id);
+                  setLikedRealPosts(prev => { const n = new Set(prev); isLiked ? n.delete(selectedRealPost.id) : n.add(selectedRealPost.id); return n; });
+                  setRealPostLikeCounts(prev => ({ ...prev, [selectedRealPost.id]: (prev[selectedRealPost.id] ?? 0) + (isLiked ? -1 : 1) }));
+                  isLiked ? unlikePost(appUser.id, selectedRealPost.id) : likePost(appUser.id, selectedRealPost.id);
+                }}
+              >
+                <Heart size={22} strokeWidth={1.5} className={likedRealPosts.has(selectedRealPost.id) ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
+                <span className="text-xs text-gray-500">{realPostLikeCounts[selectedRealPost.id] ?? 0}</span>
+              </button>
+            </div>
+            <button
+              className={`px-5 py-1.5 rounded-full border text-sm font-semibold transition-colors ${savedRealPosts.has(selectedRealPost.id) ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-900 text-gray-900 bg-white'}`}
+              onClick={() => {
+                if (!appUser) return;
+                const isSaved = savedRealPosts.has(selectedRealPost.id);
+                setSavedRealPosts(prev => { const n = new Set(prev); isSaved ? n.delete(selectedRealPost.id) : n.add(selectedRealPost.id); return n; });
+                isSaved ? unsavePost(appUser.id, selectedRealPost.id) : savePost(appUser.id, selectedRealPost.id);
+              }}
+            >{savedRealPosts.has(selectedRealPost.id) ? 'Saved' : 'Save'}</button>
+          </div>
           <p className="text-sm text-gray-800 leading-relaxed">{selectedRealPost.caption}</p>
           {selectedRealPost.locationLabel && (
             <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
@@ -1014,7 +1048,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           <div className="px-4 pt-4 pb-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-bold text-gray-900">My Collections</p>
-              <button onClick={() => { setNewColName(''); setNewColEmoji('📍'); setNewColDesc(''); setNewColCoverFile(null); setNewColCoverPreview(null); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
+              <button onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setNewColCoverFile(null); setNewColCoverPreview(null); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
                 <Plus size={12} strokeWidth={2.5} /> New
               </button>
             </div>
@@ -1032,7 +1066,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       )}
                     </div>
                     <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                    {col.description ? <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{col.description}</p> : null}
+                    <p className="text-xs text-gray-400 mt-0.5">{col.placesCount ?? 0} places</p>
                   </div>
                 ))}
               </div>

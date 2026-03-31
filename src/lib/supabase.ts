@@ -251,24 +251,66 @@ export interface RealCollection {
   emoji: string;
   description: string;
   coverImageUrl: string | null;
+  placesCount: number;
   createdAt: string;
 }
 
 export async function getUserCollections(userId: string): Promise<RealCollection[]> {
   const { data } = await supabase
     .from('user_collections')
-    .select('*')
+    .select('*, collection_places(count)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   return (data ?? []).map((r: any) => ({
     id: r.id,
     userId: r.user_id,
     name: r.name ?? '',
-    emoji: r.emoji ?? '📍',
+    emoji: r.emoji ?? '',
     description: r.description ?? '',
     coverImageUrl: r.cover_image_url ?? null,
+    placesCount: r.collection_places?.[0]?.count ?? 0,
     createdAt: r.created_at,
   }));
+}
+
+// ── Likes ─────────────────────────────────────────────────────────────────────
+export async function getLikedPosts(userId: string): Promise<Set<string>> {
+  const { data } = await supabase.from('post_likes').select('post_id').eq('user_id', userId);
+  return new Set((data ?? []).map((r: any) => r.post_id));
+}
+
+export async function getPostLikeCounts(postIds: string[]): Promise<Record<string, number>> {
+  if (postIds.length === 0) return {};
+  const { data } = await supabase
+    .from('post_likes')
+    .select('post_id')
+    .in('post_id', postIds);
+  const counts: Record<string, number> = {};
+  for (const id of postIds) counts[id] = 0;
+  for (const r of data ?? []) counts[(r as any).post_id] = (counts[(r as any).post_id] ?? 0) + 1;
+  return counts;
+}
+
+export async function likePost(userId: string, postId: string) {
+  await supabase.from('post_likes').insert({ user_id: userId, post_id: postId });
+}
+
+export async function unlikePost(userId: string, postId: string) {
+  await supabase.from('post_likes').delete().eq('user_id', userId).eq('post_id', postId);
+}
+
+// ── Saves ─────────────────────────────────────────────────────────────────────
+export async function getSavedPosts(userId: string): Promise<Set<string>> {
+  const { data } = await supabase.from('post_saves').select('post_id').eq('user_id', userId);
+  return new Set((data ?? []).map((r: any) => r.post_id));
+}
+
+export async function savePost(userId: string, postId: string) {
+  await supabase.from('post_saves').insert({ user_id: userId, post_id: postId });
+}
+
+export async function unsavePost(userId: string, postId: string) {
+  await supabase.from('post_saves').delete().eq('user_id', userId).eq('post_id', postId);
 }
 
 export async function createCollection(userId: string, payload: { name: string; emoji: string; description: string; cover_image_url?: string | null }): Promise<{ data: RealCollection | null; error: string | null }> {
