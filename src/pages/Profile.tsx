@@ -142,14 +142,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       setSaving(true);
       setSaveError('');
 
-      let newAvatarUrl: string | null = null;
+      let finalAvatarUrl: string | null = appUser.avatar;
       if (avatarFile) {
-        const ext = avatarFile.type.split('/')[1] ?? 'jpg';
+        const ext = avatarFile.name.split('.').pop() ?? 'jpg';
         const path = `${appUser.id}/avatar.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('avatars')
-          .upload(path, avatarFile, { upsert: true });
-        if (!uploadError) newAvatarUrl = getPublicUrl('avatars', path);
+          .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type });
+        if (uploadError) {
+          setSaving(false);
+          setSaveError(`Photo upload failed: ${uploadError.message}`);
+          return;
+        }
+        finalAvatarUrl = getPublicUrl('avatars', path);
       }
 
       const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string } = {
@@ -157,8 +162,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         username: editUsername.trim().replace('@', '') || displayUser.username,
         bio: editBio.trim(),
         location: editLocation.trim(),
+        avatar_url: finalAvatarUrl ?? undefined,
       };
-      if (newAvatarUrl) updates.avatar_url = newAvatarUrl;
 
       const error = await updateProfile(appUser.id, updates);
       setSaving(false);
@@ -168,7 +173,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         onProfileUpdate?.({
           name: updates.name!,
           username: updates.username!,
-          avatar: newAvatarUrl ?? appUser.avatar,
+          avatar: finalAvatarUrl,
           bio: updates.bio ?? '',
           location: updates.location ?? '',
         });
