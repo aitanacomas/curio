@@ -133,7 +133,7 @@ export default function App() {
       case 'saved':
         return <Saved isNewUser={appUser?.isDemo === false} />;
       case 'profile':
-        return <Profile onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} />;
+        return <Profile onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} />;
     }
   };
 

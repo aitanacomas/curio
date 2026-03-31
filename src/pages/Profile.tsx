@@ -40,7 +40,7 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
-export default function Profile({ onOpenMessages, appUser, onLogout }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
@@ -150,7 +150,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout }: { onOpenM
           <h2 className="text-base font-bold text-gray-900 flex-1">{title}</h2>
         </div>
         <div className="divide-y divide-gray-50">
-          {otherUsers.map(u => (
+          {(isNewUser ? [] : otherUsers).map(u => (
             <div key={u.id} className="flex items-center gap-3 px-4 py-3.5">
               <img src={u.avatar} alt={u.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" style={{ objectPosition: u.avatarPosition ?? 'top' }} />
               <div className="flex-1 min-w-0">
@@ -165,6 +165,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout }: { onOpenM
               </button>
             </div>
           ))}
+          {isNewUser && (
+            <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+              <p className="text-3xl mb-3">{showFollowers === 'followers' ? '👥' : '🔍'}</p>
+              <p className="text-sm font-semibold text-gray-900 mb-1">
+                {showFollowers === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
+              </p>
+              <p className="text-xs text-gray-400 max-w-[200px]">
+                {showFollowers === 'followers'
+                  ? 'Share your posts and people will find you'
+                  : 'Explore curio to find people to follow'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -595,7 +608,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout }: { onOpenM
               </div>
               <p className="text-slate-800 font-semibold text-base mb-1.5">No posts yet</p>
               <p className="text-slate-400 text-sm text-center max-w-[200px] mb-6">Share a place you love and it'll appear here</p>
-              <button className="px-6 py-2.5 bg-slate-900 text-white rounded-full text-sm font-semibold">
+              <button onClick={() => onNavigate?.('add')} className="px-6 py-2.5 bg-slate-900 text-white rounded-full text-sm font-semibold">
                 Create first post
               </button>
             </div>

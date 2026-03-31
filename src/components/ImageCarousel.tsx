@@ -4,78 +4,47 @@ interface Props {
   images: string[];
   labels?: string[];
   scales?: number[];
+  onClick?: () => void;
 }
 
-export default function ImageCarousel({ images, labels, scales }: Props) {
+export default function ImageCarousel({ images, labels, scales, onClick }: Props) {
   const [index, setIndex] = useState(0);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const isDragging = useRef(false);
-  const isHorizontal = useRef<boolean | null>(null);
-  const didSwipe = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   if (!images || images.length === 0) return null;
 
-  const goTo = (i: number) => setIndex(Math.max(0, Math.min(images.length - 1, i)));
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    startX.current = e.clientX;
-    startY.current = e.clientY;
-    isDragging.current = true;
-    isHorizontal.current = null;
-    didSwipe.current = false;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging.current) return;
-    const dx = Math.abs(e.clientX - startX.current);
-    const dy = Math.abs(e.clientY - startY.current);
-    if (isHorizontal.current === null && (dx > 5 || dy > 5)) {
-      isHorizontal.current = dx > dy;
-    }
-    if (isHorizontal.current) {
-      e.stopPropagation();
+  const handleScroll = () => {
+    if (scrollRef.current) {
+      const i = Math.round(scrollRef.current.scrollLeft / scrollRef.current.offsetWidth);
+      setIndex(i);
     }
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isDragging.current) return;
-    isDragging.current = false;
-    const delta = startX.current - e.clientX;
-    if (isHorizontal.current && Math.abs(delta) > 40) {
-      didSwipe.current = true;
-      e.stopPropagation();
-      if (delta > 0) goTo(index + 1);
-      else goTo(index - 1);
+  const scrollTo = (i: number) => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ left: i * scrollRef.current.offsetWidth, behavior: 'smooth' });
     }
-    isHorizontal.current = null;
   };
 
   return (
-    <div
-      className="relative overflow-hidden select-none"
-      style={{ touchAction: 'pan-y' }}
-      onClick={(e) => { if (didSwipe.current) { didSwipe.current = false; e.stopPropagation(); } }}
-    >
-      {/* Slide strip */}
+    <div className="relative overflow-hidden select-none" onClick={onClick}>
+      {/* Scroll strip — native CSS snap for reliable iOS swiping */}
       <div
-        className="flex transition-transform duration-300 ease-out"
-        style={{ transform: `translateX(-${index * 100}%)`, touchAction: 'pan-y' }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={() => { isDragging.current = false; isHorizontal.current = null; }}
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex overflow-x-auto snap-x snap-mandatory"
+        style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
       >
         {images.map((src, i) => (
-          <img
-            key={i}
-            src={src}
-            alt=""
-            draggable={false}
-            className="w-full flex-shrink-0 aspect-[4/5] object-cover pointer-events-none"
-            style={scales?.[i] ? { transform: `scale(${scales[i]})`, transformOrigin: 'center' } : undefined}
-          />
+          <div key={i} className="flex-shrink-0 w-full snap-start">
+            <img
+              src={src}
+              alt=""
+              draggable={false}
+              className="w-full aspect-[4/5] object-cover pointer-events-none"
+              style={scales?.[i] ? { transform: `scale(${scales[i]})`, transformOrigin: 'center' } : undefined}
+            />
+          </div>
         ))}
       </div>
 
@@ -89,18 +58,20 @@ export default function ImageCarousel({ images, labels, scales }: Props) {
         </div>
       )}
 
-      {/* Dots — bottom left */}
-      <div className="absolute bottom-3 left-4 flex items-center gap-1.5">
-        {images.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => goTo(i)}
-            className={`rounded-full transition-all duration-200 ${
-              i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'
-            }`}
-          />
-        ))}
-      </div>
+      {/* Dots */}
+      {images.length > 1 && (
+        <div className="absolute bottom-3 left-4 flex items-center gap-1.5">
+          {images.map((_, i) => (
+            <button
+              key={i}
+              onClick={e => { e.stopPropagation(); scrollTo(i); }}
+              className={`rounded-full transition-all duration-200 ${
+                i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'
+              }`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
