@@ -16,6 +16,7 @@ interface IdentifiedPlace {
   photo: string;
   name: string;
   category: Category | '';
+  neighborhood: string;
   city: string;
   country: string;
   analyzing: boolean;
@@ -115,6 +116,7 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
         locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: 100 } },
         maxResultCount: 1,
         excludedTypes: ['locality', 'political', 'country', 'route', 'street_address'],
+        languageCode: 'en',
       }),
     });
     const data = await res.json();
@@ -123,12 +125,13 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
     const name = place.displayName?.text ?? '';
     const types: string[] = place.types ?? [];
     const category = googleTypesToCategory(types);
-    let city = '', country = '';
+    let neighborhood = '', city = '', country = '';
     for (const comp of place.addressComponents ?? []) {
+      if (comp.types?.includes('sublocality_level_1') || comp.types?.includes('neighborhood')) neighborhood = comp.longText ?? '';
       if (comp.types?.includes('locality')) city = comp.longText ?? '';
       if (comp.types?.includes('country')) country = comp.longText ?? '';
     }
-    return { name, category, city, country, lat, lng };
+    return { name, category, neighborhood, city, country, lat, lng };
   } catch { return null; }
 }
 
@@ -167,7 +170,7 @@ function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>
         const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-          body: JSON.stringify({ input: val }),
+          body: JSON.stringify({ input: val, languageCode: 'en' }),
         });
         const data = await res.json();
         setSuggestions(
@@ -189,20 +192,22 @@ function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>
         headers: {
           'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
           'X-Goog-FieldMask': 'displayName,types,addressComponents,location',
+          'X-Goog-LanguageCode': 'en',
         },
       });
       const place = await res.json();
       const name = place.displayName?.text ?? text;
       const types: string[] = place.types ?? [];
       const category = googleTypesToCategory(types);
-      let city = '', country = '';
+      let neighborhood = '', city = '', country = '';
       for (const comp of place.addressComponents ?? []) {
+        if (comp.types?.includes('sublocality_level_1') || comp.types?.includes('neighborhood')) neighborhood = comp.longText ?? '';
         if (comp.types?.includes('locality')) city = comp.longText ?? '';
         if (comp.types?.includes('country')) country = comp.longText ?? '';
       }
       const lat: number | undefined = place.location?.latitude;
       const lng: number | undefined = place.location?.longitude;
-      onSelect({ name, category, city, country, lat, lng });
+      onSelect({ name, category, neighborhood, city, country, lat, lng });
     } catch { onSelect({ name: text }); }
   };
 
@@ -393,7 +398,7 @@ function SortablePlaceRow({
               </p>
               <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
                 <MapPin size={10} />
-                {p.city || p.country ? `${p.city}${p.city && p.country ? ', ' : ''}${p.country}` : 'No location set'}
+                {[p.neighborhood, p.city, p.country].filter(Boolean).join(', ') || 'No location set'}
               </p>
             </>
           )}
@@ -432,6 +437,12 @@ function SortablePlaceRow({
             <MapPin size={10} className="text-gray-400 flex-shrink-0" />
             <span className="text-xs text-gray-400 flex items-center" style={{ gap: 0 }}>
               <input
+                value={p.neighborhood}
+                onChange={e => onUpdate(p.id, { neighborhood: e.target.value })}
+                className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                style={{ width: `${Math.max(52, (p.neighborhood || 'Neighbourhood').length * 7.2)}px`, padding: 0, margin: 0 }}
+                placeholder="Neighbourhood"
+              /><span>,&nbsp;</span><input
                 value={p.city}
                 onChange={e => onUpdate(p.id, { city: e.target.value })}
                 className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
@@ -524,7 +535,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
     const entries: IdentifiedPlace[] = files.map((f, i) => ({
       id: `${Date.now()}-${i}`,
       photo: URL.createObjectURL(f),
-      name: '', category: '', city: '', country: '',
+      name: '', category: '', neighborhood: '', city: '', country: '',
       analyzing: true, expanded: false,
     }));
     setPlaces(entries);
@@ -539,7 +550,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
     const entries: IdentifiedPlace[] = files.map((f, i) => ({
       id: `${Date.now()}-add-${i}`,
       photo: URL.createObjectURL(f),
-      name: '', category: '', city: '', country: '',
+      name: '', category: '', neighborhood: '', city: '', country: '',
       analyzing: true, expanded: false,
     }));
     setPlaces(prev => [...prev, ...entries]);
@@ -594,6 +605,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
         post_id: post.id,
         name: p.name,
         category: p.category || null,
+        neighborhood: p.neighborhood || null,
         city: p.city,
         country: p.country,
         photo_url: p.photoUrl,

@@ -1,7 +1,173 @@
-import { lazy, Suspense, useState } from 'react';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X } from 'lucide-react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { DayPicker } from 'react-day-picker';
+import type { DateRange } from 'react-day-picker';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link } from 'lucide-react';
+
+const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+
+function LocationSearch({ value, onChange, onCoverImage }: { value: string; onChange: (val: string) => void; onCoverImage?: (url: string) => void }) {
+  const [suggestions, setSuggestions] = useState<{ placeId: string; text: string }[]>([]);
+  const [searching, setSearching] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = (val: string) => {
+    onChange(val);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!val.trim()) { setSuggestions([]); return; }
+    timerRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+          body: JSON.stringify({ input: val, languageCode: 'en' }),
+        });
+        const data = await res.json();
+        setSuggestions(
+          (data.suggestions ?? [])
+            .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
+            .filter((s: any) => s.placeId)
+            .slice(0, 5)
+        );
+      } catch { setSuggestions([]); }
+      setSearching(false);
+    }, 400);
+  };
+
+  const handleSelect = async (placeId: string, text: string) => {
+    onChange(text);
+    setSuggestions([]);
+    if (onCoverImage) {
+      try {
+        const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=photos`, {
+          headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'photos' },
+        });
+        const data = await res.json();
+        const photoName = data.photos?.[0]?.name;
+        if (photoName) {
+          onCoverImage(`https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}`);
+        }
+      } catch { /* silent */ }
+    }
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+        <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+        <input
+          value={value}
+          onChange={e => handleChange(e.target.value)}
+          placeholder="Location (optional)"
+          className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+        />
+        {searching && <Loader2 size={13} className="text-gray-400 animate-spin flex-shrink-0" />}
+      </div>
+      {suggestions.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
+          {suggestions.map(s => (
+            <button
+              key={s.placeId}
+              onClick={() => handleSelect(s.placeId, s.text)}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-800 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+            >
+              {s.text}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function CoverCropModal({ file, onConfirm, onCancel }: {
+  file: File;
+  onConfirm: (blob: Blob, previewUrl: string) => void;
+  onCancel: () => void;
+}) {
+  const imgSrc = useState(() => URL.createObjectURL(file))[0];
+  const [translateY, setTranslateY] = useState(0);
+  const lastY = useRef(0);
+  const isDragging = useRef(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const FRAME_W = 320;
+  const FRAME_H = Math.round(FRAME_W * 208 / 384); // ~173px
+
+  const clamp = (val: number) => {
+    if (!imgRef.current) return val;
+    const min = -(imgRef.current.clientHeight - FRAME_H);
+    return Math.max(min, Math.min(0, val));
+  };
+
+  const onLoad = () => {
+    if (imgRef.current) setTranslateY(clamp(-(imgRef.current.clientHeight - FRAME_H) / 2));
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    isDragging.current = true;
+    lastY.current = e.clientY;
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!isDragging.current) return;
+    setTranslateY(prev => clamp(prev + (e.clientY - lastY.current)));
+    lastY.current = e.clientY;
+  };
+
+  const onPointerUp = () => { isDragging.current = false; };
+
+  const handleConfirm = () => {
+    const img = imgRef.current;
+    if (!img) return;
+    const scaleX = img.naturalWidth / img.clientWidth;
+    const scaleY = img.naturalHeight / img.clientHeight;
+    const cropTop = -translateY;
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = Math.round(800 * FRAME_H / FRAME_W);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, cropTop * scaleY, img.clientWidth * scaleX, FRAME_H * scaleY, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (blob) onConfirm(blob, URL.createObjectURL(blob));
+    }, 'image/jpeg', 0.92);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[400] bg-black flex flex-col" style={{ maxWidth: 384, margin: '0 auto' }}>
+      <div className="flex items-center justify-between px-5 py-4">
+        <button onClick={onCancel} className="text-sm text-white/70 font-medium">Cancel</button>
+        <p className="text-sm font-bold text-white">Adjust cover</p>
+        <button onClick={handleConfirm} className="text-sm font-bold text-white">Done</button>
+      </div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-5">
+        <div
+          className="relative overflow-hidden rounded-2xl cursor-grab active:cursor-grabbing"
+          style={{ width: FRAME_W, height: FRAME_H }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={onPointerUp}
+        >
+          <img
+            ref={imgRef}
+            src={imgSrc}
+            alt=""
+            onLoad={onLoad}
+            style={{ width: FRAME_W, height: 'auto', transform: `translateY(${translateY}px)`, userSelect: 'none', pointerEvents: 'none', display: 'block' }}
+            draggable={false}
+          />
+          <div className="absolute inset-0 ring-2 ring-white/40 rounded-2xl pointer-events-none" />
+        </div>
+        <p className="text-white/40 text-xs">Drag to reposition</p>
+      </div>
+    </div>
+  );
+}
+
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
+import { getSavedPlaces, supabase, getPublicUrl } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -13,13 +179,28 @@ interface TripItem {
   name: string;
   category: string;
   image: string;
+  address?: string;
+  neighborhood?: string;
   time?: string;
+  timeEnd?: string;
+  notes?: string;
+  location?: string;
+  status?: 'none' | 'pending' | 'booked';
+  checkIn?: string;
+  checkOut?: string;
   booked?: boolean;
 }
 
 interface TripDay {
+  id?: string;
   label: string;
   items: TripItem[];
+}
+
+interface TripCollaborator {
+  id: string;
+  name: string;
+  avatar: string;
 }
 
 interface Trip {
@@ -28,11 +209,22 @@ interface Trip {
   country: string;
   dates: string;
   coverImage: string;
-  status: 'upcoming' | 'planning' | 'past';
+  status: 'dreaming' | 'planning' | 'upcoming' | 'past';
   days: TripDay[];
+  collaborators?: TripCollaborator[];
+  description?: string;
 }
 
 const mockTrips: Trip[] = [
+  {
+    id: 'trip-6',
+    destination: 'Barcelona',
+    country: 'Spain',
+    dates: '',
+    coverImage: 'https://images.unsplash.com/photo-1539037116277-4db20889f2d4?w=600&q=80',
+    status: 'dreaming',
+    days: [],
+  },
   {
     id: 'trip-2',
     destination: 'Tokyo',
@@ -75,6 +267,10 @@ const mockTrips: Trip[] = [
     dates: 'Mar 11 – Mar 16, 2026',
     coverImage: '/miami-IMG_7402.jpg',
     status: 'past',
+    collaborators: [
+      { id: 'c1', name: 'Sofia R.', avatar: 'https://i.pravatar.cc/150?img=47' },
+      { id: 'c2', name: 'James T.', avatar: 'https://i.pravatar.cc/150?img=12' },
+    ],
     days: [
       {
         label: 'Day 1 · Tue Mar 11',
@@ -107,6 +303,9 @@ const mockTrips: Trip[] = [
     dates: 'Dec 15 – Dec 22, 2025',
     coverImage: '/moco-5.jpg',
     status: 'past',
+    collaborators: [
+      { id: 'c3', name: 'Mia K.', avatar: 'https://i.pravatar.cc/150?img=32' },
+    ],
     days: [
       {
         label: 'Day 1 · Sun Dec 15',
@@ -143,8 +342,15 @@ const placeCategories: { id: Category | 'all'; label: string; emoji: string }[] 
 ];
 
 const categoryEmoji: Record<string, string> = {
-  cafe: '☕', restaurant: '🍽', hotel: '🏨', attraction: '🗺', bar: '🍸', nature: '🌿', shop: '🛍', experience: '🎭',
-  Attraction: '🗺', Restaurant: '🍽', Bar: '🍸', Food: '🍽', Cafe: '☕', Event: '🎟', Hotel: '🏨',
+  cafe: '☕', restaurant: '🍽', hotel: '🏨', stay: '🏨', attraction: '🏛️', bar: '🍸', nature: '🌿', shop: '🛍', experience: '🗺️', sports: '🎾',
+  flight: '✈️', transport: '🚗', event: '🎟️', beach: '🏖️', food: '🍕', wellness: '💆',
+  Attraction: '🏛️', Restaurant: '🍽', Bar: '🍸', Food: '🍽', Cafe: '☕', Event: '🎟️', Hotel: '🏨', Sports: '⚽',
+};
+
+const categoryDisplayName: Record<string, string> = {
+  hotel: 'Stay', cafe: 'Café', restaurant: 'Restaurant', bar: 'Bar',
+  attraction: 'Attraction', nature: 'Nature', shop: 'Shop', experience: 'Experience', sports: 'Sports',
+  flight: 'Flight', transport: 'Transport', event: 'Event', beach: 'Beach', food: 'Food', wellness: 'Wellness',
 };
 
 function PlaceRow({ place, isLocked, isSaved, onToggleSave, onBook }: {
@@ -181,9 +387,187 @@ function PlaceRow({ place, isLocked, isSaved, onToggleSave, onBook }: {
   );
 }
 
-export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
+/** Extract a "Neighborhood, City" string from Google Places address components.
+ *  Falls back to parsing the formatted address string if no components. */
+function extractNeighborhood(comps: any[], formattedAddress?: string): string {
+  if (comps.length > 0) {
+    const find = (...types: string[]) =>
+      comps.find((c: any) => types.some(t => c.types?.includes(t)))?.longText ?? '';
+    // Specific area within city
+    const area = find('neighborhood') || find('sublocality_level_1') || find('sublocality');
+    // Parent city
+    const city = find('locality') || find('administrative_area_level_2') || find('administrative_area_level_3');
+    // Build "Area, City" — if area already contains a comma it already has the city embedded
+    if (area && city) {
+      if (area.includes(',')) return area; // already "Polanco, Mexico City" format
+      if (area === city) return city;
+      return `${area}, ${city}`;
+    }
+    if (area) return area;
+    if (city) return city;
+  }
+  // Fallback: parse from "Street, Area, State, Country" address string
+  if (formattedAddress) {
+    const parts = formattedAddress.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 3) return `${parts[1]}, ${parts[2]}`; // "Area, State/City"
+    if (parts.length === 2) return parts[1];
+  }
+  return '';
+}
+
+function formatTime12(val: string): string {
+  if (!val) return '';
+  const [hStr, mStr] = val.split(':');
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+  if (isNaN(h) || isNaN(m)) return val;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${period}`;
+}
+
+function countDaysFromDateStr(dates: string): number {
+  if (!dates) return 0;
+  const parts = dates.split('–').map(s => s.trim());
+  if (parts.length === 1) return 1;
+  const [startStr, endStr] = parts;
+  const year = new Date().getFullYear();
+  const start = new Date(`${startStr} ${year}`);
+  const end = /^\d+$/.test(endStr)
+    ? new Date(`${startStr.split(' ')[0]} ${endStr} ${year}`)
+    : new Date(`${endStr} ${year}`);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
+  return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+function PlanCard({ trip, onClick }: { trip: Trip; onClick: () => void }) {
+  const statusBadge: Record<Trip['status'], string> = {
+    dreaming: 'bg-white text-orange-400',
+    planning: 'bg-white text-orange-500',
+    upcoming: 'bg-white text-orange-500',
+    past: 'bg-gray-100 text-gray-500',
+  };
+  const statusLabel: Record<Trip['status'], string> = {
+    dreaming: '✨ Want to do / see',
+    planning: '📋 Planning it',
+    upcoming: '🗓 Coming up',
+    past: '✅ Done',
+  };
+  return (
+    <button onClick={onClick} className="w-full relative h-24 rounded-2xl overflow-hidden text-left">
+      <img src={trip.coverImage} alt={trip.destination} className="w-full h-full object-cover" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
+
+      <div className="absolute bottom-2.5 left-3 right-3">
+        <p className="text-sm font-black text-white">{trip.destination}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          {trip.dates ? (
+            <p className="text-white/80 text-xs flex items-center gap-1"><CalendarDays size={10} strokeWidth={1.5} />{trip.dates}</p>
+          ) : (
+            <p className="text-white/60 text-xs">No dates set</p>
+          )}
+          {trip.dates && <p className="text-white/60 text-xs">· {countDaysFromDateStr(trip.dates)} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places</p>}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function TimePicker({ value, onChange, label }: { value?: string; onChange: (v: string) => void; label: string }) {
+  const parse = (v?: string) => {
+    const m = v?.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+    return { h: m?.[1] ?? '', min: m?.[2] ?? '00', p: (m?.[3]?.toUpperCase() ?? 'AM') as 'AM' | 'PM' };
+  };
+  const init = parse(value);
+  const [hour, setHour] = useState(init.h);
+  const [min, setMin] = useState(init.min);
+  const [period, setPeriod] = useState<'AM' | 'PM'>(init.p);
+
+  const emit = (h: string, m: string, p: string) => {
+    onChange(h ? `${h}:${m} ${p}` : '');
+  };
+
+  return (
+    <div className="flex-1 bg-gray-50 rounded-xl px-3 py-2.5">
+      <p className="text-[10px] text-gray-400 mb-1.5">{label}</p>
+      <div className="flex items-center gap-0.5">
+        <select
+          value={hour}
+          onChange={e => { setHour(e.target.value); emit(e.target.value, min, period); }}
+          className="bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer appearance-none"
+        >
+          <option value="">--</option>
+          {[1,2,3,4,5,6,7,8,9,10,11,12].map(h => <option key={h} value={String(h)}>{h}</option>)}
+        </select>
+        <span className="text-sm font-bold text-gray-400 mx-0.5">:</span>
+        <select
+          value={min}
+          onChange={e => { setMin(e.target.value); emit(hour, e.target.value, period); }}
+          className="bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer appearance-none"
+        >
+          {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select
+          value={period}
+          onChange={e => { setPeriod(e.target.value as 'AM'|'PM'); emit(hour, min, e.target.value); }}
+          className="bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer appearance-none ml-1"
+        >
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function EventCard({ trip, onClick }: { trip: Trip; onClick: () => void }) {
+  const rawDesc = trip.description ?? '';
+  const catMatch = rawDesc.match(/\[cat:([^\]]*)\]/);
+  const timeMatch = rawDesc.match(/\[time:([^\]]*)\]/);
+  const evCat = catMatch?.[1] ?? '';
+  const evTime = timeMatch?.[1] ?? '';
+  const desc = rawDesc
+    .replace('[event]', '')
+    .replace(/\[cat:[^\]]*\]/g, '')
+    .replace(/\[time:[^\]]*\]/g, '')
+    .replace(/\[link:[^\]]*\]/g, '')
+    .trim();
+  const hasThumb = trip.coverImage && !trip.coverImage.includes('unsplash.com/photo-1476514525535');
+  return (
+    <button onClick={onClick} className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3.5 text-left">
+      <div className="w-12 h-12 rounded-xl bg-gray-900 flex items-center justify-center flex-shrink-0 text-2xl overflow-hidden">
+        {hasThumb
+          ? <img src={trip.coverImage} alt={trip.destination} className="w-full h-full object-cover" />
+          : '🎟️'
+        }
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-gray-900">{trip.destination}</p>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {trip.dates && (
+            <p className="text-xs text-gray-400 flex items-center gap-1">
+              <CalendarDays size={10} strokeWidth={1.5} />{trip.dates}
+            </p>
+          )}
+          {evTime && (
+            <p className="text-xs text-gray-400 flex items-center gap-1">
+              <Clock size={10} strokeWidth={1.5} />{evTime}
+            </p>
+          )}
+        </div>
+        {evCat && <p className="text-xs text-gray-500 mt-0.5 font-medium">{evCat}</p>}
+        {desc && <p className="text-xs text-gray-400 mt-0.5 truncate">{desc}</p>}
+      </div>
+      <ChevronRight size={16} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
+    </button>
+  );
+}
+
+export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: boolean; userId?: string; userAvatar?: string | null }) {
   const [activeTab, setActiveTab] = useState<SavedTab>('Places');
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
+  const [showEventSheet, setShowEventSheet] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<Trip | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [placeCategory, setPlaceCategory] = useState<Category | 'all'>('all');
   const [savedPlaceSet, setSavedPlaceSet] = useState<Set<string>>(new Set(isNewUser ? [] : savedPlaceIds));
@@ -194,6 +578,474 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
   const [colAdditions, setColAdditions] = useState<Record<string, string[]>>({});
   const [addSearch, setAddSearch] = useState('');
   const [addCatFilter, setAddCatFilter] = useState('all');
+  const [showNewPlan, setShowNewPlan] = useState(false);
+  const [newPlanName, setNewPlanName] = useState('');
+  const [newPlanDest, setNewPlanDest] = useState('');
+  const [newPlanDates, setNewPlanDates] = useState('');
+  const [newPlanStatus, setNewPlanStatus] = useState<Trip['status']>('planning');
+  const [newPlanType, setNewPlanType] = useState<'trip' | 'event'>('trip');
+  const coverImageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [newEventAddress, setNewEventAddress] = useState('');
+  const [newEventNeighborhood, setNewEventNeighborhood] = useState('');
+  const [newEventCategory, setNewEventCategory] = useState('');
+  const [newEventAddressSuggestions, setNewEventAddressSuggestions] = useState<{ placeId: string; label: string }[]>([]);
+  const [newEventAddressLoading, setNewEventAddressLoading] = useState(false);
+  const newEventAddressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showEventSingleCal, setShowEventSingleCal] = useState(false);
+  const [eventSingleDate, setEventSingleDate] = useState<Date | undefined>();
+  const [newEventTimeStart, setNewEventTimeStart] = useState('');
+  const [newEventTimeEnd, setNewEventTimeEnd] = useState('');
+  const [newEventNotes, setNewEventNotes] = useState('');
+  const [newEventInviteLink, setNewEventInviteLink] = useState('');
+  const [newEventCollabInput, setNewEventCollabInput] = useState('');
+  const [newEventCollabs, setNewEventCollabs] = useState<string[]>([]);
+  const [plans, setPlans] = useState<Trip[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [realSavedPlaces, setRealSavedPlaces] = useState<SavedPlace[]>([]);
+  const [realSavedPlaceIds, setRealSavedPlaceIds] = useState<Set<string>>(new Set());
+  const [planViewMode, setPlanViewMode] = useState<'itinerary' | 'list'>('itinerary');
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [showEditPlan, setShowEditPlan] = useState(false);
+  const [editPlanTrip, setEditPlanTrip] = useState<Trip | null>(null);
+  const [editShowCalendar, setEditShowCalendar] = useState(false);
+  const [editDateRange, setEditDateRange] = useState<DateRange | undefined>();
+  const [editPlanName, setEditPlanName] = useState('');
+  const [editPlanDesc, setEditPlanDesc] = useState('');
+  const [editPlanCollabInput, setEditPlanCollabInput] = useState('');
+  const [editPlanCollabs, setEditPlanCollabs] = useState<TripCollaborator[]>([]);
+  const [editPlanLocation, setEditPlanLocation] = useState('');
+  const [editPlanCoverImage, setEditPlanCoverImage] = useState('');
+  const [editCollabSuggestions, setEditCollabSuggestions] = useState<FollowProfile[]>([]);
+  const [editFollowList, setEditFollowList] = useState<FollowProfile[]>([]);
+  const editCoverInputRef = useRef<HTMLInputElement>(null);
+  const [coverCropFile, setCoverCropFile] = useState<File | null>(null);
+  const [coverCropTarget, setCoverCropTarget] = useState<'edit' | null>(null);
+  const [coverCropSaving, setCoverCropSaving] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteInput, setInviteInput] = useState('');
+  const [inviteSuggestions, setInviteSuggestions] = useState<FollowProfile[]>([]);
+  const [inviteFollowList, setInviteFollowList] = useState<FollowProfile[]>([]);
+  const [inviteCollabs, setInviteCollabs] = useState<TripCollaborator[]>([]);
+  const [showAddPlace, setShowAddPlace] = useState(false);
+  const [addPlaceDayId, setAddPlaceDayId] = useState<string | null>(null);
+  const [addPlaceSearch, setAddPlaceSearch] = useState('');
+  const [addPlaceSuggestions, setAddPlaceSuggestions] = useState<{ placeId: string; text: string }[]>([]);
+  const [addPlaceSearching, setAddPlaceSearching] = useState(false);
+  const [addPlaceSaving, setAddPlaceSaving] = useState(false);
+  const addPlaceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [addPlaceSelectedId, setAddPlaceSelectedId] = useState('');
+  const [addPlaceSelectedName, setAddPlaceSelectedName] = useState('');
+  const [addPlaceTime, setAddPlaceTime] = useState('');
+  const [addPlaceNotes, setAddPlaceNotes] = useState('');
+  const [addPlaceCategory, setAddPlaceCategory] = useState('');
+  const [addPlaceStatus, setAddPlaceStatus] = useState<'none'|'pending'|'booked'>('none');
+  const [addPlaceCheckIn, setAddPlaceCheckIn] = useState('');
+  const [addPlaceCheckOut, setAddPlaceCheckOut] = useState('');
+  const [addPlaceCustomImage, setAddPlaceCustomImage] = useState('');
+  const [addPlaceLocation, setAddPlaceLocation] = useState('');
+  const [addPlaceTimeEnd, setAddPlaceTimeEnd] = useState('');
+  const [addPlaceAddress, setAddPlaceAddress] = useState('');
+  const [addPlaceNeighborhood, setAddPlaceNeighborhood] = useState('');
+  const addPlaceImageRef = useRef<HTMLInputElement>(null);
+  const editItemImageRef = useRef<HTMLInputElement>(null);
+  const [showItemDetail, setShowItemDetail] = useState(false);
+  const [detailItem, setDetailItem] = useState<TripItem | null>(null);
+  const [detailItemDayId, setDetailItemDayId] = useState<string | null>(null);
+  const [showEditItem, setShowEditItem] = useState(false);
+  const [editItem, setEditItem] = useState<TripItem | null>(null);
+  const [editItemDayId, setEditItemDayId] = useState<string | null>(null);
+  const [editItemAddressSearch, setEditItemAddressSearch] = useState('');
+  const [editItemAddressSuggestions, setEditItemAddressSuggestions] = useState<{ placeId: string; text: string }[]>([]);
+  const [editItemAddressSearching, setEditItemAddressSearching] = useState(false);
+  const editItemAddressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showItemInvite, setShowItemInvite] = useState(false);
+  const [itemInviteSearch, setItemInviteSearch] = useState('');
+  const [itemInviteSuggestions, setItemInviteSuggestions] = useState<FollowProfile[]>([]);
+  const [itemInviteFollowList, setItemInviteFollowList] = useState<FollowProfile[]>([]);
+  const [itemInviteSending, setItemInviteSending] = useState(false);
+  const [itemInviteSentTo, setItemInviteSentTo] = useState<string[]>([]);
+  const itemInviteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showNewCollection, setShowNewCollection] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const [newColEmoji, setNewColEmoji] = useState('');
+  const [newColDesc, setNewColDesc] = useState('');
+  const [newColSaving, setNewColSaving] = useState(false);
+  const [dbCollections, setDbCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
+  const [itemInvites, setItemInvites] = useState<ItemInvite[]>([]);
+  const [newPlanDesc, setNewPlanDesc] = useState('');
+  const [newPlanLocation, setNewPlanLocation] = useState('');
+  const [newPlanCoverImage, setNewPlanCoverImage] = useState('');
+  const [newPlanCollabInput, setNewPlanCollabInput] = useState('');
+  const [newPlanCollabs, setNewPlanCollabs] = useState<string[]>([]);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
+
+  const googleTypesToCategory = (types: string[]): string => {
+    if (types.some(t => ['lodging', 'hotel', 'motel', 'resort_hotel'].includes(t))) return 'hotel';
+    if (types.some(t => ['restaurant', 'meal_takeaway', 'meal_delivery', 'food'].includes(t))) return 'restaurant';
+    if (types.some(t => ['cafe', 'bakery', 'coffee_shop'].includes(t))) return 'cafe';
+    if (types.some(t => ['bar', 'night_club'].includes(t))) return 'bar';
+    if (types.some(t => ['store', 'shopping_mall', 'clothing_store'].includes(t))) return 'shop';
+    if (types.some(t => ['park', 'natural_feature', 'campground'].includes(t))) return 'nature';
+    if (types.some(t => ['museum', 'art_gallery', 'tourist_attraction', 'landmark'].includes(t))) return 'attraction';
+    if (types.some(t => ['stadium', 'sports_complex', 'gym', 'fitness_center'].includes(t))) return 'sports';
+    return 'experience';
+  };
+
+  const getTripDayLabel = (trip: Trip, dayIndex: number): string => {
+    if (trip.dates) {
+      const startStr = trip.dates.split('–')[0].trim();
+      const year = new Date().getFullYear();
+      const start = new Date(`${startStr} ${year}`);
+      if (!isNaN(start.getTime())) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + dayIndex);
+        const fmt = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return `Day ${dayIndex + 1} · ${fmt}`;
+      }
+    }
+    return `Day ${dayIndex + 1}`;
+  };
+
+  const handleAddDay = async () => {
+    if (!selectedTrip) return;
+    const position = selectedTrip.days.length;
+    const label = getTripDayLabel(selectedTrip, position);
+    if (userId) {
+      const newDay = await createPlanDay(selectedTrip.id, label, position);
+      if (newDay) {
+        const updated: Trip = { ...selectedTrip, days: [...selectedTrip.days, { id: newDay.id, label, items: [] }] };
+        setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+        setSelectedTrip(updated);
+      }
+    } else {
+      const updated: Trip = { ...selectedTrip, days: [...selectedTrip.days, { label, items: [] }] };
+      setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+      setSelectedTrip(updated);
+    }
+  };
+
+  const handleInitDays = async () => {
+    if (!selectedTrip || !selectedTrip.dates) return;
+    if (selectedTrip.days.length > 0) return; // already set up
+    const total = countDaysFromDates(selectedTrip.dates);
+    if (total === 0) return;
+    const newDays: TripDay[] = [];
+    for (let i = 0; i < total; i++) {
+      const label = getTripDayLabel(selectedTrip, i);
+      if (userId) {
+        const newDay = await createPlanDay(selectedTrip.id, label, i);
+        if (newDay) newDays.push({ id: newDay.id, label, items: [] });
+      } else {
+        newDays.push({ label, items: [] });
+      }
+    }
+    const updated: Trip = { ...selectedTrip, days: newDays };
+    setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+    setSelectedTrip(updated);
+  };
+
+  const openAddPlace = (dayId: string | null) => {
+    setAddPlaceDayId(dayId);
+    setAddPlaceSearch('');
+    setAddPlaceSuggestions([]);
+    setAddPlaceSelectedId('');
+    setAddPlaceSelectedName('');
+    setAddPlaceTime('');
+    setAddPlaceNotes('');
+    setAddPlaceCategory('');
+    setAddPlaceStatus('none');
+    setAddPlaceCheckIn('');
+    setAddPlaceCheckOut('');
+    setAddPlaceCustomImage('');
+    setAddPlaceLocation('');
+    setAddPlaceTimeEnd('');
+    setAddPlaceAddress('');
+    setAddPlaceNeighborhood('');
+    setShowAddPlace(true);
+  };
+
+  const handleSelectPlace = async (placeId: string, text: string, timeLabel: string, timeEnd: string, notes: string, categoryOverride: string, locationStr = '', neighborhoodHint = '') => {
+    if (!selectedTrip) return;
+    setAddPlaceSaving(true);
+    try {
+      let name = text;
+      let category = categoryOverride || 'experience';
+      let imageUrl = addPlaceCustomImage || '';
+      let address = locationStr;
+      let neighborhood = neighborhoodHint;
+
+      if (placeId) {
+        try {
+          const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+            headers: {
+              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+              'X-Goog-FieldMask': 'displayName,types,photos,formattedAddress,addressComponents',
+              'X-Goog-LanguageCode': 'en',
+            },
+          });
+          const place = await res.json();
+          if (place.displayName?.text) name = place.displayName.text;
+          if (!categoryOverride && place.types) category = googleTypesToCategory(place.types);
+          const photoName = place.photos?.[0]?.name;
+          if (!imageUrl && photoName) imageUrl = `https://places.googleapis.com/v1/${photoName}/media?key=${GOOGLE_PLACES_KEY}&maxWidthPx=400`;
+          if (place.formattedAddress) address = place.formattedAddress;
+          const area = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
+          if (area) neighborhood = area;
+        } catch { /* use fallback name/category already set */ }
+      }
+
+      let targetDayId = addPlaceDayId;
+      let updatedDays = [...selectedTrip.days];
+
+      // If no day exists yet, create Day 1
+      if (updatedDays.length === 0) {
+        const label = getTripDayLabel(selectedTrip, 0);
+        if (userId) {
+          const newDay = await createPlanDay(selectedTrip.id, label, 0);
+          if (newDay) {
+            updatedDays = [{ id: newDay.id, label, items: [] }];
+            targetDayId = newDay.id;
+          }
+        } else {
+          updatedDays = [{ label, items: [] }];
+          targetDayId = null;
+        }
+      }
+
+      const dayIndex = targetDayId ? updatedDays.findIndex(d => d.id === targetDayId) : 0;
+      if (dayIndex === -1) return;
+      const day = updatedDays[dayIndex];
+      const position = day.items.length;
+
+      const finalImage = imageUrl; // imageUrl already prefers addPlaceCustomImage (set at top of function)
+      let newItem: TripItem;
+      if (userId && day.id) {
+        const dbItem = await createPlanItem(selectedTrip.id, day.id, {
+          name, category, image_url: finalImage,
+          time_label: timeLabel, time_end: timeEnd || undefined,
+          notes, address: address || undefined, neighborhood: neighborhood || undefined,
+          status: addPlaceStatus !== 'none' ? addPlaceStatus : undefined,
+          check_in: addPlaceCheckIn || undefined,
+          check_out: addPlaceCheckOut || undefined,
+          position,
+        });
+        if (!dbItem) return;
+        newItem = { id: dbItem.id, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined };
+      } else {
+        newItem = { id: `item-${Date.now()}`, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined };
+      }
+
+      updatedDays[dayIndex] = { ...day, items: [...day.items, newItem] };
+      const updated: Trip = { ...selectedTrip, days: updatedDays };
+      setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+      setSelectedTrip(updated);
+      setAddPlaceSearch('');
+      setAddPlaceSuggestions([]);
+      setShowAddPlace(false);
+    } catch { /* silent */ }
+    setAddPlaceSaving(false);
+  };
+
+  const openEditPlan = async (trip: Trip) => {
+    setEditPlanTrip(trip);
+    setEditPlanName(trip.destination);
+    setEditPlanDesc(trip.description ?? '');
+    setEditPlanLocation(trip.country ?? '');
+    setEditPlanCoverImage(trip.coverImage);
+    setEditPlanCollabs(trip.collaborators ?? []);
+    setEditDateRange(undefined);
+    setEditShowCalendar(false);
+    setEditPlanCollabInput('');
+    setShowEditPlan(true);
+    if (userId) {
+      const [followers, following] = await Promise.all([getFollowerProfiles(userId), getFollowingProfiles(userId)]);
+      const combined = [...followers, ...following].filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i);
+      setEditFollowList(combined);
+    }
+  };
+
+  const parseTripStartDate = (dates: string, status: string): Date | null => {
+    if (!dates) return null;
+    const startStr = dates.split('–')[0].trim();
+    const year = new Date().getFullYear();
+    const d = new Date(`${startStr} ${year}`);
+    if (isNaN(d.getTime())) return null;
+    if (status === 'past' && d > new Date()) d.setFullYear(year - 1);
+    return d;
+  };
+
+  const countDaysFromDates = (dates: string): number => {
+    if (!dates) return 0;
+    const parts = dates.split('–').map(s => s.trim());
+    if (parts.length === 1) return 1;
+    const [startStr, endStr] = parts;
+    const year = new Date().getFullYear();
+    const start = new Date(`${startStr} ${year}`);
+    const end = /^\d+$/.test(endStr)
+      ? new Date(`${startStr.split(' ')[0]} ${endStr} ${year}`)
+      : new Date(`${endStr} ${year}`);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
+    return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  };
+
+  const formatDateRange = (range: DateRange | undefined): string => {
+    if (!range?.from) return '';
+    const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (!range.to || range.from.getTime() === range.to.getTime()) return fmt(range.from);
+    if (range.from.getMonth() === range.to.getMonth() && range.from.getFullYear() === range.to.getFullYear()) {
+      return `${fmt(range.from)} – ${range.to.getDate()}`;
+    }
+    return `${fmt(range.from)} – ${fmt(range.to)}`;
+  };
+
+  // ── Load real data from Supabase ──────────────────────────────────────────
+  useEffect(() => {
+    if (!userId) {
+      setPlans(mockTrips);
+      return;
+    }
+    setPlansLoading(true);
+    getPlans(userId).then(dbPlans => {
+      const converted: Trip[] = dbPlans.map(p => ({
+        id: p.id,
+        destination: p.title,
+        country: p.country,
+        dates: p.dates,
+        coverImage: p.coverImageUrl,
+        status: p.status,
+        description: p.description,
+        days: p.days.map(d => ({
+          id: d.id,
+          label: d.label,
+          items: d.items.map(i => ({
+            id: i.id,
+            name: i.name,
+            category: i.category,
+            image: i.imageUrl || 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=400&q=80',
+            time: i.timeLabel || undefined,
+            timeEnd: i.timeEnd || undefined,
+            notes: i.notes || undefined,
+            address: i.address || undefined,
+            neighborhood: i.neighborhood || undefined,
+            location: i.location || undefined,
+            status: (i.status as TripItem['status']) || 'none',
+            checkIn: i.checkIn || undefined,
+            checkOut: i.checkOut || undefined,
+            booked: i.booked,
+          })),
+        })),
+        collaborators: p.collaborators.map(c => ({ id: c.id, name: c.name, avatar: c.avatar })),
+      }));
+      setPlans(converted);
+      setPlansLoading(false);
+    });
+
+    getSavedPlaces(userId).then(sp => {
+      setRealSavedPlaces(sp);
+      setRealSavedPlaceIds(new Set(sp.map(p => p.id)));
+    });
+
+    getItemInvites(userId).then(setItemInvites);
+    getUserCollections(userId).then(setDbCollections);
+  }, [userId]);
+
+  // ── Enrich items in the opened trip with address/neighborhood/photo ──
+  useEffect(() => {
+    if (!selectedTrip || !userId || !GOOGLE_PLACES_KEY) return;
+    const plan = selectedTrip;
+    let cancelled = false;
+
+    const applyPatch = (itemId: string, dayId: string | undefined, patch: Partial<TripItem>) => {
+      setPlans(prev => prev.map(p => p.id !== plan.id ? p : {
+        ...p, days: p.days.map(d => d.id !== dayId ? d : {
+          ...d, items: d.items.map(i => i.id !== itemId ? i : { ...i, ...patch }),
+        }),
+      }));
+      setSelectedTrip(prev => !prev || prev.id !== plan.id ? prev : {
+        ...prev, days: prev.days.map(d => d.id !== dayId ? d : {
+          ...d, items: d.items.map(i => i.id !== itemId ? i : { ...i, ...patch }),
+        }),
+      });
+    };
+
+    (async () => {
+      for (const day of plan.days) {
+        for (const item of day.items) {
+          if (cancelled) return;
+          // Already complete with proper "Area, City" format → skip
+          if (item.address && item.neighborhood && item.neighborhood.includes(',')) continue;
+          if (!item.name || item.name.length < 2) continue;
+
+          try {
+            // ── Fast path: item has address but neighborhood is missing or plain (no ", City") ──
+            // For truly generic items (Boat Day etc) that won't match well in Places search,
+            // parse what we can from the address string.
+            if (item.address && !item.neighborhood) {
+              const neighborhood = extractNeighborhood([], item.address);
+              if (neighborhood) {
+                const ok = await updatePlanItem(item.id, { neighborhood });
+                if (ok) applyPatch(item.id, day.id, { neighborhood });
+              }
+              continue; // no API call needed
+            }
+            // item.address exists but neighborhood is plain (no comma) → fall through to slow path
+            // so Google Places can give us proper "Area, City" from address components
+
+            // ── Slow path: no address → search Google Places by name ──
+            const query = plan.country ? `${item.name} ${plan.country}` : item.name;
+            const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+              body: JSON.stringify({ input: query, languageCode: 'en' }),
+            });
+            const acData = await acRes.json();
+            const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
+            if (!placeId) continue;
+
+            const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+              headers: {
+                'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+                'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents,photos',
+                'X-Goog-LanguageCode': 'en',
+              },
+            });
+            const det = await detRes.json();
+
+            // Verify result loosely matches item name
+            const placeName = (det.displayName?.text ?? '').toLowerCase();
+            const itemFirst = item.name.toLowerCase().split(' ')[0];
+            if (placeName && itemFirst.length > 2
+              && !placeName.includes(itemFirst)
+              && !item.name.toLowerCase().includes(placeName.split(' ')[0])) continue;
+
+            const newAddress = det.formattedAddress ?? '';
+            const newNeighborhood = extractNeighborhood(det.addressComponents ?? [], det.formattedAddress);
+            const photoName = det.photos?.[0]?.name;
+            const isDefaultImg = !item.image || item.image.includes('unsplash.com/photo-1476514525535');
+            const newImage = isDefaultImg && photoName
+              ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
+              : '';
+
+            const dbUpdates: Record<string, string> = {};
+            if (newAddress) dbUpdates.address = newAddress;
+            if (newNeighborhood) dbUpdates.neighborhood = newNeighborhood;
+            if (newImage) dbUpdates.image_url = newImage;
+            if (Object.keys(dbUpdates).length === 0) continue;
+
+            const ok = await updatePlanItem(item.id, dbUpdates);
+            if (!ok) continue;
+            applyPatch(item.id, day.id, {
+              ...(newAddress ? { address: newAddress } : {}),
+              ...(newNeighborhood ? { neighborhood: newNeighborhood } : {}),
+              ...(newImage ? { image: newImage } : {}),
+            });
+            await new Promise(r => setTimeout(r, 200));
+          } catch { /* silent */ }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const savedPlaces = isNewUser
     ? places.filter(p => savedPlaceSet.has(p.id))
@@ -201,46 +1053,93 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
   const myCollections = isNewUser ? [] : collections.filter(c => c.curatorId === 'user-1');
   const followingCollections = collections.filter(c => c.curatorId !== 'user-1');
 
-  // ── Trip Detail ───────────────────────────────────────────────
+  // ── Plan Detail ───────────────────────────────────────────────
+  const parseTimeToMinutes = (t: string): number => {
+    if (!t) return 9999;
+    const match = t.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+    if (!match) return 9999;
+    let h = parseInt(match[1]);
+    const m = parseInt(match[2]);
+    const period = match[3]?.toUpperCase();
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    return h * 60 + m;
+  };
+
   if (selectedTrip) {
     const totalItems = selectedTrip.days.reduce((acc, d) => acc + d.items.length, 0);
-    const bookedCount = selectedTrip.days.reduce((acc, d) => acc + d.items.filter(i => i.booked).length, 0);
+    const bookedCount = selectedTrip.days.reduce((acc, d) => acc + d.items.filter(i => i.booked || i.status === 'booked').length, 0);
+    const sortedDays = selectedTrip.days.map(d => ({
+      ...d,
+      items: [...d.items].sort((a, b) => parseTimeToMinutes(a.time ?? '') - parseTimeToMinutes(b.time ?? '')),
+    }));
+    const allItems = sortedDays.flatMap(d => d.items);
+    const statusConfig: Record<Trip['status'], { label: string; color: string }> = {
+      dreaming: { label: '✨ Want to do / see', color: 'bg-purple-100 text-purple-700' },
+      planning: { label: '📋 Planning it', color: 'bg-amber-100 text-amber-700' },
+      upcoming: { label: '🗓 Coming up', color: 'bg-violet-100 text-violet-700' },
+      past: { label: '✅ Done', color: 'bg-gray-100 text-gray-500' },
+    };
+    const collabs = selectedTrip.collaborators ?? [];
+
+    const isEvent = selectedTrip.description?.startsWith('[event]');
+
+    // If somehow an event ended up as selectedTrip, redirect to the event sheet
+    if (isEvent) {
+      if (!showEventSheet) {
+        setSelectedEvent(selectedTrip);
+        setShowEventSheet(true);
+        setSelectedTrip(null);
+      }
+      return null;
+    }
+
     return (
       <div className="bg-white min-h-screen">
+
+      {(
+        /* ══════════════════════════════════════
+           TRIP view — photo hero + stats + days
+           ══════════════════════════════════════ */
+        <>
         {/* Hero */}
         <div className="relative h-52">
           <img src={selectedTrip.coverImage} alt={selectedTrip.destination} className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
-          <button
-            onClick={() => setSelectedTrip(null)}
-            className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
-          >
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/20" />
+          <button onClick={() => setSelectedTrip(null)} className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button onClick={() => { openEditPlan(selectedTrip); }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
+              <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            <button className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
+              <Share2 size={15} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+          </div>
           <div className="absolute bottom-4 left-4 right-4">
-            <div className="flex items-center gap-2 mb-1">
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                selectedTrip.status === 'upcoming' ? 'bg-violet-500 text-white' :
-                selectedTrip.status === 'planning' ? 'bg-amber-400 text-white' :
-                'bg-white/30 text-white'
-              }`}>
-                {selectedTrip.status === 'upcoming' ? 'Upcoming' : selectedTrip.status === 'planning' ? 'Planning' : 'Past trip'}
-              </span>
-            </div>
             <h2 className="text-2xl font-black text-white">{selectedTrip.destination}</h2>
-            <p className="text-white/80 text-xs flex items-center gap-1 mt-0.5">
-              <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
-            </p>
+            <div className="flex items-center gap-3 mt-1">
+              {selectedTrip.dates && (
+                <p className="text-white/70 text-xs flex items-center gap-1">
+                  <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
+                </p>
+              )}
+              {selectedTrip.country && (
+                <p className="text-white/70 text-xs flex items-center gap-1">
+                  <MapPin size={11} strokeWidth={1.5} />{selectedTrip.country}
+                </p>
+              )}
+            </div>
+            {selectedTrip.description && (
+              <p className="text-white/60 text-xs mt-1.5 line-clamp-2">{selectedTrip.description}</p>
+            )}
           </div>
         </div>
 
-        {/* Stats bar */}
+        {/* Stats row */}
         <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
-          {[
-            { value: selectedTrip.days.length, label: 'Days' },
-            { value: totalItems, label: 'Places' },
-            { value: bookedCount, label: 'Booked' },
-          ].map(s => (
+          {[{ value: countDaysFromDates(selectedTrip.dates), label: 'Days' }, { value: totalItems, label: 'Places' }, { value: bookedCount, label: 'Booked' }].map(s => (
             <div key={s.label} className="flex-1 py-3 text-center">
               <p className="text-base font-black text-gray-900">{s.value}</p>
               <p className="text-xs text-gray-400">{s.label}</p>
@@ -248,47 +1147,1238 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
           ))}
         </div>
 
-        {/* Days */}
-        <div className="px-4 pt-4 pb-8 space-y-6">
-          {selectedTrip.days.map((day, di) => (
-            <div key={di}>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">{day.label}</p>
-              <div className="space-y-3">
-                {day.items.map(item => (
-                  <div key={item.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
-                    <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
-                        {item.booked && (
-                          <span className="text-xs bg-green-100 text-green-700 font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">Booked</span>
-                        )}
+        {/* Collaborators strip */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+          <div className="flex -space-x-2">
+            {/* You (always first) */}
+            {userAvatar ? (
+              <img src={userAvatar} alt="You" className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0 z-10" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center flex-shrink-0 z-10">
+                <span className="text-white text-xs font-bold">You</span>
+              </div>
+            )}
+            {collabs.map((c, i) => (
+              <img key={c.id} src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0" style={{ zIndex: 9 - i }} />
+            ))}
+          </div>
+          <div className="flex-1 min-w-0">
+            {collabs.length === 0
+              ? <p className="text-xs text-gray-400">Just you on this plan</p>
+              : <p className="text-xs text-gray-600 font-medium">You + {collabs.map(c => c.name.split(' ')[0]).join(', ')}</p>
+            }
+          </div>
+          <button
+            onClick={async () => {
+              setInviteCollabs(selectedTrip.collaborators ?? []);
+              setInviteInput('');
+              setShowInvite(true);
+              if (userId) {
+                const [followers, following] = await Promise.all([getFollowerProfiles(userId), getFollowingProfiles(userId)]);
+                const combined = [...followers, ...following].filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i);
+                setInviteFollowList(combined);
+                setInviteSuggestions(combined.filter(f => !(selectedTrip.collaborators ?? []).some(c => c.id === f.id)));
+              }
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-gray-100 px-3 py-1.5 rounded-full flex-shrink-0"
+          >
+            <UserPlus size={12} strokeWidth={2} /> Invite
+          </button>
+        </div>
+
+
+
+        {/* View toggle + place list — TRIP only (events returned early above) */}
+        <div className="px-4 pt-4 pb-28">
+          <>
+          {/* Toggle */}
+          {selectedTrip.days.length > 0 && (
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{totalItems} places</p>
+              <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5">
+                {(['itinerary', 'list'] as const).map(mode => (
+                  <button key={mode} onClick={() => setPlanViewMode(mode)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${planViewMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
+                    {mode === 'itinerary' ? 'By day' : 'List'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedTrip.days.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="text-3xl mb-3">✨</p>
+              <p className="text-base font-bold text-gray-900 mb-1">Nothing added yet</p>
+              <p className="text-sm text-gray-400 mb-6">Set up your days or add places directly</p>
+              {selectedTrip.dates && countDaysFromDates(selectedTrip.dates) > 0 && (
+                <button onClick={handleInitDays} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold mb-3">
+                  <CalendarDays size={14} strokeWidth={2} /> Set up {countDaysFromDates(selectedTrip.dates)} days
+                </button>
+              )}
+              <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-600 rounded-full text-sm font-semibold">
+                <Plus size={14} strokeWidth={2} /> Add a place
+              </button>
+            </div>
+          ) : planViewMode === 'itinerary' ? (
+            <div className="space-y-6">
+              {sortedDays
+                .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx) // deduplicate by label
+                .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length) // cap to trip date range
+                .map((day, di) => (
+                <div key={di}>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{day.label}</p>
+                  <div className="space-y-2.5">
+                    {day.items.map(item => (
+                      <div key={item.id} className="bg-gray-50 rounded-2xl p-3" onClick={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}>
+                        <div className="flex items-start gap-3">
+                          {item.image
+                            ? <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                            : <div className="w-14 h-14 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-2xl">{categoryEmoji[item.category] ?? '📍'}</div>
+                          }
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
+                              {item.neighborhood ? ` · ${item.neighborhood}` : ''}
+                            </p>
+                            {item.time && (
+                              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                                <Clock size={9} strokeWidth={1.5} />
+                                {item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
+                              </p>
+                            )}
+                            {(item.checkIn || item.checkOut) && (
+                              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                                <CalendarDays size={9} strokeWidth={1.5} />
+                                {item.checkIn}{item.checkIn && item.checkOut ? ' → ' : ''}{item.checkOut}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                            {(item.status === 'booked' || item.booked) && <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full">Booked</span>}
+                            {item.status === 'pending' && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+                          </div>
+                        </div>
+
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[item.category] ?? '📍'} {item.category}</p>
+                    ))}
+                    {day.items.length === 0 && (
+                      <div className="border-2 border-dashed border-gray-100 rounded-2xl py-5 flex items-center justify-center">
+                        <p className="text-sm text-gray-300">Nothing added</p>
+                      </div>
+                    )}
+                    <button onClick={() => openAddPlace(day.id ?? null)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                      <Plus size={12} strokeWidth={2} /> Add place / plan
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button onClick={handleAddDay} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-100 text-sm text-gray-300 font-medium">
+                <Plus size={14} strokeWidth={1.5} /> Add a day
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {allItems.map(item => {
+                const itemDay = selectedTrip.days.find(d => d.items.some(i => i.id === item.id));
+                return (
+                <button key={item.id} onClick={() => { setDetailItem(item); setDetailItemDayId(itemDay?.id ?? null); setShowItemDetail(true); }} className="w-full bg-gray-50 rounded-2xl p-3 text-left">
+                  <div className="flex items-center gap-3">
+                    {item.image
+                      ? <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                      : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 text-xl">{categoryEmoji[item.category] ?? '📍'}</div>
+                    }
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
+                        {item.neighborhood ? ` · ${item.neighborhood}` : ''}
+                      </p>
                       {item.time && (
-                        <p className="text-xs text-gray-500 flex items-center gap-0.5 mt-0.5">
-                          <Clock size={10} strokeWidth={1.5} />{item.time}
+                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                          <Clock size={9} strokeWidth={1.5} />{item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
+                        </p>
+                      )}
+                      {(item.checkIn || item.checkOut) && (
+                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                          <CalendarDays size={9} strokeWidth={1.5} />{item.checkIn}{item.checkIn && item.checkOut ? ' → ' : ''}{item.checkOut}
                         </p>
                       )}
                     </div>
+                    {(item.booked || item.status === 'booked')
+                      ? <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-1 rounded-full flex-shrink-0">Booked</span>
+                      : item.status === 'pending'
+                      ? <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-1 rounded-full flex-shrink-0">Pending</span>
+                      : null
+                    }
                   </div>
-                ))}
-                {day.items.length === 0 && (
-                  <div className="border-2 border-dashed border-gray-200 rounded-2xl py-5 flex items-center justify-center">
-                    <p className="text-sm text-gray-400">Nothing planned yet</p>
+                </button>
+                );
+              })}
+            </div>
+          )}
+          </>
+        </div>
+        </> /* end TRIP view */
+        )}
+
+        {/* ── Shared sheets (shown for both events and trips) ── */}
+        {/* Edit Plan Sheet */}
+        {showEditPlan && editPlanTrip && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditPlan(false)} />
+            <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-center mb-4">
+                <div className="w-10 h-1 rounded-full bg-gray-200" />
+              </div>
+              <button onClick={() => setShowEditPlan(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                <X size={15} strokeWidth={2} className="text-gray-500" />
+              </button>
+
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit plan</p>
+
+              {/* Cover image preview */}
+              <div className="relative h-28 rounded-2xl overflow-hidden mb-4">
+                <img src={editPlanCoverImage || editPlanTrip.coverImage} alt="" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                  {coverCropSaving ? (
+                    <Loader2 size={20} className="text-white animate-spin" />
+                  ) : (
+                    <button onClick={() => editCoverInputRef.current?.click()} className="flex items-center gap-1.5 bg-white/90 text-gray-800 text-xs font-semibold px-3 py-1.5 rounded-full">
+                      <Pencil size={11} strokeWidth={2} /> Change cover
+                    </button>
+                  )}
+                </div>
+              </div>
+              <input
+                ref={editCoverInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setCoverCropFile(file);
+                  setCoverCropTarget('edit');
+                  e.target.value = '';
+                }}
+              />
+
+              {/* Title */}
+              <input
+                autoFocus
+                value={editPlanName}
+                onChange={e => setEditPlanName(e.target.value)}
+                placeholder="Title?"
+                className="w-full text-2xl font-black text-gray-900 outline-none placeholder:text-gray-200 mb-5 bg-transparent"
+              />
+
+              {/* Dates */}
+              <div className="mb-2">
+                <button
+                  onClick={() => setEditShowCalendar(v => !v)}
+                  className="w-full flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 text-left"
+                >
+                  <CalendarDays size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <span className={`flex-1 text-sm ${editDateRange?.from ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
+                    {editDateRange?.from ? formatDateRange(editDateRange) : (editPlanTrip.dates || 'Dates?')}
+                  </span>
+                  {editDateRange?.from && (
+                    <span onClick={e => { e.stopPropagation(); setEditDateRange(undefined); }} className="text-gray-300 hover:text-gray-500">
+                      <X size={13} strokeWidth={2} />
+                    </span>
+                  )}
+                </button>
+                {editShowCalendar && (
+                  <div className="curio-cal mt-1 rounded-xl overflow-hidden bg-gray-50 flex justify-center">
+                    <style>{`
+                      .curio-cal .rdp-range_start { background: linear-gradient(to right, transparent 50%, #ffedd5 50%); }
+                      .curio-cal .rdp-range_end   { background: linear-gradient(to left,  transparent 50%, #ffedd5 50%); }
+                      .curio-cal .rdp-range_middle { background: #ffedd5; }
+                      .curio-cal .rdp-range_start button { background: #f97316 !important; color: white !important; border-radius: 9999px !important; }
+                      .curio-cal .rdp-range_end   button { background: #f97316 !important; color: white !important; border-radius: 9999px !important; }
+                      .curio-cal .rdp-range_middle button { background: transparent !important; color: #c2410c !important; border-radius: 0 !important; }
+                    `}</style>
+                    <DayPicker
+                      mode="range"
+                      selected={editDateRange}
+                      onSelect={(range) => {
+                        setEditDateRange(range);
+                        if (range?.from && range?.to && range.to.getTime() !== range.from.getTime()) {
+                          setEditShowCalendar(false);
+                        }
+                      }}
+                      classNames={{
+                        root: 'p-4 w-full relative',
+                        month: 'w-full',
+                        month_caption: 'flex items-center mb-3',
+                        caption_label: 'text-sm font-bold text-gray-900',
+                        nav: 'absolute top-4 right-4 flex gap-2 items-center',
+                        button_previous: 'w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors',
+                        button_next: 'w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors',
+                        month_grid: 'w-full border-collapse',
+                        weekdays: 'flex mb-1',
+                        weekday: 'flex-1 text-center text-xs text-gray-400 font-medium py-1',
+                        week: 'flex',
+                        day: 'flex-1 flex items-center justify-center p-0.5',
+                        day_button: 'w-8 h-8 flex items-center justify-center rounded-full text-sm text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer',
+                        today: 'font-bold',
+                        outside: 'text-gray-200',
+                        disabled: 'text-gray-200 cursor-not-allowed',
+                      }}
+                    />
                   </div>
                 )}
-                <button className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl border border-gray-200 text-sm text-gray-500 font-medium">
-                  <Plus size={14} strokeWidth={1.5} /> Add place
+              </div>
+
+              {/* Optional fields */}
+              <div className="space-y-2 mb-5 mt-2">
+                <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                  <AlignLeft size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <input
+                    value={editPlanDesc}
+                    onChange={e => setEditPlanDesc(e.target.value)}
+                    placeholder="Description (optional)"
+                    className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                  />
+                </div>
+                <LocationSearch value={editPlanLocation} onChange={setEditPlanLocation} onCoverImage={setEditPlanCoverImage} />
+              </div>
+
+              <button
+                onClick={async () => {
+                  const dates = editDateRange?.from ? formatDateRange(editDateRange) : editPlanTrip.dates;
+                  const status = editDateRange?.from
+                    ? (editDateRange.from >= new Date(new Date().setHours(0, 0, 0, 0)) ? 'upcoming' : 'past')
+                    : editPlanTrip.status;
+                  const coverImage = editPlanCoverImage || editPlanTrip.coverImage;
+                  const updated: Trip = { ...editPlanTrip, destination: editPlanName || editPlanTrip.destination, country: editPlanLocation || editPlanTrip.country, dates, description: editPlanDesc, status, coverImage };
+                  if (userId) {
+                    await dbUpdatePlan(editPlanTrip.id, { title: updated.destination, country: updated.country, dates: updated.dates, description: updated.description ?? '', status: updated.status, cover_image_url: coverImage });
+                  }
+                  setPlans(prev => prev.map(p => p.id === editPlanTrip.id ? updated : p));
+                  if (selectedTrip?.id === editPlanTrip.id) setSelectedTrip(updated);
+                  if (selectedEvent?.id === editPlanTrip.id) setSelectedEvent(updated);
+                  setShowEditPlan(false);
+                }}
+                className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold"
+              >
+                Save changes
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm('Delete this plan?')) return;
+                  if (userId) await dbDeletePlan(editPlanTrip.id);
+                  setPlans(prev => prev.filter(p => p.id !== editPlanTrip.id));
+                  setShowEditPlan(false);
+                  setSelectedTrip(null);
+                  setShowEventSheet(false);
+                  setSelectedEvent(null);
+                }}
+                className="w-full py-3 text-red-500 text-sm font-semibold"
+              >
+                Delete trip
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Invite Sheet */}
+        {showInvite && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowInvite(false)} />
+            <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10 max-h-[70vh] overflow-y-auto">
+              <div className="flex justify-center mb-4">
+                <div className="w-10 h-1 rounded-full bg-gray-200" />
+              </div>
+              <button onClick={() => setShowInvite(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                <X size={15} strokeWidth={2} className="text-gray-500" />
+              </button>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Invite to plan</p>
+              {inviteCollabs.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {inviteCollabs.map(c => (
+                    <span key={c.id} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5">
+                      <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" />
+                      <span className="text-xs text-gray-600 font-medium">{c.name.split(' ')[0]}</span>
+                      <button onClick={() => setInviteCollabs(prev => prev.filter(x => x.id !== c.id))}>
+                        <X size={10} strokeWidth={2} className="text-gray-400" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="relative">
+                <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 mb-1">
+                  <Users size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <input
+                    autoFocus
+                    value={inviteInput}
+                    onChange={async e => {
+                      const val = e.target.value;
+                      setInviteInput(val);
+                      if (!val.trim()) {
+                        setInviteSuggestions(inviteFollowList.filter(f => !inviteCollabs.some(c => c.id === f.id)));
+                        return;
+                      }
+                      const q = val.replace(/^@/, '').toLowerCase();
+                      const fromFollows = inviteFollowList.filter(f =>
+                        (f.username.toLowerCase().includes(q) || f.name.toLowerCase().includes(q)) &&
+                        !inviteCollabs.some(c => c.id === f.id)
+                      );
+                      if (fromFollows.length > 0) {
+                        setInviteSuggestions(fromFollows);
+                      } else if (userId) {
+                        const results = await searchProfiles(val.replace(/^@/, ''), userId);
+                        setInviteSuggestions(results.filter(r => !inviteCollabs.some(c => c.id === r.id)));
+                      }
+                    }}
+                    placeholder="Search by name or username..."
+                    className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                  />
+                </div>
+                {inviteSuggestions.length > 0 && (
+                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    {inviteSuggestions.slice(0, 6).map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          setInviteCollabs(prev => [...prev, { id: s.id, name: s.name, avatar: s.avatarUrl ?? `https://i.pravatar.cc/150?u=${s.id}` }]);
+                          setInviteInput('');
+                          setInviteSuggestions(inviteFollowList.filter(f => !inviteCollabs.some(c => c.id === f.id) && f.id !== s.id));
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                      >
+                        <img src={s.avatarUrl ?? `https://i.pravatar.cc/150?u=${s.id}`} alt={s.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                        <div className="text-left min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                          <p className="text-xs text-gray-400 truncate">@{s.username}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {inviteCollabs.length > 0 && (
+                <button
+                  onClick={async () => {
+                    const updated: Trip = { ...selectedTrip, collaborators: inviteCollabs };
+                    if (userId) {
+                      await dbUpdatePlan(selectedTrip.id, {});
+                    }
+                    setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                    setSelectedTrip(updated);
+                    setShowInvite(false);
+                  }}
+                  className="w-full mt-4 py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold"
+                >
+                  Save collaborators
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Cover Crop Modal */}
+        {coverCropFile && coverCropTarget === 'edit' && (
+          <CoverCropModal
+            file={coverCropFile}
+            onCancel={() => { setCoverCropFile(null); setCoverCropTarget(null); }}
+            onConfirm={async (blob, previewUrl) => {
+              setCoverCropFile(null);
+              setCoverCropTarget(null);
+              if (!userId) { setEditPlanCoverImage(previewUrl); return; }
+              setCoverCropSaving(true);
+              const path = `plan-covers/${userId}/${Date.now()}.jpg`;
+              const { error } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+              if (!error) setEditPlanCoverImage(getPublicUrl('avatars', path));
+              else setEditPlanCoverImage(previewUrl);
+              setCoverCropSaving(false);
+            }}
+          />
+        )}
+
+        {/* Add Place Sheet */}
+        {showAddPlace && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddPlace(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
+              {/* handle */}
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                <div className="w-10 h-1 rounded-full bg-gray-200" />
+              </div>
+              {/* header */}
+              <div className="flex items-center px-5 pt-2 pb-3 flex-shrink-0">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Add a place</p>
+                <button onClick={() => setShowAddPlace(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                  <X size={15} strokeWidth={2} className="text-gray-500" />
+                </button>
+              </div>
+
+              {/* scrollable body */}
+              <div className="flex-1 overflow-y-auto px-5 pb-8">
+                {/* Day selector */}
+                {selectedTrip && selectedTrip.days.length > 0 && (
+                  <div className="mb-5">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Which day?</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {selectedTrip.days.map(day => (
+                        <button
+                          key={day.id ?? day.label}
+                          onClick={() => setAddPlaceDayId(day.id ?? null)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                            addPlaceDayId === (day.id ?? null)
+                              ? 'bg-gray-900 text-white border-gray-900'
+                              : 'bg-white text-gray-600 border-gray-200'
+                          }`}
+                        >
+                          {day.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Title */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Title</p>
+                  <input
+                    value={addPlaceSelectedName}
+                    onChange={e => setAddPlaceSelectedName(e.target.value)}
+                    placeholder="e.g. Dinner at Carbone"
+                    className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                  />
+                </div>
+
+                {/* Address search */}
+                <div className="mb-5">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Address <span className="font-normal">(optional)</span></p>
+                    <div>
+                      <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                        <Search size={14} className="text-gray-400 flex-shrink-0" />
+                        <input
+                          value={addPlaceSearch}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setAddPlaceSearch(val);
+                            if (addPlaceTimerRef.current) clearTimeout(addPlaceTimerRef.current);
+                            if (!val.trim()) { setAddPlaceSuggestions([]); return; }
+                            addPlaceTimerRef.current = setTimeout(async () => {
+                              setAddPlaceSearching(true);
+                              try {
+                                const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+                                  body: JSON.stringify({ input: val, languageCode: 'en' }),
+                                });
+                                const data = await res.json();
+                                setAddPlaceSuggestions(
+                                  (data.suggestions ?? [])
+                                    .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
+                                    .filter((s: any) => s.placeId)
+                                    .slice(0, 6)
+                                );
+                              } catch { setAddPlaceSuggestions([]); }
+                              setAddPlaceSearching(false);
+                            }, 400);
+                          }}
+                          placeholder="Search restaurant, stay, activity…"
+                          className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                        />
+                        {addPlaceSearching && <Loader2 size={14} className="text-gray-400 animate-spin flex-shrink-0" />}
+                      </div>
+                      {addPlaceSuggestions.length > 0 && (
+                        <div className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden">
+                          {addPlaceSuggestions.map(s => (
+                            <button
+                              key={s.placeId}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={async () => {
+                                setAddPlaceSelectedId(s.placeId);
+                                setAddPlaceSuggestions([]);
+                                // Show the full suggestion text in the address search field
+                                setAddPlaceSearch(s.text);
+                                // Fetch full details: clean display name, address, neighborhood
+                                try {
+                                  const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
+                                    headers: {
+                                      'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+                                      'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents',
+                                      'X-Goog-LanguageCode': 'en',
+                                    },
+                                  });
+                                  const data = await res.json();
+                                  // Always use clean Google display name for title (unless user manually typed something)
+                                  if (data.displayName?.text) {
+                                    setAddPlaceSelectedName(prev => {
+                                      const prevClean = prev.trim();
+                                      // Only override if blank or still matches old suggestion text
+                                      if (!prevClean || prevClean === s.text) return data.displayName.text;
+                                      return prev;
+                                    });
+                                  } else if (!addPlaceSelectedName.trim()) {
+                                    setAddPlaceSelectedName(s.text);
+                                  }
+                                  if (data.formattedAddress) setAddPlaceAddress(data.formattedAddress);
+                                  const area = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
+                                  if (area) setAddPlaceNeighborhood(area);
+                                } catch {
+                                  // Fallback: use suggestion text as title
+                                  if (!addPlaceSelectedName.trim()) setAddPlaceSelectedName(s.text);
+                                }
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 text-left"
+                            >
+                              <MapPin size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                              <span className="text-sm text-gray-800">{s.text}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                </div>
+
+                {/* Neighborhood */}
+                <div className="mb-5">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Neighborhood <span className="font-normal">(optional)</span></p>
+                  <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                    <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <input value={addPlaceNeighborhood} onChange={e => setAddPlaceNeighborhood(e.target.value)} placeholder="Auto-filled from search" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                  </div>
+                </div>
+
+                {/* Custom image */}
+                <div className="mb-5">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Photo <span className="font-normal">(optional)</span></p>
+                  {addPlaceCustomImage ? (
+                    <div className="relative">
+                      <img src={addPlaceCustomImage} alt="custom" className="w-full h-32 object-cover rounded-2xl" />
+                      <button onClick={() => setAddPlaceCustomImage('')} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 flex items-center justify-center">
+                        <X size={12} strokeWidth={2} className="text-white" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => addPlaceImageRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-1 text-gray-400">
+                      <Plus size={18} strokeWidth={1.5} />
+                      <span className="text-xs">Add your own photo</span>
+                    </button>
+                  )}
+                  <input ref={addPlaceImageRef} type="file" accept="image/*" className="hidden" onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    // Show preview immediately so the user gets instant feedback
+                    const preview = URL.createObjectURL(file);
+                    setAddPlaceCustomImage(preview);
+                    // Try to upload to Supabase for persistence; fall back to blob URL
+                    if (userId) {
+                      const path = `plan-items/${userId}/${Date.now()}.jpg`;
+                      const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                      if (!error) setAddPlaceCustomImage(getPublicUrl('avatars', path));
+                      // else: blob URL preview stays — good enough for current session
+                    }
+                  }} />
+                </div>
+
+                {/* Category */}
+                <div className="mb-5">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Type <span className="font-normal">(optional)</span></p>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      { key: 'restaurant', label: '🍽 Restaurant' },
+                      { key: 'hotel', label: '🏨 Stay' },
+                      { key: 'cafe', label: '☕ Café' },
+                      { key: 'bar', label: '🍸 Bar' },
+                      { key: 'attraction', label: '🏛️ Attraction' },
+                      { key: 'nature', label: '🌿 Nature' },
+                      { key: 'shop', label: '🛍 Shop' },
+                      { key: 'experience', label: '🗺️ Experience' },
+                      { key: 'sports', label: '🎾 Sports' },
+                      { key: 'flight', label: '✈️ Flight' },
+                      { key: 'transport', label: '🚗 Transport' },
+                      { key: 'event', label: '🎟️ Event' },
+                      { key: 'beach', label: '🏖️ Beach' },
+                      { key: 'food', label: '🍕 Food' },
+                      { key: 'wellness', label: '💆 Wellness' },
+                    ].map(cat => (
+                      <button
+                        key={cat.key}
+                        onClick={() => setAddPlaceCategory(prev => prev === cat.key ? '' : cat.key)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                          addPlaceCategory === cat.key
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-600 border-gray-200'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Time — conditional on category */}
+                {addPlaceCategory === 'hotel' ? (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Check-in / Check-out <span className="font-normal">(optional)</span></p>
+                    <div className="flex gap-2 mb-2">
+                      <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                        <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                        <input value={addPlaceCheckIn} onChange={e => setAddPlaceCheckIn(e.target.value)} placeholder="Check-in date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                      </div>
+                      <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                        <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                        <input value={addPlaceCheckOut} onChange={e => setAddPlaceCheckOut(e.target.value)} placeholder="Check-out date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <TimePicker label="Check-in time" value={addPlaceTime} onChange={setAddPlaceTime} />
+                      <TimePicker label="Check-out time" value={addPlaceTimeEnd} onChange={setAddPlaceTimeEnd} />
+                    </div>
+                  </div>
+                ) : addPlaceCategory ? (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Time <span className="font-normal">(optional)</span></p>
+                    <div className="flex gap-2">
+                      <TimePicker label="Starts" value={addPlaceTime} onChange={setAddPlaceTime} />
+                      <TimePicker label="Ends" value={addPlaceTimeEnd} onChange={setAddPlaceTimeEnd} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Status */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Status <span className="font-normal">(optional)</span></p>
+                  <div className="flex gap-2">
+                    {(['none', 'pending', 'booked'] as const).map(s => (
+                      <button key={s} onClick={() => setAddPlaceStatus(s)}
+                        className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                          addPlaceStatus === s ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'
+                        }`}>
+                        {s === 'none' ? '—' : s === 'pending' ? 'Pending' : 'Booked'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div className="mb-6">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Notes <span className="font-normal">(optional)</span></p>
+                  <textarea
+                    value={addPlaceNotes}
+                    onChange={e => setAddPlaceNotes(e.target.value)}
+                    placeholder="Who you went with, what you ordered, how was it…"
+                    rows={3}
+                    className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none placeholder:text-gray-400 resize-none"
+                  />
+                </div>
+
+                {/* Save */}
+                <button
+                  onClick={() => {
+                    const id = addPlaceSelectedId;
+                    const name = addPlaceSelectedName || addPlaceSearch.trim();
+                    if (name) handleSelectPlace(id, name, addPlaceTime, addPlaceTimeEnd, addPlaceNotes, addPlaceCategory, addPlaceAddress || addPlaceLocation, addPlaceNeighborhood);
+                  }}
+                  disabled={(!addPlaceSelectedId && !addPlaceSearch.trim()) || addPlaceSaving}
+                  className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : 'Add to plan'}
                 </button>
               </div>
             </div>
-          ))}
+          </div>
+        )}
 
-          <button className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 text-sm text-gray-400 font-medium">
-            <Plus size={14} strokeWidth={1.5} /> Add a day
-          </button>
-        </div>
+        {/* Item Detail — bottom sheet */}
+        {showItemDetail && detailItem && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowItemDetail(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col overflow-hidden" style={{ maxHeight: '88vh' }}>
+            {/* Photo header */}
+            <div className="relative flex-shrink-0">
+              {detailItem.image
+                ? <img src={detailItem.image} alt={detailItem.name} className="w-full object-cover rounded-t-3xl" style={{ height: '48vw', maxHeight: 220, minHeight: 160 }} />
+                : <div className="w-full flex items-center justify-center bg-gray-100 rounded-t-3xl text-6xl" style={{ height: '36vw', maxHeight: 160, minHeight: 120 }}>{categoryEmoji[detailItem.category] ?? '📍'}</div>
+              }
+              {/* X close */}
+              <button onClick={() => setShowItemDetail(false)} className="absolute top-4 left-4 w-9 h-9 rounded-full bg-black/40 flex items-center justify-center">
+                <X size={15} strokeWidth={2.5} className="text-white" />
+              </button>
+              {/* Edit button */}
+              <button onClick={() => {
+                setShowItemDetail(false);
+                setEditItem(detailItem);
+                setEditItemDayId(detailItemDayId);
+                setEditItemAddressSearch(detailItem.address ?? '');
+                setEditItemAddressSuggestions([]);
+                setShowEditItem(true);
+              }} className="absolute top-4 right-4 flex items-center gap-1.5 bg-black/40 text-white text-sm font-semibold px-4 py-2 rounded-full">
+                <Pencil size={12} strokeWidth={2} /> Edit
+              </button>
+              {/* Status badge */}
+              {(detailItem.status === 'booked' || detailItem.booked) && (
+                <span className="absolute bottom-4 right-4 text-sm bg-green-500 text-white font-bold px-4 py-1.5 rounded-full shadow-sm">Booked</span>
+              )}
+              {detailItem.status === 'pending' && (
+                <span className="absolute bottom-4 right-4 text-sm bg-amber-400 text-white font-bold px-4 py-1.5 rounded-full shadow-sm">Pending</span>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-5 pt-5 pb-10">
+              {/* Title */}
+              <h2 className="text-2xl font-black text-gray-900 leading-tight mb-1">{detailItem.name}</h2>
+              {/* Category · neighborhood */}
+              <p className="text-sm text-gray-400 mb-4 flex items-center gap-1">
+                <span>{categoryEmoji[detailItem.category] ?? '📍'}</span>
+                <span>{categoryDisplayName[detailItem.category] ?? detailItem.category}</span>
+                {detailItem.neighborhood && <><span>·</span><span>{detailItem.neighborhood}</span></>}
+              </p>
+
+              {/* Time */}
+              {detailItem.time && (
+                <div className="flex items-center gap-3 mb-3">
+                  <Clock size={16} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <p className="text-base text-gray-800">{detailItem.time}{detailItem.timeEnd ? ` – ${detailItem.timeEnd}` : ''}</p>
+                </div>
+              )}
+              {/* Check-in / out */}
+              {(detailItem.checkIn || detailItem.checkOut) && (
+                <div className="flex items-center gap-3 mb-3">
+                  <CalendarDays size={16} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <p className="text-base text-gray-800">{detailItem.checkIn}{detailItem.checkIn && detailItem.checkOut ? ' → ' : ''}{detailItem.checkOut}</p>
+                </div>
+              )}
+              {/* Address */}
+              {(detailItem.address || detailItem.neighborhood) && (
+                <div className="flex items-start gap-3 mb-4">
+                  <MapPin size={16} strokeWidth={1.5} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-base text-gray-800">{detailItem.address || detailItem.neighborhood}</p>
+                </div>
+              )}
+
+              {/* Notes */}
+              {detailItem.notes && (
+                <div className="bg-gray-50 rounded-2xl px-4 py-4 mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-1.5">Notes</p>
+                  <p className="text-base text-gray-800 leading-relaxed">{detailItem.notes}</p>
+                </div>
+              )}
+
+              {/* Who's coming */}
+              {(() => {
+                const invitesForThis = itemInvites.filter(inv => inv.planItemId === detailItem.id);
+                const collabs = selectedTrip?.collaborators ?? [];
+                const hasAnyone = collabs.length > 0 || invitesForThis.length > 0;
+                return hasAnyone ? (
+                  <div className="mt-1">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Who's coming</p>
+                    <div className="flex flex-wrap gap-2">
+                      {collabs.map(c => (
+                        <div key={c.id} className="flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1.5">
+                          {c.avatar ? <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" /> : <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold">{c.name[0]}</div>}
+                          <span className="text-xs font-semibold text-gray-700">{c.name}</span>
+                        </div>
+                      ))}
+                      {invitesForThis.map(inv => (
+                        <div key={inv.id} className="flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1.5">
+                          {inv.invitedByAvatar ? <img src={inv.invitedByAvatar} alt={inv.invitedByName} className="w-5 h-5 rounded-full object-cover" /> : <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold">{inv.invitedByName[0]}</div>}
+                          <span className="text-xs font-semibold text-gray-700">{inv.invitedByName}</span>
+                          <span className={`text-[10px] font-semibold ${inv.status === 'accepted' ? 'text-green-500' : 'text-amber-500'}`}>{inv.status === 'accepted' ? '✓' : '…'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+            </div>
+            </div> {/* end sheet inner */}
+          </div>
+        )}
+
+        {/* Edit Item Sheet */}
+        {showEditItem && editItem && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditItem(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+              <div className="flex items-center px-5 pt-2 pb-3 flex-shrink-0">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Edit place / plan</p>
+                <button onClick={() => setShowEditItem(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><X size={15} strokeWidth={2} className="text-gray-500" /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 pb-8">
+                {/* Photo */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Photo</p>
+                  <div className="relative">
+                    {editItem.image ? (
+                      <img src={editItem.image} alt={editItem.name} className="w-full h-36 object-cover rounded-2xl" />
+                    ) : (
+                      <div className="w-full h-36 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-5xl">
+                        {categoryEmoji[editItem.category] ?? '📍'}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => editItemImageRef.current?.click()}
+                      className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 text-white text-xs font-semibold px-3 py-1.5 rounded-full"
+                    >
+                      <Pencil size={11} strokeWidth={2} /> Change photo
+                    </button>
+                  </div>
+                  <input ref={editItemImageRef} type="file" accept="image/*" className="hidden" onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    let url = URL.createObjectURL(file);
+                    if (userId) {
+                      const path = `plan-items/${userId}/${Date.now()}.jpg`;
+                      const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                      if (!error) url = getPublicUrl('avatars', path);
+                    }
+                    setEditItem(prev => prev ? { ...prev, image: url } : prev);
+                  }} />
+                </div>
+                {/* Name */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Name</p>
+                  <input value={editItem.name} onChange={e => setEditItem(prev => prev ? { ...prev, name: e.target.value } : prev)}
+                    className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                </div>
+                {/* Address with Google Places autocomplete */}
+                <div className="mb-3">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Address</p>
+                  <div className="relative">
+                    <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                      <Search size={14} className="text-gray-400 flex-shrink-0" />
+                      <input
+                        value={editItemAddressSearch}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setEditItemAddressSearch(val);
+                          setEditItem(prev => prev ? { ...prev, address: val } : prev);
+                          if (editItemAddressTimerRef.current) clearTimeout(editItemAddressTimerRef.current);
+                          if (!val.trim()) { setEditItemAddressSuggestions([]); return; }
+                          editItemAddressTimerRef.current = setTimeout(async () => {
+                            setEditItemAddressSearching(true);
+                            try {
+                              const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+                                body: JSON.stringify({ input: val, languageCode: 'en' }),
+                              });
+                              const data = await res.json();
+                              setEditItemAddressSuggestions(
+                                (data.suggestions ?? [])
+                                  .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
+                                  .filter((s: any) => s.placeId)
+                                  .slice(0, 6)
+                              );
+                            } catch { setEditItemAddressSuggestions([]); }
+                            setEditItemAddressSearching(false);
+                          }, 400);
+                        }}
+                        placeholder="Search or type address…"
+                        className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                      />
+                      {editItemAddressSearching && <Loader2 size={13} className="text-gray-400 animate-spin flex-shrink-0" />}
+                    </div>
+                    {editItemAddressSuggestions.length > 0 && (
+                      <div className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden">
+                        {editItemAddressSuggestions.map(s => (
+                          <button
+                            key={s.placeId}
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={async () => {
+                              setEditItemAddressSuggestions([]);
+                              setEditItemAddressSearch(s.text);
+                              setEditItem(prev => prev ? { ...prev, address: s.text } : prev);
+                              // Fetch full details for formatted address + neighborhood
+                              try {
+                                const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
+                                  headers: {
+                                    'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+                                    'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents,photos',
+                                    'X-Goog-LanguageCode': 'en',
+                                  },
+                                });
+                                const data = await res.json();
+                                if (data.formattedAddress) {
+                                  setEditItemAddressSearch(data.formattedAddress);
+                                  setEditItem(prev => prev ? { ...prev, address: data.formattedAddress } : prev);
+                                }
+                                const area = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
+                                if (area) setEditItem(prev => prev ? { ...prev, neighborhood: area } : prev);
+                                // Auto-fill photo if none
+                                const photoName = data.photos?.[0]?.name;
+                                if (photoName) {
+                                  setEditItem(prev => {
+                                    if (!prev || prev.image) return prev;
+                                    return { ...prev, image: `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}` };
+                                  });
+                                }
+                              } catch { /* ignore */ }
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 text-left"
+                          >
+                            <MapPin size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                            <span className="text-sm text-gray-800">{s.text}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* Neighborhood */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Neighborhood</p>
+                  <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                    <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <input value={editItem.neighborhood ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, neighborhood: e.target.value } : prev)}
+                      placeholder="Auto-filled from search" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                  </div>
+                </div>
+                {/* Category */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Type</p>
+                  <div className="flex gap-2 flex-wrap">
+                    {[{ key: 'restaurant', label: '🍽 Restaurant' },{ key: 'hotel', label: '🏨 Stay' },{ key: 'cafe', label: '☕ Café' },{ key: 'bar', label: '🍸 Bar' },{ key: 'attraction', label: '🏛️ Attraction' },{ key: 'nature', label: '🌿 Nature' },{ key: 'shop', label: '🛍 Shop' },{ key: 'experience', label: '🗺️ Experience' },{ key: 'sports', label: '🎾 Sports' },{ key: 'flight', label: '✈️ Flight' },{ key: 'transport', label: '🚗 Transport' },{ key: 'event', label: '🎟️ Event' },{ key: 'beach', label: '🏖️ Beach' },{ key: 'food', label: '🍕 Food' },{ key: 'wellness', label: '💆 Wellness' }].map(cat => (
+                      <button key={cat.key} onClick={() => setEditItem(prev => prev ? { ...prev, category: cat.key } : prev)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${editItem.category === cat.key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Time — conditional */}
+                {editItem.category === 'hotel' ? (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Check-in / Check-out</p>
+                    <div className="flex gap-2 mb-2">
+                      <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                        <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                        <input value={editItem.checkIn ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, checkIn: e.target.value } : prev)}
+                          placeholder="Check-in date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                      </div>
+                      <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                        <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                        <input value={editItem.checkOut ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, checkOut: e.target.value } : prev)}
+                          placeholder="Check-out date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <TimePicker label="Check-in time" value={editItem.time} onChange={v => setEditItem(prev => prev ? { ...prev, time: v } : prev)} />
+                      <TimePicker label="Check-out time" value={editItem.timeEnd} onChange={v => setEditItem(prev => prev ? { ...prev, timeEnd: v } : prev)} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Time</p>
+                    <div className="flex gap-2">
+                      <TimePicker label="Starts" value={editItem.time} onChange={v => setEditItem(prev => prev ? { ...prev, time: v } : prev)} />
+                      <TimePicker label="Ends" value={editItem.timeEnd} onChange={v => setEditItem(prev => prev ? { ...prev, timeEnd: v } : prev)} />
+                    </div>
+                  </div>
+                )}
+                {/* Status */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Status</p>
+                  <div className="flex gap-2">
+                    {(['none','pending','booked'] as const).map(s => (
+                      <button key={s} onClick={() => setEditItem(prev => prev ? { ...prev, status: s } : prev)}
+                        className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${editItem.status === s ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>
+                        {s === 'none' ? '—' : s === 'pending' ? 'Pending' : 'Booked'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Notes */}
+                <div className="mb-6">
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Notes</p>
+                  <textarea value={editItem.notes ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, notes: e.target.value } : prev)}
+                    rows={3} className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none resize-none placeholder:text-gray-400"
+                    placeholder="Who you went with, what you ordered…" />
+                </div>
+                {/* Save */}
+                <button onClick={async () => {
+                  if (!editItem || !selectedTrip) return;
+                  if (userId) {
+                    await updatePlanItem(editItem.id, {
+                      name: editItem.name, category: editItem.category,
+                      image_url: editItem.image ?? '',
+                      time_label: editItem.time ?? '', time_end: editItem.timeEnd ?? '',
+                      notes: editItem.notes ?? '',
+                      address: editItem.address ?? '', neighborhood: editItem.neighborhood ?? '',
+                      status: editItem.status ?? 'none',
+                      check_in: editItem.checkIn ?? '', check_out: editItem.checkOut ?? '',
+                    });
+                  }
+                  const updatedDays = selectedTrip.days.map(d => ({
+                    ...d, items: d.items.map(i => i.id === editItem.id ? editItem : i),
+                  }));
+                  const updated = { ...selectedTrip, days: updatedDays };
+                  setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                  setSelectedTrip(updated);
+                  // Keep detail view in sync
+                  if (detailItem?.id === editItem.id) setDetailItem(editItem);
+                  setShowEditItem(false);
+                }} className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold">
+                  Save changes
+                </button>
+                {/* Who's coming */}
+                {(() => {
+                  const itemInvitesForThis = itemInvites.filter(inv => inv.planItemId === editItem?.id);
+                  const collabs = selectedTrip?.collaborators ?? [];
+                  const hasAnyone = collabs.length > 0 || itemInvitesForThis.length > 0;
+                  return hasAnyone ? (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold text-gray-400 mb-2">Who's coming</p>
+                      <div className="flex flex-wrap gap-2">
+                        {collabs.map(c => (
+                          <div key={c.id} className="flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1.5">
+                            {c.avatar
+                              ? <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" />
+                              : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center text-[10px] font-bold text-gray-500">{c.name[0]}</div>
+                            }
+                            <span className="text-xs font-semibold text-gray-700">{c.name}</span>
+                          </div>
+                        ))}
+                        {itemInvitesForThis.map(inv => (
+                          <div key={inv.id} className="flex items-center gap-1.5 bg-gray-50 rounded-full px-3 py-1.5">
+                            {inv.invitedByAvatar
+                              ? <img src={inv.invitedByAvatar} alt={inv.invitedByName} className="w-5 h-5 rounded-full object-cover" />
+                              : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center text-[10px] font-bold text-gray-500">{inv.invitedByName[0]}</div>
+                            }
+                            <span className="text-xs font-semibold text-gray-700">{inv.invitedByName}</span>
+                            <span className={`text-[10px] font-semibold ${inv.status === 'accepted' ? 'text-green-500' : 'text-amber-500'}`}>
+                              {inv.status === 'accepted' ? '✓' : '…'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+                {/* Invite */}
+                <button onClick={async () => {
+                  setShowItemInvite(true);
+                  setItemInviteSearch('');
+                  setItemInviteSentTo([]);
+                  if (userId) {
+                    const [followers, following] = await Promise.all([getFollowerProfiles(userId), getFollowingProfiles(userId)]);
+                    const combined = [...followers, ...following].filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i);
+                    setItemInviteFollowList(combined);
+                    setItemInviteSuggestions(combined);
+                  }
+                }} className="w-full py-3.5 border border-gray-200 text-gray-700 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 mt-2">
+                  <UserPlus size={15} strokeWidth={2} /> Invite someone
+                </button>
+                {/* Delete */}
+                <button onClick={async () => {
+                  if (!editItem || !selectedTrip) return;
+                  if (userId) await deletePlanItem(editItem.id);
+                  const updatedDays = selectedTrip.days.map(d => ({ ...d, items: d.items.filter(i => i.id !== editItem.id) }));
+                  const updated = { ...selectedTrip, days: updatedDays };
+                  setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                  setSelectedTrip(updated);
+                  setShowEditItem(false);
+                }} className="w-full py-3 text-red-500 text-sm font-semibold mt-2">
+                  Remove from plan
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Item Invite Sheet */}
+        {showItemInvite && editItem && (
+          <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowItemInvite(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '75vh' }}>
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+              <div className="flex items-center px-5 pt-2 pb-3 flex-shrink-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-gray-900">Invite to {editItem.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">They'll see this as a standalone item in their Trips</p>
+                </div>
+                <button onClick={() => setShowItemInvite(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center ml-3 flex-shrink-0">
+                  <X size={15} strokeWidth={2} className="text-gray-500" />
+                </button>
+              </div>
+              {/* Search */}
+              <div className="px-5 pb-3 flex-shrink-0">
+                <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                  <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <input
+                    value={itemInviteSearch}
+                    onChange={e => {
+                      setItemInviteSearch(e.target.value);
+                      const q = e.target.value.toLowerCase();
+                      setItemInviteSuggestions(q
+                        ? itemInviteFollowList.filter(p => p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q))
+                        : itemInviteFollowList
+                      );
+                    }}
+                    placeholder="Search people…"
+                    className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                  />
+                </div>
+              </div>
+              {/* People list */}
+              <div className="flex-1 overflow-y-auto px-5 pb-8 space-y-1">
+                {itemInviteSuggestions.length === 0 && (
+                  <p className="text-center text-sm text-gray-400 py-8">
+                    {itemInviteFollowList.length === 0 ? 'Follow people to invite them' : 'No people found'}
+                  </p>
+                )}
+                {itemInviteSuggestions.map(person => (
+                  <div key={person.id} className="flex items-center gap-3 py-2.5">
+                    {person.avatarUrl
+                      ? <img src={person.avatarUrl} alt={person.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-500">{person.name[0]}</div>
+                    }
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{person.name}</p>
+                      <p className="text-xs text-gray-400">@{person.username}</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (itemInviteSentTo.includes(person.id) || !userId || !selectedTrip) return;
+                        setItemInviteSending(true);
+                        const dayIdx = editItemDayId ? selectedTrip.days.findIndex(d => d.id === editItemDayId) : -1;
+                        const eventDate = dayIdx >= 0 ? getTripDayLabel(selectedTrip, dayIdx) : '';
+                        await createItemInvite({
+                          planItemId: editItem.id,
+                          planId: selectedTrip.id,
+                          invitedBy: userId,
+                          invitedUserId: person.id,
+                          itemName: editItem.name,
+                          itemCategory: editItem.category,
+                          itemImageUrl: editItem.image ?? '',
+                          itemTime: editItem.time ?? '',
+                          itemTimeEnd: editItem.timeEnd ?? '',
+                          itemAddress: editItem.address ?? '',
+                          itemNeighborhood: editItem.neighborhood ?? '',
+                          itemNotes: editItem.notes ?? '',
+                          eventDate,
+                        });
+                        setItemInviteSentTo(prev => [...prev, person.id]);
+                        setItemInviteSending(false);
+                      }}
+                      disabled={itemInviteSentTo.includes(person.id) || itemInviteSending}
+                      className={`text-xs font-bold px-4 py-2 rounded-full transition-colors flex-shrink-0 ${
+                        itemInviteSentTo.includes(person.id)
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-900 text-white'
+                      }`}
+                    >
+                      {itemInviteSentTo.includes(person.id) ? '✓ Sent' : 'Invite'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -579,14 +2669,14 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
         <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
           <Search size={15} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
           <input
-            placeholder="Search saved places, trips..."
+            placeholder="Search saved places, plans..."
             className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
           />
         </div>
 
         {/* Tabs */}
         <div className="flex gap-6 border-b border-gray-100">
-          {(['Places', 'Collections', 'Trips', 'Map'] as SavedTab[]).map(tab => (
+          {([['Places', 'All saved'], ['Collections', 'Collections'], ['Trips', 'My plans'], ['Map', 'Map']] as [SavedTab, string][]).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -596,14 +2686,41 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
                   : 'text-gray-400'
               }`}
             >
-              {tab}
+              {label}
             </button>
           ))}
         </div>
       </div>
 
       {/* Places Tab */}
-      {activeTab === 'Places' && (
+      {activeTab === 'Places' && userId && (
+        <div className="pb-6">
+          {realSavedPlaces.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <span className="text-3xl">🔖</span>
+              </div>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">Nothing saved yet</p>
+              <p className="text-slate-400 text-sm text-center max-w-[200px]">Tap the bookmark icon on any place to save it here</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 px-4 pt-3">
+              {realSavedPlaces.map(place => (
+                <div key={place.id} className="relative rounded-2xl overflow-hidden cursor-pointer">
+                  <img src={place.photoUrl} alt={place.name} className="w-full aspect-square object-cover" />
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-2.5 pb-2.5 pt-6">
+                    <p className="text-white text-xs font-semibold leading-tight truncate">{place.name}</p>
+                    <p className="text-white/70 text-xs flex items-center gap-0.5 mt-0.5">
+                      <MapPin size={9} strokeWidth={1.5} />{place.city}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {activeTab === 'Places' && !userId && (
         <div className="pb-6">
           {isNewUser && savedPlaces.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 px-6">
@@ -615,28 +2732,30 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
             </div>
           )}
           {/* Category chips */}
-          <div className="flex gap-2 overflow-x-auto scrollbar-none px-4 pt-3 pb-3">
-            {placeCategories.map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => setPlaceCategory(cat.id)}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-sm font-medium transition-all ${
-                  placeCategory === cat.id
-                    ? 'bg-gray-900 border-gray-900 text-white'
-                    : 'bg-gray-50 border-gray-100 text-gray-600'
-                }`}
-              >
-                <span>{cat.emoji}</span>
-                <span>{cat.label}</span>
-              </button>
-            ))}
-          </div>
+          {savedPlaces.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto scrollbar-none px-4 pt-3 pb-3">
+              {placeCategories.map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => setPlaceCategory(cat.id)}
+                  className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-sm font-medium transition-all ${
+                    placeCategory === cat.id
+                      ? 'bg-gray-900 border-gray-900 text-white'
+                      : 'bg-gray-50 border-gray-100 text-gray-600'
+                  }`}
+                >
+                  <span>{cat.emoji}</span>
+                  <span>{cat.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {(() => {
             const filtered = placeCategory === 'all'
               ? savedPlaces
               : savedPlaces.filter(p => p.category === placeCategory);
-            return filtered.length === 0 ? (
+            return filtered.length === 0 && !(isNewUser && savedPlaces.length === 0) ? (
               <div className="flex flex-col items-center justify-center py-20 text-center px-8">
                 <p className="text-4xl mb-3">{placeCategories.find(c => c.id === placeCategory)?.emoji ?? '🔖'}</p>
                 <p className="text-base font-bold text-gray-900">{placeCategory === 'all' ? 'No saved places' : `No saved ${placeCategories.find(c => c.id === placeCategory)?.label.toLowerCase()}s`}</p>
@@ -663,13 +2782,16 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
 
       {/* Collections Tab */}
       {activeTab === 'Collections' && (
-        isNewUser && myCollections.length === 0 ? (
+        isNewUser && myCollections.length === 0 && dbCollections.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
               <span className="text-3xl">🗂️</span>
             </div>
             <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
             <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+            <button onClick={() => setShowNewCollection(true)} className="mt-5 flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold">
+              <Plus size={14} strokeWidth={2} /> New collection
+            </button>
           </div>
         ) : (
         <div className="px-4 pt-4 pb-6 space-y-6">
@@ -686,7 +2808,7 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
                   <p className="text-xs text-gray-400">{col.placeIds.length} places</p>
                 </div>
               ))}
-              <div className="cursor-pointer">
+              <div className="cursor-pointer" onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }}>
                 <div className="rounded-xl border-2 border-dashed border-gray-200 aspect-square flex items-center justify-center bg-gray-50">
                   <Plus size={24} strokeWidth={1.5} className="text-gray-300" />
                 </div>
@@ -731,83 +2853,142 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
 
       {/* Trips Tab */}
       {activeTab === 'Trips' && (
-        isNewUser ? (
+        plansLoading ? (
+          <div className="px-4 pt-8 space-y-3">
+            {[1,2,3].map(i => <div key={i} className="h-24 rounded-2xl bg-gray-100 animate-pulse" />)}
+          </div>
+        ) :
+        isNewUser && plans.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
               <span className="text-3xl">✈️</span>
             </div>
-            <p className="text-slate-800 font-semibold text-base mb-1.5">No trips planned</p>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No plans yet</p>
             <p className="text-slate-400 text-sm text-center max-w-[200px]">Start planning your next adventure and it'll appear here</p>
+            <button onClick={() => setShowNewPlan(true)} className="mt-5 flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold">
+              <Plus size={14} strokeWidth={2} /> New plan
+            </button>
           </div>
         ) : (
         <div className="px-4 pt-4 pb-6 space-y-6">
 
-          {/* Upcoming */}
-          {mockTrips.some(t => t.status === 'upcoming' || t.status === 'planning') && (
+          {/* Invited items */}
+          {itemInvites.length > 0 && (
             <div>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">Upcoming</p>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">📬 Invited to</p>
               <div className="space-y-3">
-                {mockTrips.filter(t => t.status === 'upcoming' || t.status === 'planning').map(trip => (
-                  <button
-                    key={trip.id}
-                    onClick={() => setSelectedTrip(trip)}
-                    className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left"
-                  >
-                    <img src={trip.coverImage} alt={trip.destination} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold text-gray-900">{trip.destination}</p>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                          trip.status === 'upcoming' ? 'bg-violet-100 text-violet-600' : 'bg-amber-100 text-amber-600'
-                        }`}>
-                          {trip.status === 'upcoming' ? 'Upcoming' : 'Planning'}
-                        </span>
+                {itemInvites.map(invite => (
+                  <div key={invite.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="flex items-start gap-3 p-3">
+                      {invite.itemImageUrl
+                        ? <img src={invite.itemImageUrl} alt={invite.itemName} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                        : <div className="w-14 h-14 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-2xl">{categoryEmoji[invite.itemCategory] ?? '📍'}</div>
+                      }
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-gray-900">{invite.itemName}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {categoryEmoji[invite.itemCategory] ?? '📍'} {categoryDisplayName[invite.itemCategory] ?? invite.itemCategory}
+                          {invite.itemNeighborhood ? ` · ${invite.itemNeighborhood}` : ''}
+                        </p>
+                        {invite.itemTime && (
+                          <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                            <Clock size={9} strokeWidth={1.5} />
+                            {invite.itemTime}{invite.itemTimeEnd ? ` – ${invite.itemTimeEnd}` : ''}
+                          </p>
+                        )}
+                        {invite.eventDate && (
+                          <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                            <CalendarDays size={9} strokeWidth={1.5} />{invite.eventDate}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-1">From <span className="font-semibold text-gray-600">{invite.invitedByName}</span></p>
                       </div>
-                      <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                        <CalendarDays size={10} strokeWidth={1.5} />{trip.dates}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {trip.days.length} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places
-                      </p>
                     </div>
-                    <ChevronRight size={16} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
-                  </button>
+                    {invite.status === 'pending' && (
+                      <div className="flex gap-2 px-3 pb-3">
+                        <button
+                          onClick={async () => {
+                            await updateItemInviteStatus(invite.id, 'accepted');
+                            setItemInvites(prev => prev.map(i => i.id === invite.id ? { ...i, status: 'accepted' } : i));
+                          }}
+                          className="flex-1 py-2 bg-gray-900 text-white text-xs font-bold rounded-xl"
+                        >Accept</button>
+                        <button
+                          onClick={async () => {
+                            await updateItemInviteStatus(invite.id, 'declined');
+                            setItemInvites(prev => prev.filter(i => i.id !== invite.id));
+                          }}
+                          className="flex-1 py-2 border border-gray-200 text-gray-500 text-xs font-semibold rounded-xl"
+                        >Decline</button>
+                      </div>
+                    )}
+                    {invite.status === 'accepted' && (
+                      <div className="px-3 pb-3">
+                        <p className="text-xs text-green-600 font-semibold">✓ Going</p>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* New Trip */}
-          <button className="w-full flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-2xl p-4">
-            <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
-              <Plane size={22} strokeWidth={1.5} className="text-gray-300" />
+          {/* New plan — always first */}
+          <button onClick={() => setShowNewPlan(true)} className="w-full flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-2xl p-4 text-left">
+            <div className="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center flex-shrink-0">
+              <Plus size={20} strokeWidth={1.5} className="text-gray-400" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-400">Plan a new trip</p>
-              <p className="text-xs text-gray-300 mt-0.5">Add destinations, days & places</p>
+              <p className="text-sm font-semibold text-gray-700">New plan</p>
+              <p className="text-xs text-gray-400 mt-0.5">A weekend, a trip, a day out, a single plan — anything</p>
             </div>
           </button>
 
-          {/* Past */}
-          {mockTrips.some(t => t.status === 'past') && (
+          {/* Someday */}
+          {plans.some(t => t.status === 'dreaming') && (
             <div>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">Past</p>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">✨ Want to do / see</p>
               <div className="space-y-3">
-                {mockTrips.filter(t => t.status === 'past').map(trip => (
-                  <button
-                    key={trip.id}
-                    onClick={() => setSelectedTrip(trip)}
-                    className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left opacity-50"
-                  >
-                    <img src={trip.coverImage} alt={trip.destination} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+                {plans.filter(t => t.status === 'dreaming').map(trip => (
+                  trip.description?.startsWith('[event]')
+                    ? <EventCard key={trip.id} trip={trip} onClick={() => { setSelectedEvent(trip); setShowEventSheet(true); }} />
+                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip); setPlanViewMode('itinerary'); }} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Coming up */}
+          {plans.some(t => t.status === 'planning' || t.status === 'upcoming') && (
+            <div>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">🗓 Coming up</p>
+              <div className="space-y-3">
+                {plans.filter(t => t.status === 'planning' || t.status === 'upcoming')
+                  .sort((a, b) => (parseTripStartDate(a.dates, a.status)?.getTime() ?? 0) - (parseTripStartDate(b.dates, b.status)?.getTime() ?? 0))
+                  .map(trip => (
+                  trip.description?.startsWith('[event]')
+                    ? <EventCard key={trip.id} trip={trip} onClick={() => { setSelectedEvent(trip); setShowEventSheet(true); }} />
+                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip); setPlanViewMode('itinerary'); }} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Past */}
+          {plans.some(t => t.status === 'past') && (
+            <div>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">✅ Past</p>
+              <div className="space-y-2.5">
+                {plans.filter(t => t.status === 'past')
+                  .sort((a, b) => (parseTripStartDate(b.dates, b.status)?.getTime() ?? 0) - (parseTripStartDate(a.dates, a.status)?.getTime() ?? 0))
+                  .map(trip => (
+                  <button key={trip.id} onClick={() => { setSelectedTrip(trip); setPlanViewMode('itinerary'); }}
+                    className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left">
+                    <img src={trip.coverImage} alt={trip.destination} className="w-14 h-14 rounded-xl object-cover flex-shrink-0 opacity-40" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-gray-900">{trip.destination}</p>
-                      <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                        <CalendarDays size={10} strokeWidth={1.5} />{trip.dates}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {trip.days.length} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places
-                      </p>
+                      <p className="text-sm font-bold text-gray-700">{trip.destination}</p>
+                      <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5"><CalendarDays size={10} strokeWidth={1.5} />{trip.dates}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{countDaysFromDates(trip.dates)} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places</p>
                     </div>
                     <ChevronRight size={16} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
                   </button>
@@ -818,6 +2999,571 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
 
         </div>
         )
+      )}
+
+      {/* New Collection Sheet */}
+      {showNewCollection && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewCollection(false)} />
+          <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10">
+            <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <button onClick={() => setShowNewCollection(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+              <X size={15} strokeWidth={2} className="text-gray-500" />
+            </button>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">New Collection</p>
+            {/* Emoji + Name row */}
+            <div className="flex gap-3 mb-4">
+              <input
+                value={newColEmoji}
+                onChange={e => setNewColEmoji(e.target.value)}
+                placeholder="🗂️"
+                className="w-14 h-14 bg-gray-50 rounded-2xl text-2xl text-center outline-none"
+                maxLength={2}
+              />
+              <input
+                autoFocus
+                value={newColName}
+                onChange={e => setNewColName(e.target.value)}
+                placeholder="Collection name"
+                className="flex-1 bg-gray-50 rounded-2xl px-4 py-3 text-sm font-semibold text-gray-900 outline-none placeholder:text-gray-400 placeholder:font-normal"
+              />
+            </div>
+            {/* Description */}
+            <textarea
+              value={newColDesc}
+              onChange={e => setNewColDesc(e.target.value)}
+              placeholder="Description (optional)"
+              rows={2}
+              className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none resize-none placeholder:text-gray-400 mb-5"
+            />
+            <button
+              disabled={!newColName.trim() || newColSaving}
+              onClick={async () => {
+                if (!newColName.trim() || !userId) return;
+                setNewColSaving(true);
+                const { data } = await createCollection(userId, {
+                  name: newColName.trim(),
+                  emoji: newColEmoji || '🗂️',
+                  description: newColDesc.trim(),
+                });
+                if (data) setDbCollections(prev => [data, ...prev]);
+                setNewColSaving(false);
+                setShowNewCollection(false);
+              }}
+              className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold disabled:opacity-40"
+            >
+              {newColSaving ? 'Creating…' : 'Create collection'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Event Detail Bottom Sheet ── */}
+      {showEventSheet && selectedEvent && (() => {
+        const ev = selectedEvent;
+        const evDesc = ev.description?.replace('[event]', '').replace(/\[cat:[^\]]*\]/g, '').replace(/\[time:[^\]]*\]/g, '').replace(/\[link:[^\]]*\]/g, '').trim() ?? '';
+        const evItems = ev.days.flatMap(d => d.items).sort((a, b) => parseTimeToMinutes(a.time ?? '') - parseTimeToMinutes(b.time ?? ''));
+        const hasPhoto = ev.coverImage && !ev.coverImage.includes('unsplash.com/photo-1476514525535');
+        return (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowEventSheet(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col overflow-hidden" style={{ maxHeight: '88vh' }}>
+              {/* Photo / emoji header */}
+              <div className="relative flex-shrink-0">
+                {hasPhoto
+                  ? <img src={ev.coverImage} alt={ev.destination} className="w-full object-cover rounded-t-3xl" style={{ height: '48vw', maxHeight: 220, minHeight: 160 }} />
+                  : <div className="w-full bg-gray-950 flex items-center justify-center rounded-t-3xl" style={{ height: '36vw', maxHeight: 180, minHeight: 130 }}>
+                      <span className="text-6xl">🎟️</span>
+                    </div>
+                }
+                <button onClick={() => setShowEventSheet(false)} className="absolute top-4 left-4 w-9 h-9 rounded-full bg-black/40 flex items-center justify-center">
+                  <X size={15} strokeWidth={2.5} className="text-white" />
+                </button>
+                <div className="absolute top-4 right-4 flex gap-2">
+                  <button onClick={async () => {
+                    if (!confirm('Delete this event?')) return;
+                    if (userId) await dbDeletePlan(ev.id);
+                    setPlans(prev => prev.filter(p => p.id !== ev.id));
+                    setShowEventSheet(false);
+                    setSelectedEvent(null);
+                  }} className="w-9 h-9 rounded-full bg-black/40 flex items-center justify-center">
+                    <X size={15} strokeWidth={2} className="text-red-400" />
+                  </button>
+                  <button onClick={() => openEditPlan(ev)} className="flex items-center gap-1.5 bg-black/40 text-white text-sm font-semibold px-4 py-2 rounded-full">
+                    <Pencil size={12} strokeWidth={2} /> Edit
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-5 pt-5 pb-10">
+                <h2 className="text-2xl font-black text-gray-900 leading-tight mb-1">{ev.destination}</h2>
+                {ev.dates && (
+                  <p className="text-sm text-gray-400 flex items-center gap-1.5 mb-1">
+                    <CalendarDays size={13} strokeWidth={1.5} />{ev.dates}
+                  </p>
+                )}
+                {ev.country && (
+                  <p className="text-sm text-gray-400 flex items-center gap-1.5 mb-1">
+                    <MapPin size={13} strokeWidth={1.5} />{ev.country}
+                  </p>
+                )}
+                {evDesc && <p className="text-sm text-gray-500 mt-1 mb-3">{evDesc}</p>}
+
+                {evItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <p className="text-sm font-bold text-gray-900 mb-1">Nothing added yet</p>
+                    <p className="text-xs text-gray-400 mb-5">Add places, tickets or notes</p>
+                    <button onClick={() => { setShowEventSheet(false); setSelectedTrip(ev); openAddPlace(null); }} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold">
+                      <Plus size={14} strokeWidth={2} /> Add a place / plan
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 mt-4">
+                    {evItems.map(item => (
+                      <button key={item.id} onClick={() => { setDetailItem(item); setDetailItemDayId(ev.days.find(d => d.items.some(i => i.id === item.id))?.id ?? null); setShowItemDetail(true); }} className="w-full bg-gray-50 rounded-2xl p-3 text-left">
+                        <div className="flex items-center gap-3">
+                          {item.image
+                            ? <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                            : <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-2xl">{categoryEmoji[item.category] ?? '📍'}</div>
+                          }
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}{item.neighborhood ? ` · ${item.neighborhood}` : ''}</p>
+                            {item.time && <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><Clock size={9} strokeWidth={1.5} />{item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}</p>}
+                          </div>
+                          {(item.booked || item.status === 'booked') ? <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-1 rounded-full flex-shrink-0">Booked</span>
+                            : item.status === 'pending' ? <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-1 rounded-full flex-shrink-0">Pending</span> : null}
+                        </div>
+                      </button>
+                    ))}
+                    <button onClick={() => { setShowEventSheet(false); setSelectedTrip(ev); openAddPlace(ev.days[0]?.id ?? null); }} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                      <Plus size={12} strokeWidth={2} /> Add place / plan
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Edit Plan Sheet (for events, rendered at root level) */}
+      {showEditPlan && editPlanTrip && (
+        <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditPlan(false)} />
+          <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-center mb-3"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <button onClick={() => setShowEditPlan(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+              <X size={15} strokeWidth={2} className="text-gray-500" />
+            </button>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit event</p>
+            <input autoFocus value={editPlanName} onChange={e => setEditPlanName(e.target.value)} placeholder="Title" className="w-full text-2xl font-black text-gray-900 outline-none placeholder:text-gray-200 mb-5 bg-transparent" />
+            <div className="space-y-2 mb-5">
+              <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                <AlignLeft size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                <input value={editPlanDesc} onChange={e => setEditPlanDesc(e.target.value)} placeholder="Description (optional)" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+              </div>
+              <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                <input value={editPlanLocation} onChange={e => setEditPlanLocation(e.target.value)} placeholder="Location (optional)" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+              </div>
+            </div>
+            <button onClick={async () => {
+              const updated: Trip = { ...editPlanTrip, destination: editPlanName || editPlanTrip.destination, country: editPlanLocation || editPlanTrip.country, description: editPlanDesc };
+              if (userId) await dbUpdatePlan(editPlanTrip.id, { title: updated.destination, country: updated.country, dates: editPlanTrip.dates, description: updated.description ?? '', status: editPlanTrip.status, cover_image_url: editPlanTrip.coverImage });
+              setPlans(prev => prev.map(p => p.id === editPlanTrip.id ? updated : p));
+              setSelectedEvent(updated);
+              setShowEditPlan(false);
+            }} className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold mb-2">Save changes</button>
+            <button onClick={async () => {
+              if (!confirm('Delete this event?')) return;
+              if (userId) await dbDeletePlan(editPlanTrip.id);
+              setPlans(prev => prev.filter(p => p.id !== editPlanTrip.id));
+              setShowEditPlan(false); setShowEventSheet(false); setSelectedEvent(null);
+            }} className="w-full py-3 text-red-500 text-sm font-semibold">Delete event</button>
+          </div>
+        </div>
+      )}
+
+      {/* New Plan Sheet */}
+      {showNewPlan && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewPlan(false)} />
+          <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
+            {/* Handle + close — fixed at top */}
+            <div className="flex-shrink-0 px-5 pt-4 pb-2">
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 rounded-full bg-gray-200" />
+              </div>
+              <button onClick={() => setShowNewPlan(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                <X size={15} strokeWidth={2} className="text-gray-500" />
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-5 pb-10">
+
+            {/* Type toggle */}
+            <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5 mb-5 w-fit">
+              {(['trip', 'event'] as const).map(t => (
+                <button key={t} onClick={() => setNewPlanType(t)}
+                  className={`px-5 py-1.5 rounded-full text-xs font-semibold transition-colors ${newPlanType === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
+                  {t === 'trip' ? '🧳 Trip' : '🎟️ Event'}
+                </button>
+              ))}
+            </div>
+
+            {/* Shared title input */}
+            <input
+              autoFocus
+              value={newPlanName}
+              onChange={e => {
+                const val = e.target.value;
+                setNewPlanName(val);
+                if (coverImageTimerRef.current) clearTimeout(coverImageTimerRef.current);
+                if (val.trim().length > 2) {
+                  const query = val.trim();
+                  coverImageTimerRef.current = setTimeout(async () => {
+                    try {
+                      const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+                        body: JSON.stringify({ input: query, languageCode: 'en' }),
+                      });
+                      const acData = await acRes.json();
+                      const placeId = acData?.suggestions?.[0]?.placePrediction?.placeId;
+                      if (placeId) {
+                        const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=photos`, {
+                          headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'photos' },
+                        });
+                        const detData = await detRes.json();
+                        const photoName = detData?.photos?.[0]?.name;
+                        if (photoName) {
+                          setNewPlanCoverImage(`https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}`);
+                          return;
+                        }
+                      }
+                    } catch (_) { /* fall through */ }
+                    setNewPlanCoverImage(`https://source.unsplash.com/featured/800x500/?${encodeURIComponent(query)}`);
+                  }, 600);
+                }
+              }}
+              placeholder="Title"
+              className="w-full text-2xl font-black text-gray-900 outline-none placeholder:text-gray-200 mb-5 bg-transparent"
+            />
+
+            {newPlanType === 'trip' ? (
+              /* ── TRIP form ── */
+              <>
+                {/* Date range */}
+                <div className="mb-2">
+                  <button onClick={() => setShowCalendar(v => !v)} className="w-full flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 text-left">
+                    <CalendarDays size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <span className={`flex-1 text-sm ${dateRange?.from ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
+                      {dateRange?.from ? formatDateRange(dateRange) : 'Dates?'}
+                    </span>
+                    {dateRange?.from && (
+                      <span onClick={e => { e.stopPropagation(); setDateRange(undefined); setNewPlanDates(''); }} className="text-gray-300"><X size={13} strokeWidth={2} /></span>
+                    )}
+                  </button>
+                  {showCalendar && (
+                    <div className="curio-cal mt-1 rounded-xl overflow-hidden bg-gray-50 flex justify-center">
+                      <style>{`
+                        .curio-cal .rdp-range_start { background: linear-gradient(to right, transparent 50%, #ffedd5 50%); }
+                        .curio-cal .rdp-range_end   { background: linear-gradient(to left,  transparent 50%, #ffedd5 50%); }
+                        .curio-cal .rdp-range_middle { background: #ffedd5; }
+                        .curio-cal .rdp-range_start button { background: #f97316 !important; color: white !important; border-radius: 9999px !important; }
+                        .curio-cal .rdp-range_end   button { background: #f97316 !important; color: white !important; border-radius: 9999px !important; }
+                        .curio-cal .rdp-range_middle button { background: transparent !important; color: #c2410c !important; border-radius: 0 !important; }
+                      `}</style>
+                      <DayPicker mode="range" selected={dateRange}
+                        onSelect={(range) => {
+                          setDateRange(range);
+                          if (range?.from && range?.to && range.to.getTime() !== range.from.getTime()) { setNewPlanDates(formatDateRange(range)); setShowCalendar(false); }
+                          else if (range?.from) setNewPlanDates(formatDateRange(range));
+                        }}
+                        classNames={{ root: 'p-4 w-full relative', month: 'w-full', month_caption: 'flex items-center mb-3', caption_label: 'text-sm font-bold text-gray-900', nav: 'absolute top-4 right-4 flex gap-2 items-center', button_previous: 'w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 transition-colors', button_next: 'w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 transition-colors', month_grid: 'w-full border-collapse', weekdays: 'flex mb-1', weekday: 'flex-1 text-center text-xs text-gray-400 font-medium py-1', week: 'flex', day: 'flex-1 flex items-center justify-center p-0.5', day_button: 'w-8 h-8 flex items-center justify-center rounded-full text-sm text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer', today: 'font-bold', outside: 'text-gray-200', disabled: 'text-gray-200 cursor-not-allowed' }}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2 mb-5">
+                  <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                    <AlignLeft size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <input value={newPlanDesc} onChange={e => setNewPlanDesc(e.target.value)} placeholder="Description (optional)" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                  </div>
+                  <LocationSearch value={newPlanLocation} onChange={setNewPlanLocation} onCoverImage={setNewPlanCoverImage} />
+                  <div className="flex items-start gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                    <Users size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      {newPlanCollabs.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {newPlanCollabs.map(c => (
+                            <span key={c} className="flex items-center gap-1 bg-white border border-gray-200 text-xs text-gray-600 font-medium px-2 py-1 rounded-full">
+                              @{c}<button onClick={() => setNewPlanCollabs(prev => prev.filter(x => x !== c))}><X size={10} strokeWidth={2} className="text-gray-400" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <input value={newPlanCollabInput} onChange={e => setNewPlanCollabInput(e.target.value)}
+                        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ',') && newPlanCollabInput.trim()) { e.preventDefault(); const val = newPlanCollabInput.trim().replace(/^@/, ''); if (val && !newPlanCollabs.includes(val)) setNewPlanCollabs(prev => [...prev, val]); setNewPlanCollabInput(''); } }}
+                        placeholder="Add collaborators (optional)" className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* ── EVENT form — looks like Add Place ── */
+              <div className="space-y-4 mb-5">
+                {/* Single date */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Date</p>
+                  <button onClick={() => setShowEventSingleCal(v => !v)} className="w-full flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 text-left">
+                    <CalendarDays size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <span className={`flex-1 text-sm ${eventSingleDate ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
+                      {eventSingleDate ? eventSingleDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Pick a date'}
+                    </span>
+                    {eventSingleDate && <span onClick={e => { e.stopPropagation(); setEventSingleDate(undefined); }} className="text-gray-300"><X size={13} strokeWidth={2} /></span>}
+                  </button>
+                  {showEventSingleCal && (
+                    <div className="curio-cal mt-1 rounded-xl overflow-hidden bg-gray-50 flex justify-center">
+                      <DayPicker mode="single" selected={eventSingleDate}
+                        onSelect={(d) => { setEventSingleDate(d ?? undefined); setShowEventSingleCal(false); }}
+                        classNames={{ root: 'p-4 w-full relative', month: 'w-full', month_caption: 'flex items-center mb-3', caption_label: 'text-sm font-bold text-gray-900', nav: 'absolute top-4 right-4 flex gap-2 items-center', button_previous: 'w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 transition-colors', button_next: 'w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 transition-colors', month_grid: 'w-full border-collapse', weekdays: 'flex mb-1', weekday: 'flex-1 text-center text-xs text-gray-400 font-medium py-1', week: 'flex', day: 'flex-1 flex items-center justify-center p-0.5', day_button: 'w-8 h-8 flex items-center justify-center rounded-full text-sm text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer', selected: '!bg-gray-900 !text-white !rounded-full', today: 'font-bold', outside: 'text-gray-200', disabled: 'text-gray-200 cursor-not-allowed' }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Address search */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Address <span className="font-normal text-gray-400">(optional)</span></p>
+                  <div className="relative">
+                    <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                      <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                      <input
+                        value={newEventAddress}
+                        onChange={async e => {
+                          const val = e.target.value;
+                          setNewEventAddress(val);
+                          if (newEventAddressTimerRef.current) clearTimeout(newEventAddressTimerRef.current);
+                          if (val.trim().length > 2) {
+                            setNewEventAddressLoading(true);
+                            newEventAddressTimerRef.current = setTimeout(async () => {
+                              try {
+                                const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+                                  body: JSON.stringify({ input: val.trim(), languageCode: 'en' }),
+                                });
+                                const data = await res.json();
+                                setNewEventAddressSuggestions((data.suggestions ?? []).slice(0, 4).map((s: { placePrediction: { placeId: string; text: { text: string } } }) => ({ placeId: s.placePrediction.placeId, label: s.placePrediction.text.text })));
+                              } catch { setNewEventAddressSuggestions([]); }
+                              setNewEventAddressLoading(false);
+                            }, 400);
+                          } else {
+                            setNewEventAddressSuggestions([]);
+                            setNewEventAddressLoading(false);
+                          }
+                        }}
+                        placeholder="Search venue, address..."
+                        className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                      />
+                    </div>
+                    {newEventAddressSuggestions.length > 0 && (
+                      <div className="mt-1 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+                        {newEventAddressSuggestions.map(s => (
+                          <button key={s.placeId} onClick={async () => {
+                            setNewEventAddress(s.label);
+                            setNewEventAddressSuggestions([]);
+                            try {
+                              const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
+                                headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'addressComponents,photos', 'X-Goog-LanguageCode': 'en' },
+                              });
+                              const data = await res.json();
+                              const nbhdText = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
+                              if (nbhdText) setNewEventNeighborhood(nbhdText);
+                              const photoName = data.photos?.[0]?.name;
+                              if (photoName) setNewPlanCoverImage(`https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}`);
+                            } catch { /* ignore */ }
+                          }} className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-50 last:border-0">
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Neighborhood */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Neighborhood <span className="font-normal text-gray-400">(optional)</span></p>
+                  <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                    <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <input value={newEventNeighborhood} onChange={e => setNewEventNeighborhood(e.target.value)} placeholder="Auto-filled from search" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                  </div>
+                </div>
+
+                {/* Photo */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Photo <span className="font-normal text-gray-400">(optional)</span></p>
+                  {newPlanCoverImage ? (
+                    <div className="relative h-28 rounded-xl overflow-hidden">
+                      <img src={newPlanCoverImage} alt="" className="w-full h-full object-cover" />
+                      <button onClick={() => setNewPlanCoverImage('')} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 flex items-center justify-center"><X size={11} strokeWidth={2} className="text-white" /></button>
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed border-gray-200 rounded-xl py-6 flex flex-col items-center gap-1 text-gray-300">
+                      <Plus size={20} strokeWidth={1.5} />
+                      <p className="text-xs">Add your own photo</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Time */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Time <span className="font-normal text-gray-400">(optional)</span></p>
+                  <div className="flex gap-2">
+                    <TimePicker label="Starts" value={newEventTimeStart} onChange={setNewEventTimeStart} />
+                    <TimePicker label="Ends" value={newEventTimeEnd} onChange={setNewEventTimeEnd} />
+                  </div>
+                </div>
+
+                {/* Type chips */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-2">Type <span className="font-normal text-gray-400">(optional)</span></p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: 'restaurant', label: '🍽 Restaurant' }, { key: 'hotel', label: '🏨 Stay' }, { key: 'cafe', label: '☕ Café' },
+                      { key: 'bar', label: '🍸 Bar' }, { key: 'attraction', label: '🏛️ Attraction' }, { key: 'nature', label: '🌿 Nature' },
+                      { key: 'shop', label: '🛍 Shop' }, { key: 'experience', label: '🗺️ Experience' }, { key: 'sports', label: '🎾 Sports' },
+                      { key: 'flight', label: '✈️ Flight' }, { key: 'transport', label: '🚗 Transport' }, { key: 'event', label: '🎟️ Event' },
+                      { key: 'beach', label: '🏖️ Beach' }, { key: 'food', label: '🍕 Food' }, { key: 'wellness', label: '💆 Wellness' },
+                    ].map(chip => (
+                      <button key={chip.key} onClick={() => setNewEventCategory(prev => prev === chip.key ? '' : chip.key)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${newEventCategory === chip.key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Notes <span className="font-normal text-gray-400">(optional)</span></p>
+                  <textarea
+                    value={newEventNotes}
+                    onChange={e => setNewEventNotes(e.target.value)}
+                    placeholder="Any details, reminders, confirmation numbers..."
+                    rows={3}
+                    className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none placeholder:text-gray-400 resize-none"
+                  />
+                </div>
+
+                {/* Invite link */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Invite link <span className="font-normal text-gray-400">(optional)</span></p>
+                  <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
+                    <Link size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <input
+                      value={newEventInviteLink}
+                      onChange={e => setNewEventInviteLink(e.target.value)}
+                      placeholder="Paste ticket or event link..."
+                      className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Invite people */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Invite people <span className="font-normal text-gray-400">(optional)</span></p>
+                  <div className="flex items-start gap-3 bg-gray-50 rounded-xl px-4 py-3">
+                    <Users size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      {newEventCollabs.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {newEventCollabs.map(c => (
+                            <span key={c} className="flex items-center gap-1 bg-white border border-gray-200 text-xs text-gray-600 font-medium px-2 py-1 rounded-full">
+                              @{c}
+                              <button onClick={() => setNewEventCollabs(prev => prev.filter(x => x !== c))}><X size={10} strokeWidth={2} className="text-gray-400" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <input
+                        value={newEventCollabInput}
+                        onChange={e => setNewEventCollabInput(e.target.value)}
+                        onKeyDown={e => {
+                          if ((e.key === 'Enter' || e.key === ',') && newEventCollabInput.trim()) {
+                            e.preventDefault();
+                            const val = newEventCollabInput.trim().replace(/^@/, '');
+                            if (val && !newEventCollabs.includes(val)) setNewEventCollabs(prev => [...prev, val]);
+                            setNewEventCollabInput('');
+                          }
+                        }}
+                        placeholder="Add @username or email..."
+                        className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={async () => {
+                if (!newPlanName.trim()) return;
+                const defaultCover = 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80';
+                const coverImage = newPlanCoverImage || defaultCover;
+
+                let dates = '';
+                let status: Trip['status'] = 'dreaming';
+                if (newPlanType === 'event') {
+                  if (eventSingleDate) {
+                    dates = eventSingleDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    status = eventSingleDate >= new Date(new Date().setHours(0,0,0,0)) ? 'upcoming' : 'past';
+                  }
+                } else {
+                  dates = newPlanDates.trim();
+                  status = dateRange?.from ? (dateRange.from >= new Date(new Date().setHours(0,0,0,0)) ? 'upcoming' : 'past') : 'dreaming';
+                }
+
+                const descWithType = newPlanType === 'event'
+                  ? `[event]${newEventCategory ? `[cat:${newEventCategory}]` : ''}${newEventTimeStart ? `[time:${newEventTimeStart}${newEventTimeEnd ? `-${newEventTimeEnd}` : ''}]` : ''}${newEventInviteLink ? `[link:${newEventInviteLink}]` : ''}${newEventNotes.trim()}`
+                  : newPlanDesc.trim();
+                const location = newPlanType === 'event' ? (newEventNeighborhood || newEventAddress) : newPlanLocation.trim();
+
+                let newPlan: Trip;
+                if (userId) {
+                  const dbPlan = await dbCreatePlan(userId, { title: newPlanName.trim(), country: location, dates, description: descWithType, cover_image_url: coverImage, status });
+                  if (!dbPlan) return;
+                  newPlan = { id: dbPlan.id, destination: dbPlan.title, country: dbPlan.country, dates: dbPlan.dates, coverImage, status: dbPlan.status, description: dbPlan.description, days: [], collaborators: [] };
+                } else {
+                  newPlan = { id: `plan-${Date.now()}`, destination: newPlanName.trim(), country: location, dates, coverImage, status, days: [] };
+                }
+                setPlans(prev => [newPlan, ...prev]);
+                setNewPlanName(''); setNewPlanDest(''); setNewPlanDates('');
+                setNewPlanDesc(''); setNewPlanLocation(''); setNewPlanCoverImage(''); setNewPlanCollabs([]); setNewPlanCollabInput('');
+                setDateRange(undefined); setEventSingleDate(undefined); setNewEventAddress(''); setNewEventNeighborhood(''); setNewEventCategory('');
+                setNewEventTimeStart(''); setNewEventTimeEnd(''); setNewEventNotes(''); setNewEventInviteLink(''); setNewEventCollabs([]); setNewEventCollabInput('');
+                setShowNewPlan(false);
+                if (newPlanType === 'event') {
+                  setSelectedEvent(newPlan);
+                  setShowEventSheet(true);
+                } else {
+                  setSelectedTrip(newPlan);
+                  setPlanViewMode('itinerary');
+                }
+              }}
+              disabled={!newPlanName.trim()}
+              className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold disabled:opacity-30 transition-opacity"
+            >
+              Let's go
+            </button>
+            </div> {/* end scrollable content */}
+          </div>
+        </div>
       )}
 
       {/* Map Tab */}

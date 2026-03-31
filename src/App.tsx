@@ -8,7 +8,8 @@ import Saved from './pages/Saved';
 import Profile from './pages/Profile';
 import Auth from './pages/Auth';
 import Onboarding from './pages/Onboarding';
-import { supabase, getProfile } from './lib/supabase';
+import PublicCollection from './pages/PublicCollection';
+import { supabase, getProfile, addCollaborator } from './lib/supabase';
 
 type AuthStage = 'loading' | 'auth' | 'onboarding' | 'app';
 
@@ -24,6 +25,10 @@ export default function App() {
   const [pageResetKey, setPageResetKey] = useState(0);
   const [showMessages, setShowMessages] = useState(false);
   const [postToast, setPostToast] = useState<PostToast | null>(null);
+  const [publicCollectionId, setPublicCollectionId] = useState<string | null>(() => {
+    const match = window.location.pathname.match(/^\/collection\/([^/]+)$/);
+    return match ? match[1] : null;
+  });
 
   const handleTabChange = (tab: Tab) => {
     if (tab === activeTab) {
@@ -66,8 +71,12 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleAuth = (user: AppUser, isNewUser: boolean) => {
+  const handleAuth = async (user: AppUser, isNewUser: boolean) => {
     setAppUser(user);
+    // If user came via a collection invite link, add them as collaborator
+    if (publicCollectionId) {
+      await addCollaborator(publicCollectionId, user.id, user.id);
+    }
     setAuthStage(isNewUser ? 'onboarding' : 'app');
   };
 
@@ -93,6 +102,33 @@ export default function App() {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <p className="text-4xl font-black text-gray-900 tracking-tight animate-pulse">curio</p>
+      </div>
+    );
+  }
+
+  // ── Public collection (no auth needed to view) ────────────────────
+  if (publicCollectionId) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex justify-center items-start">
+        <div className="w-full max-w-sm bg-white min-h-screen relative shadow-2xl overflow-y-auto">
+          {authStage === 'auth' ? (
+            // Not logged in — show collection with sign-up CTA
+            <PublicCollection
+              collectionId={publicCollectionId}
+              appUser={null}
+              onBack={() => { setPublicCollectionId(null); window.history.pushState({}, '', '/'); }}
+              onSignUp={() => setAuthStage('auth')}
+            />
+          ) : (
+            // Logged in — show collection with join/collaborator CTA
+            <PublicCollection
+              collectionId={publicCollectionId}
+              appUser={appUser}
+              onBack={() => { setPublicCollectionId(null); window.history.pushState({}, '', '/'); }}
+              onSignUp={() => {}}
+            />
+          )}
+        </div>
       </div>
     );
   }
@@ -143,7 +179,7 @@ export default function App() {
           />
         );
       case 'saved':
-        return <Saved key={pageResetKey} isNewUser={appUser?.isDemo === false} />;
+        return <Saved key={pageResetKey} userId={appUser?.id} userAvatar={appUser?.avatar} isNewUser={appUser?.isDemo === false} />;
       case 'profile':
         return <Profile key={pageResetKey} onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates: { name: string; username: string; avatar: string | null; bio: string; location: string }) => setAppUser(prev => prev ? { ...prev, name: updates.name, username: updates.username, avatar: updates.avatar, bio: updates.bio, location: updates.location } : prev)} onFollowingCountChange={(delta) => setAppUser(prev => prev ? { ...prev, followingCount: prev.followingCount + delta } : prev)} />;
     }

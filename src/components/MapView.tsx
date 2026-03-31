@@ -10,7 +10,7 @@ L.Icon.Default.mergeOptions({
 
 const createDotIcon = () =>
   L.divIcon({
-    html: `<div style="width:14px;height:14px;background:#7C3AED;border:2.5px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(124,58,237,0.5)"></div>`,
+    html: `<div style="width:14px;height:14px;background:#F97316;border:2.5px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(249,115,22,0.5)"></div>`,
     className: '',
     iconSize: [14, 14],
     iconAnchor: [7, 7],
@@ -39,11 +39,9 @@ function FitBounds({ places }: { places: MapPlace[] }) {
 function FitWorld() {
   const map = useMap();
   useEffect(() => {
-    // Get the zoom that fits the world width, then add 10% (log2(1.1) ≈ 0.137)
     const baseZoom = map.getBoundsZoom([[-58, -178], [72, 178]]);
     const zoom = baseZoom + Math.log2(1.1);
     const containerHeight = map.getSize().y;
-    // Position so the southernmost land tip (~-56°) sits at the bottom edge
     const southPt = map.project([-56, 0], zoom);
     const centerY = southPt.y - containerHeight / 2;
     const center = map.unproject([map.project([0, 0], zoom).x, centerY], zoom);
@@ -51,6 +49,42 @@ function FitWorld() {
     map.setMinZoom(zoom);
   }, [map]);
   return null;
+}
+
+function ZoomControls() {
+  const map = useMap();
+  return (
+    <div
+      style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 4 }}
+    >
+      <button
+        onClick={() => map.zoomIn()}
+        style={{
+          width: 32, height: 32, borderRadius: 10, background: 'white',
+          border: 'none', padding: 0, boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
+          fontSize: 18, fontWeight: 300, color: '#374151', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <line x1="6" y1="0" x2="6" y2="12" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+          <line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      </button>
+      <button
+        onClick={() => map.zoomOut()}
+        style={{
+          width: 32, height: 32, borderRadius: 10, background: 'white',
+          border: 'none', padding: 0, boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 interface Props {
@@ -65,9 +99,9 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
     <MapContainer
       center={center}
       zoom={zoom}
-      style={{ height, width: '100%', background: '#D5DADC' }}
+      style={{ height, width: '100%', background: '#D5DADC', position: 'relative' }}
       className="rounded-xl z-0"
-      zoomControl={true}
+      zoomControl={false}
       attributionControl={false}
       zoomSnap={0}
       maxBounds={[[-60, -220], [72, 220]]}
@@ -77,6 +111,7 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       <TileLayer url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png" minZoom={5} />
       {places.length === 0 && <FitWorld />}
       {places.length > 1 && <FitBounds places={places} />}
+      <ZoomControls />
       {places.map(place => (
         <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon()}>
           <Popup>

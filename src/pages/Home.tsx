@@ -885,7 +885,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                         {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-gray-900 truncate">{place.name}</p>
-                          <p className="text-[11px] text-gray-400 truncate">{place.city}, {place.country}</p>
+                          <p className="text-[11px] text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
                         </div>
                         {userCollections.length > 0 && (
                           <button

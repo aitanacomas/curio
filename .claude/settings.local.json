@@ -98,7 +98,30 @@
       "Bash(find /Users/aitanacomas/Desktop/Social Media App/src -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) -exec wc -l {} +)",
       "Bash(grep -E '\\\\.\\(jpg|jpeg|png|gif|webp\\)$')",
       "Bash(vercel --prod)",
-      "Bash(vercel env:*)"
+      "Bash(vercel env:*)",
+      "Bash(netlify deploy:*)",
+      "Bash(./node_modules/.bin/netlify deploy:*)",
+      "Bash(npm list:*)",
+      "Bash(zip -r deploy.zip dist/)",
+      "Bash(GIT_TRACE=1 git commit -m \"test\")",
+      "Bash(ls \"/Users/aitanacomas/Desktop/Social Media App/\"*.env*)",
+      "Bash(vercel ls:*)",
+      "WebFetch(domain:www.google.com)",
+      "WebFetch(domain:en.foursquare.com)",
+      "WebFetch(domain:www.yelp.com)",
+      "WebFetch(domain:www.openstreetmap.org)",
+      "WebFetch(domain:nominatim.openstreetmap.org)",
+      "WebFetch(domain:www.instagram.com)",
+      "WebFetch(domain:maps.googleapis.com)",
+      "WebFetch(domain:places.googleapis.com)",
+      "Bash(curl -s -X POST \"https://places.googleapis.com/v1/places:searchText\" -H \"Content-Type: application/json\" -H \"X-Goog-Api-Key: AIzaSyAj0eDf6_qT-suH_6wiJlvb9AJ_4zd8KyM\" -H \"X-Goog-FieldMask: places.displayName,places.location,places.formattedAddress\" -d '{\"\"textQuery\"\": \"\"Casa Simera Polanco Mexico City\"\"}')",
+      "Bash(curl -s -X POST \"https://places.googleapis.com/v1/places:searchText\" -H \"Content-Type: application/json\" -H \"X-Goog-Api-Key: AIzaSyAj0eDf6_qT-suH_6wiJlvb9AJ_4zd8KyM\" -H \"X-Goog-FieldMask: places.displayName,places.location,places.formattedAddress\" -d '{\"\"textQuery\"\": \"\"Latte Latte Coffee Crafters Polanco Mexico City\"\"}')",
+      "Bash(curl -s \"https://leooulgankktjapregei.supabase.co/rest/v1/post_places?name=in.\\(Casa%20Simera,Latte%20Latte%20Coffee%20Crafters\\)&select=id,name,lat,lng\" -H \"apikey: sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\" -H \"Authorization: Bearer sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\")",
+      "Bash(vercel whoami:*)",
+      "Bash(supabase --version)",
+      "Bash(\"/Users/aitanacomas/Desktop/Social Media:*)",
+      "Bash(vercel deploy:*)",
+      "Bash(vercel list:*)"
     ]
   }
 }

@@ -1,12 +1,12 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send } from 'lucide-react';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, savePlace, unsavePlace, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -77,6 +77,17 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [unfollowTarget, setUnfollowTarget] = useState<FollowProfile | null>(null);
   const [unfollowing, setUnfollowing] = useState(false);
   const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
+  const [postPlaceSavedIds, setPostPlaceSavedIds] = useState<Set<string>>(new Set());
+  const [showPostMap, setShowPostMap] = useState(false);
+  const [postCommentText, setPostCommentText] = useState('');
+  const [postComments, setPostComments] = useState<{ text: string; time: string }[]>([]);
+  const postCommentInputRef = useRef<HTMLInputElement>(null);
+  const [showPostShareSheet, setShowPostShareSheet] = useState(false);
+  const [postSentTo, setPostSentTo] = useState<Set<string>>(new Set());
+  const [showEditPost, setShowEditPost] = useState(false);
+  const [editPostCaption, setEditPostCaption] = useState('');
+  const [editPostPlaces, setEditPostPlaces] = useState<RealPostPlace[]>([]);
+  const [savingEditPost, setSavingEditPost] = useState(false);
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
   const [selectedRealCollection, setSelectedRealCollection] = useState<RealCollection | null>(null);
@@ -91,10 +102,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const editColCoverInputRef = useRef<HTMLInputElement>(null);
   const [showAddPlacesSheet, setShowAddPlacesSheet] = useState(false);
   const [colPlaceIds, setColPlaceIds] = useState<Set<string>>(new Set());
-  const [linkCopied, setLinkCopied] = useState(false);
+  const [colFilter, setColFilter] = useState('all');
+  const [showColMap, setShowColMap] = useState(true);
   const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
   const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
+  const [showInlineNewCol, setShowInlineNewCol] = useState(false);
+  const [inlineNewColName, setInlineNewColName] = useState('');
+  const [savingInlineCol, setSavingInlineCol] = useState(false);
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
   const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
   const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
@@ -105,6 +120,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [newColCoverPreview, setNewColCoverPreview] = useState<string | null>(null);
   const [savingCollection, setSavingCollection] = useState(false);
   const colCoverInputRef = useRef<HTMLInputElement>(null);
+  const [sharedCollections, setSharedCollections] = useState<RealCollection[]>([]);
+  const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
+  const [showInviteSheet, setShowInviteSheet] = useState(false);
+  const [inviteSearch, setInviteSearch] = useState('');
+  const [inviteResults, setInviteResults] = useState<FollowProfile[]>([]);
+  const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -147,8 +168,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         })));
       });
       getUserCollections(appUser.id).then(setRealCollections);
+      getSharedCollections(appUser.id).then(setSharedCollections);
       getLikedPosts(appUser.id).then(setLikedRealPosts);
       getSavedPosts(appUser.id).then(setSavedRealPosts);
+      getFollowingProfiles(appUser.id).then(setFollowingProfiles);
       getFollowCounts(appUser.id).then(({ followers, following }) => {
         setRealFollowerCount(followers);
         setRealFollowingCount(following);
@@ -163,6 +186,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       return () => { supabase.removeChannel(channel); };
     }
   }, [appUser]);
+
+  // Pre-load which places in the selected post are saved to any collection
+  useEffect(() => {
+    if (!selectedRealPost || !appUser) { setPostPlaceSavedIds(new Set()); return; }
+    Promise.all(selectedRealPost.places.map(pl => getPlaceCollectionIds(pl.id))).then(results => {
+      const saved = new Set<string>();
+      selectedRealPost.places.forEach((pl, i) => { if (results[i].size > 0) saved.add(pl.id); });
+      setPostPlaceSavedIds(saved);
+    });
+  }, [selectedRealPost, appUser]);
 
   const visitedPlaces = places.filter(p => myVisitedPlaceIds.includes(p.id));
   const user = currentUser;
@@ -225,8 +258,21 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900 leading-tight">{displayUser.name}</p>
-            <p className="text-xs text-gray-400">{new Date(selectedRealPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+            {selectedRealPost.places.length > 0 && (
+              <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
+                <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                {selectedRealPost.places.length === 1
+                  ? `${selectedRealPost.places[0].name} · ${selectedRealPost.places[0].city}`
+                  : `${selectedRealPost.places[0].name} +${selectedRealPost.places.length - 1} · ${selectedRealPost.places[0].city}`}
+              </p>
+            )}
           </div>
+          <button
+            onClick={() => { setEditPostCaption(selectedRealPost.caption); setEditPostPlaces([...selectedRealPost.places]); setShowEditPost(true); }}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
+          >
+            <Edit3 size={16} strokeWidth={1.5} className="text-gray-700" />
+          </button>
         </div>
         {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
         <div className="px-4 pt-3 pb-4 border-b border-gray-100">
@@ -245,28 +291,82 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <Heart size={22} strokeWidth={1.5} className={likedRealPosts.has(selectedRealPost.id) ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
                 <span className="text-xs text-gray-500">{realPostLikeCounts[selectedRealPost.id] ?? 0}</span>
               </button>
+              <button
+                className="flex items-center gap-1.5"
+                onClick={() => { setTimeout(() => postCommentInputRef.current?.focus(), 50); }}
+              >
+                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
+                <span className="text-xs text-gray-500">{postComments.length}</span>
+              </button>
+              <button
+                onClick={() => { setPostSentTo(new Set()); setShowPostShareSheet(true); }}
+                className="flex items-center gap-1.5"
+              >
+                <Send size={20} strokeWidth={1.5} className="text-gray-700" />
+              </button>
             </div>
-            <button
-              className={`px-5 py-1.5 rounded-full border text-sm font-semibold transition-colors ${savedRealPosts.has(selectedRealPost.id) ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-900 text-gray-900 bg-white'}`}
-              onClick={() => {
-                if (!appUser) return;
-                const isSaved = savedRealPosts.has(selectedRealPost.id);
-                setSavedRealPosts(prev => { const n = new Set(prev); isSaved ? n.delete(selectedRealPost.id) : n.add(selectedRealPost.id); return n; });
-                isSaved ? unsavePost(appUser.id, selectedRealPost.id) : savePost(appUser.id, selectedRealPost.id);
-              }}
-            >{savedRealPosts.has(selectedRealPost.id) ? 'Saved' : 'Save'}</button>
+            {(() => {
+              const allSaved = selectedRealPost.places.length > 0 && selectedRealPost.places.every(p => postPlaceSavedIds.has(p.id));
+              return (
+                <button
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${allSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
+                  onClick={async () => {
+                    if (!appUser) return;
+                    if (allSaved) {
+                      // unsave all places
+                      for (const place of selectedRealPost.places) {
+                        await unsavePlace(appUser.id, place.id);
+                        setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
+                      }
+                    } else {
+                      // save all unsaved places
+                      for (const place of selectedRealPost.places) {
+                        if (!postPlaceSavedIds.has(place.id)) {
+                          await savePlace(appUser.id, place.id);
+                          setPostPlaceSavedIds(prev => new Set(prev).add(place.id));
+                        }
+                      }
+                    }
+                  }}
+                >
+                  {allSaved && <Check size={13} strokeWidth={2} />}
+                  {allSaved ? 'Saved' : 'Save all'}
+                </button>
+              );
+            })()}
           </div>
           <p className="text-sm text-gray-800 leading-relaxed">{selectedRealPost.caption}</p>
-          {selectedRealPost.locationLabel && (
-            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-              <MapPin size={10} strokeWidth={1.5} />{selectedRealPost.locationLabel}
-            </p>
+          {selectedRealPost.hashtags.length > 0 && (
+            <p className="text-xs text-orange-400 mt-1">{selectedRealPost.hashtags.map(h => `#${h.replace(/\s+/g, '')}`).join(' ')}</p>
           )}
+          <p className="text-xs text-gray-400 mt-2">{new Date(selectedRealPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </div>
-        <div className="px-4 pt-4 pb-10">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-            {selectedRealPost.places.length} Place{selectedRealPost.places.length !== 1 ? 's' : ''}
-          </p>
+
+        {/* Places + map */}
+        <div className="px-4 pt-4 pb-2">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              {selectedRealPost.places.length} Place{selectedRealPost.places.length !== 1 ? 's' : ''}
+            </p>
+            {selectedRealPost.places.some(p => p.lat != null) && (
+              <button
+                onClick={() => setShowPostMap(v => !v)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                {showPostMap ? 'Hide map' : 'Show map'}
+              </button>
+            )}
+          </div>
+          {showPostMap && (() => {
+            const mapPlaces = selectedRealPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name, city: p.city, country: p.country }));
+            return mapPlaces.length > 0 ? (
+              <div className="rounded-2xl overflow-hidden mb-3">
+                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
+                  <MapView places={mapPlaces} height="200px" />
+                </Suspense>
+              </div>
+            ) : null;
+          })()}
           <div className="space-y-3">
             {selectedRealPost.places.map(place => (
               <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
@@ -274,9 +374,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
                   <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{place.city}, {place.country}
+                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ')}
                   </p>
-                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
+                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
                 </div>
                 {realCollections.length > 0 && (
                   <button
@@ -288,21 +388,208 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                         setLoadingPlaceCollections(false);
                       });
                     }}
-                    className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-white flex-shrink-0"
+                    className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${postPlaceSavedIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
                   >
-                    <Bookmark size={14} strokeWidth={1.5} className="text-gray-500" />
+                    {postPlaceSavedIds.has(place.id)
+                      ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                      : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
                   </button>
                 )}
               </div>
             ))}
           </div>
         </div>
+
+        {/* Comments */}
+        <div className="px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+          {postComments.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
+          )}
+          <div className="space-y-3 mb-4">
+            {postComments.map((c, i) => (
+              <div key={i} className="flex items-start gap-2">
+                {appUser?.avatar
+                  ? <img src={appUser.avatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                  : <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />}
+                <div>
+                  <span className="text-xs font-semibold text-gray-900">{appUser?.username} </span>
+                  <span className="text-xs text-gray-700">{c.text}</span>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{c.time}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            {appUser?.avatar
+              ? <img src={appUser.avatar} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+              : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />}
+            <div className="flex-1 flex items-center bg-gray-100 rounded-full px-3 py-2 gap-2">
+              <input
+                ref={postCommentInputRef}
+                value={postCommentText}
+                onChange={e => setPostCommentText(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && postCommentText.trim()) {
+                    setPostComments(prev => [...prev, { text: postCommentText.trim(), time: 'just now' }]);
+                    setPostCommentText('');
+                  }
+                }}
+                placeholder="Add a comment…"
+                className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
+              />
+              {postCommentText.trim() && (
+                <button
+                  onClick={() => { setPostComments(prev => [...prev, { text: postCommentText.trim(), time: 'just now' }]); setPostCommentText(''); }}
+                  className="text-xs font-bold text-gray-900 flex-shrink-0"
+                >Post</button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Share sheet */}
+      {showPostShareSheet && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPostShareSheet(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900">Share</h3>
+              <button onClick={() => setShowPostShareSheet(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={16} strokeWidth={1.5} className="text-gray-700" />
+              </button>
+            </div>
+            {/* Preview */}
+            <div className="px-4 pb-4">
+              <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
+                {selectedRealPost.places[0]?.photoUrl && (
+                  <img src={selectedRealPost.places[0].photoUrl} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
+                )}
+                <p className="text-sm font-semibold text-gray-900 truncate">{selectedRealPost.caption}</p>
+              </div>
+            </div>
+            {/* Send to following */}
+            <div className="px-4 max-h-64 overflow-y-auto space-y-3">
+              {followingProfiles.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">Follow people to send them posts</p>
+              ) : followingProfiles.map(friend => {
+                const sent = postSentTo.has(friend.id);
+                return (
+                  <div key={friend.id} className="flex items-center gap-3">
+                    {friend.avatarUrl
+                      ? <img src={friend.avatarUrl} alt={friend.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{friend.name[0]}</div>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{friend.name}</p>
+                      <p className="text-xs text-gray-400">@{friend.username}</p>
+                    </div>
+                    <button
+                      onClick={() => setPostSentTo(prev => { const n = new Set(prev); n.add(friend.id); return n; })}
+                      className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${sent ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-300 text-gray-700'}`}
+                    >{sent ? 'Sent' : 'Send'}</button>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Also share externally */}
+            <div className="px-4 pt-4">
+              <button
+                onClick={() => navigator.share({ title: selectedRealPost.caption, text: selectedRealPost.caption }).catch(() => {})}
+                className="w-full py-2.5 bg-gray-100 rounded-2xl text-sm font-semibold text-gray-700"
+              >Share externally…</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit post sheet */}
+      {showEditPost && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditPost(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-10 max-h-[85vh] flex flex-col">
+            <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-4 flex-shrink-0">
+              <h3 className="text-base font-bold text-gray-900">Edit post</h3>
+              <button
+                disabled={savingEditPost}
+                onClick={async () => {
+                  setSavingEditPost(true);
+                  // Save caption
+                  await updatePostCaption(selectedRealPost.id, editPostCaption);
+                  // Save reorder if changed
+                  const removedIds = selectedRealPost.places.filter(p => !editPostPlaces.find(ep => ep.id === p.id)).map(p => p.id);
+                  for (const id of removedIds) await deletePostPlace(id);
+                  if (editPostPlaces.length > 1) await reorderPostPlaces(editPostPlaces.map(p => p.id));
+                  // Update local state
+                  setSelectedRealPost(prev => prev ? { ...prev, caption: editPostCaption, places: editPostPlaces } : prev);
+                  setRealPosts(prev => prev.map(p => p.id === selectedRealPost.id ? { ...p, caption: editPostCaption, places: editPostPlaces } : p));
+                  setSavingEditPost(false);
+                  setShowEditPost(false);
+                }}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-50"
+              >{savingEditPost ? 'Saving…' : 'Save'}</button>
+            </div>
+            <div className="px-4 overflow-y-auto flex-1 space-y-4">
+              {/* Caption */}
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Caption</p>
+                <textarea
+                  value={editPostCaption}
+                  onChange={e => setEditPostCaption(e.target.value)}
+                  rows={3}
+                  className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none resize-none"
+                />
+              </div>
+              {/* Places — reorder + remove */}
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Places</p>
+                <div className="space-y-2">
+                  {editPostPlaces.map((place, i) => (
+                    <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
+                      {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                        <p className="text-xs text-gray-400">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
+                      </div>
+                      {/* Move up/down */}
+                      <div className="flex flex-col gap-0.5">
+                        <button disabled={i === 0} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })} className="w-6 h-6 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-30">
+                          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2l3.5 4H1.5z" fill="currentColor"/></svg>
+                        </button>
+                        <button disabled={i === editPostPlaces.length - 1} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })} className="w-6 h-6 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-30">
+                          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 8L1.5 4h7z" fill="currentColor"/></svg>
+                        </button>
+                      </div>
+                      {/* Remove */}
+                      <button onClick={() => setEditPostPlaces(prev => prev.filter(p => p.id !== place.id))} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0">
+                        <X size={12} strokeWidth={2} className="text-gray-500" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Delete post */}
+              <button
+                onClick={async () => {
+                  if (!confirm('Delete this post?')) return;
+                  await deletePost(selectedRealPost.id);
+                  setRealPosts(prev => prev.filter(p => p.id !== selectedRealPost.id));
+                  setShowEditPost(false);
+                  setSelectedRealPost(null);
+                }}
+                className="w-full py-3 text-sm font-semibold text-red-500 bg-red-50 rounded-2xl"
+              >Delete post</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Collection picker sheet */}
       {addToColPlace && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setAddToColPlace(null)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setAddToColPlace(null); setShowInlineNewCol(false); setInlineNewColName(''); }} />
           <div className="relative bg-white rounded-t-3xl pb-8">
             <div className="flex justify-center pt-3 pb-2">
               <div className="w-10 h-1 rounded-full bg-gray-200" />
@@ -327,10 +614,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                           await removePlaceFromCollection(col.id, addToColPlace.id);
                           setPlaceInCollections(prev => { const n = new Set(prev); n.delete(col.id); return n; });
                           setRealCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                          // Update bookmark icon — check if still in any other collection
+                          getPlaceCollectionIds(addToColPlace.id).then(ids => {
+                            setPostPlaceSavedIds(prev => { const n = new Set(prev); ids.size > 0 ? n.add(addToColPlace.id) : n.delete(addToColPlace.id); return n; });
+                          });
                         } else {
                           await addPlaceToCollection(col.id, addToColPlace.id);
                           setPlaceInCollections(prev => new Set(prev).add(col.id));
                           setRealCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: c.placesCount + 1 } : c));
+                          setPostPlaceSavedIds(prev => new Set(prev).add(addToColPlace.id));
                         }
                       }}
                       className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
@@ -353,6 +645,60 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 })}
               </div>
             )}
+            {/* New collection */}
+            <div className="px-4 pt-3 pb-2">
+              {showInlineNewCol ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={inlineNewColName}
+                    onChange={e => setInlineNewColName(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && inlineNewColName.trim() && appUser) {
+                        setSavingInlineCol(true);
+                        const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                        setSavingInlineCol(false);
+                        if (!error && data) {
+                          setRealCollections(prev => [data, ...prev]);
+                          setInlineNewColName('');
+                          setShowInlineNewCol(false);
+                        }
+                      }
+                      if (e.key === 'Escape') { setShowInlineNewCol(false); setInlineNewColName(''); }
+                    }}
+                    placeholder="Collection name…"
+                    className="flex-1 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none text-gray-900 placeholder-gray-400"
+                  />
+                  <button
+                    disabled={!inlineNewColName.trim() || savingInlineCol}
+                    onClick={async () => {
+                      if (!inlineNewColName.trim() || !appUser) return;
+                      setSavingInlineCol(true);
+                      const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                      setSavingInlineCol(false);
+                      if (!error && data) {
+                        setRealCollections(prev => [data, ...prev]);
+                        setInlineNewColName('');
+                        setShowInlineNewCol(false);
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40"
+                  >
+                    {savingInlineCol ? '…' : 'Create'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setShowInlineNewCol(true); setInlineNewColName(''); }}
+                  className="w-full flex items-center gap-3 py-3 text-left"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <Plus size={18} strokeWidth={2} className="text-gray-500" />
+                  </div>
+                  <p className="text-sm font-semibold text-gray-700">New collection</p>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -719,8 +1065,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <button
               onClick={() => setSavedPosts(prev => { const n = new Set(prev); if (n.has(selectedPost.id)) n.delete(selectedPost.id); else n.add(selectedPost.id); return n; })}
-              className={`px-5 py-1.5 rounded-full border text-sm font-semibold transition-colors ${isSaved ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-900 text-gray-900 bg-white'}`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${isSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
             >
+              {isSaved && <Check size={13} strokeWidth={2} />}
               {isSaved ? 'Saved' : 'Save'}
             </button>
           </div>
@@ -850,7 +1197,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           >
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
-          <button className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center">
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}/collection/${selectedCollection.id}`;
+              navigator.share({ title: selectedCollection.name, url });
+            }}
+            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+          >
             <Share2 size={15} strokeWidth={1.5} className="text-gray-700" />
           </button>
           <div className="absolute bottom-4 left-4 right-4">
@@ -982,13 +1335,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           {/* Top right actions */}
           <div className="absolute top-4 right-4 flex gap-2">
             <button
+              onClick={() => { setInviteSearch(''); setInviteResults([]); setShowInviteSheet(true); }}
+              className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+            >
+              <UserPlus size={14} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            <button
               onClick={() => {
                 const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
-                navigator.clipboard.writeText(url).then(() => { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); });
+                navigator.share({ title: selectedRealCollection.name, url });
               }}
               className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
             >
-              {linkCopied ? <Check size={14} strokeWidth={2} className="text-green-600" /> : <Share2 size={14} strokeWidth={1.5} className="text-gray-700" />}
+              <Share2 size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
             <button
               onClick={() => { setEditColName(selectedRealCollection.name); setEditColDesc(selectedRealCollection.description); setEditColCoverFile(null); setEditColCoverPreview(null); setShowEditCollection(true); }}
@@ -1005,67 +1364,137 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
         </div>
 
-        {/* Stats bar */}
-        <div className="flex items-center border-b border-gray-100 px-4 py-3 justify-between">
-          <p className="text-sm font-bold text-gray-900">{realCollectionPlaces.length} place{realCollectionPlaces.length !== 1 ? 's' : ''}</p>
-          <button
-            onClick={() => {
-              setColPlaceIds(new Set(realCollectionPlaces.map(p => p.id)));
-              setShowAddPlacesSheet(true);
-            }}
-            className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full"
-          >
-            <Plus size={12} strokeWidth={2.5} /> Add places
-          </button>
-        </div>
+        {/* Collaborators row */}
+        {collectionCollaborators.length > 0 && (
+          <div className="flex items-center gap-2 px-4 pt-3">
+            <div className="flex -space-x-2">
+              {collectionCollaborators.slice(0, 5).map(c => (
+                c.profile.avatarUrl
+                  ? <img key={c.id} src={c.profile.avatarUrl} alt={c.profile.name} className="w-7 h-7 rounded-full border-2 border-white object-cover" />
+                  : <div key={c.id} className="w-7 h-7 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500">{c.profile.name.charAt(0)}</div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400">
+              {collectionCollaborators.length === 1
+                ? `@${collectionCollaborators[0].profile.username} can edit`
+                : `${collectionCollaborators.length} collaborators`}
+            </p>
+          </div>
+        )}
 
         {loadingCollectionPlaces ? (
           <div className="px-4 pt-4 space-y-3">
-            <div className="h-48 bg-gray-100 rounded-xl animate-pulse" />
+            <div className="h-52 bg-gray-100 rounded-2xl animate-pulse" />
             {[0,1,2].map(i => <div key={i} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />)}
           </div>
         ) : realCollectionPlaces.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
             <span className="text-4xl mb-3">📍</span>
             <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
-            <p className="text-slate-400 text-sm max-w-[220px]">Tap "Add places" to start building your collection</p>
+            <p className="text-slate-400 text-sm max-w-[220px]">Tap "+" to start building your collection</p>
           </div>
-        ) : (
-          <div className="px-4 pt-4 pb-10">
-            {mapPlaces.length > 0 && (
-              <div className="mb-4 rounded-xl overflow-hidden">
-                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
-                  <MapView places={mapPlaces} height="200px" />
-                </Suspense>
+        ) : (() => {
+          const catEmoji = (cat: string) => {
+            const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', dining: '🍽️', bar: '🍸', cocktail: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
+            return m[cat.toLowerCase()] ?? '📍';
+          };
+          const locationLine = (place: typeof realCollectionPlaces[0]) => {
+            const parts = [place.neighborhood, place.city].filter(Boolean);
+            return parts.join(', ') || place.country;
+          };
+          const PlaceCard = ({ place }: { place: typeof realCollectionPlaces[0] }) => (
+            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+              {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                  <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{locationLine(place)}
+                </p>
+                {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
               </div>
-            )}
-            <div className="space-y-3">
-              {realCollectionPlaces.map(place => (
-                <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                  {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-                    <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                      <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{place.city}, {place.country}
-                    </p>
-                    {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
-                  </div>
+              <button
+                onClick={async () => {
+                  await removePlaceFromCollection(selectedRealCollection.id, place.id);
+                  setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
+                  setRealCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                  setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0"
+              >
+                <X size={12} strokeWidth={2} className="text-gray-500" />
+              </button>
+            </div>
+          );
+          return (
+            <>
+              {/* Count + add + show/hide map */}
+              <div className="flex items-center justify-between px-4 pt-4 pb-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-900">{realCollectionPlaces.length} place{realCollectionPlaces.length !== 1 ? 's' : ''} in this collection</p>
                   <button
-                    onClick={async () => {
-                      await removePlaceFromCollection(selectedRealCollection.id, place.id);
-                      setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
-                      setRealCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
-                      setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
-                    }}
-                    className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0"
+                    onClick={() => { setColPlaceIds(new Set(realCollectionPlaces.map(p => p.id))); setShowAddPlacesSheet(true); }}
+                    className="w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 text-gray-500"
                   >
-                    <X size={12} strokeWidth={2} className="text-gray-500" />
+                    <Plus size={10} strokeWidth={3} />
                   </button>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                {mapPlaces.length > 0 && (
+                  <button
+                    onClick={() => setShowColMap(v => !v)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showColMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    {showColMap ? 'Hide map' : 'Show map'}
+                  </button>
+                )}
+              </div>
+
+              {/* Map */}
+              {showColMap && mapPlaces.length > 0 && (
+                <div className="px-4 pt-2">
+                  <div className="rounded-2xl overflow-hidden">
+                    <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
+                      <MapView places={mapPlaces} height="220px" />
+                    </Suspense>
+                  </div>
+                </div>
+              )}
+
+              {/* Activity filter chips */}
+              {(() => {
+                const cats = Array.from(new Set(realCollectionPlaces.map(p => p.category).filter(Boolean)));
+                if (cats.length < 2) return null;
+                const chipClass = (active: boolean) =>
+                  `flex-shrink-0 flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${active ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`;
+                return (
+                  <div className="flex gap-2 px-4 pt-3 overflow-x-auto no-scrollbar">
+                    <button onClick={() => setColFilter('all')} className={chipClass(colFilter === 'all')}>All</button>
+                    {cats.map(cat => (
+                      <button key={cat} onClick={() => setColFilter(colFilter === cat ? 'all' : cat)} className={chipClass(colFilter === cat)}>
+                        {catEmoji(cat)} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Places grouped by neighborhood */}
+              <div className="px-4 pt-3 pb-10 space-y-3">
+                {(() => {
+                  const filtered = colFilter === 'all' ? realCollectionPlaces : realCollectionPlaces.filter(p => p.category === colFilter);
+                  const byArea: Record<string, typeof filtered> = {};
+                  filtered.forEach(p => { const k = p.neighborhood || p.city || 'Other'; if (!byArea[k]) byArea[k] = []; byArea[k].push(p); });
+                  if (Object.keys(byArea).length === 0) return <p className="text-center text-sm text-gray-400 py-8">No places match this filter</p>;
+                  return Object.entries(byArea).map(([area, areaPlaces]) => (
+                    <div key={area}>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{area}</p>
+                      <div className="space-y-3">{areaPlaces.map(place => <PlaceCard key={place.id} place={place} />)}</div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       {/* Edit collection sheet */}
@@ -1168,7 +1597,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                         } else {
                           await addPlaceToCollection(selectedRealCollection.id, place.id);
                           setColPlaceIds(prev => new Set(prev).add(place.id));
-                          setRealCollectionPlaces(prev => [...prev, { id: place.id, name: place.name, category: place.category, city: place.city, country: place.country, photoUrl: place.photoUrl, position: place.position, lat: place.lat, lng: place.lng }]);
+                          setRealCollectionPlaces(prev => [...prev, { id: place.id, name: place.name, category: place.category, neighborhood: place.neighborhood ?? '', city: place.city, country: place.country, photoUrl: place.photoUrl, position: place.position, lat: place.lat, lng: place.lng }]);
                           setRealCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: c.placesCount + 1 } : c));
                           setSelectedRealCollection(prev => prev ? { ...prev, placesCount: prev.placesCount + 1 } : prev);
                         }
@@ -1178,7 +1607,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-                        <p className="text-xs text-gray-400">{place.city}, {place.country}</p>
+                        <p className="text-xs text-gray-400">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
                       </div>
                       <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
                         {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -1191,6 +1620,89 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
         </div>
       )}
+
+      {/* Invite collaborator sheet */}
+      {showInviteSheet && selectedRealCollection && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowInviteSheet(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8 max-h-[80vh] flex flex-col">
+            <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0">
+              <h3 className="text-base font-bold text-gray-900">Invite collaborators</h3>
+              <button onClick={() => setShowInviteSheet(false)} className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full">Done</button>
+            </div>
+            {/* Search input */}
+            <div className="px-4 pb-3 flex-shrink-0">
+              <input
+                value={inviteSearch}
+                onChange={async e => {
+                  const val = e.target.value;
+                  setInviteSearch(val);
+                  if (appUser) searchProfiles(val, appUser.id).then(setInviteResults);
+                }}
+                placeholder="Search by name or username…"
+                className="w-full bg-gray-100 rounded-full px-4 py-2 text-sm outline-none"
+              />
+            </div>
+            {/* Existing collaborators */}
+            {collectionCollaborators.length > 0 && (
+              <div className="px-4 pb-2 flex-shrink-0">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Current collaborators</p>
+                {collectionCollaborators.map(c => (
+                  <div key={c.id} className="flex items-center gap-3 py-2">
+                    {c.profile.avatarUrl
+                      ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
+                      <p className="text-xs text-gray-400">@{c.profile.username}</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await removeCollaborator(selectedRealCollection.id, c.userId);
+                        setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
+                      }}
+                      className="text-xs text-red-500 font-semibold"
+                    >Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Search results */}
+            <div className="overflow-y-auto flex-1 px-4">
+              {inviteResults.filter(r => !collectionCollaborators.some(c => c.userId === r.id)).map(user => (
+                <div key={user.id} className="flex items-center gap-3 py-2.5">
+                  {user.avatarUrl
+                    ? <img src={user.avatarUrl} alt={user.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{user.name.charAt(0)}</div>}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{user.name}</p>
+                    <p className="text-xs text-gray-400">@{user.username}</p>
+                  </div>
+                  <button
+                    disabled={invitingUserId === user.id}
+                    onClick={async () => {
+                      if (!appUser) return;
+                      setInvitingUserId(user.id);
+                      const err = await addCollaborator(selectedRealCollection.id, user.id, appUser.id);
+                      if (!err) {
+                        const newCollab: CollectionCollaborator = { id: `${Date.now()}`, collectionId: selectedRealCollection.id, userId: user.id, invitedBy: appUser.id, createdAt: new Date().toISOString(), profile: { name: user.name, username: user.username, avatarUrl: user.avatarUrl } };
+                        setCollectionCollaborators(prev => [...prev, newCollab]);
+                        setInviteResults(prev => prev.filter(r => r.id !== user.id));
+                      }
+                      setInvitingUserId(null);
+                    }}
+                    className="text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full disabled:opacity-50"
+                  >{invitingUserId === user.id ? '…' : 'Invite'}</button>
+                </div>
+              ))}
+              {inviteSearch && inviteResults.filter(r => !collectionCollaborators.some(c => c.userId === r.id)).length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-4">No users found</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       </>
     );
   }
@@ -1199,10 +1711,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   return (
     <div className="bg-white min-h-screen">
       {/* Top Nav */}
-      <div className="flex items-center justify-between px-4 pt-5 pb-3">
-        <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center">
-          <UserPlus size={22} strokeWidth={1.5} className="text-gray-700" />
-        </button>
+      <div className="grid grid-cols-3 items-center px-4 pt-5 pb-3">
+        <div className="flex items-center">
+          <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center">
+            <UserPlus size={22} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+        </div>
         <div className="text-center">
           <h2 className="text-base font-bold text-gray-900 leading-tight flex items-center justify-center gap-1.5">
             {displayUser.name}
@@ -1210,7 +1724,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </h2>
           <p className="text-xs text-gray-400">@{displayUser.username}</p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center justify-end gap-1">
           <button onClick={onOpenMessages} className="w-9 h-9 flex items-center justify-center">
             <Mail size={20} strokeWidth={1.5} className="text-gray-700" />
           </button>
@@ -1231,7 +1745,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </button>
           <div className="flex-1 min-w-0 space-y-1">
             {displayUser.bio ? (
-              <p className="text-xs text-gray-600 leading-relaxed">{displayUser.bio}</p>
+              <div className="space-y-0.5">
+                {displayUser.bio.split('\n').map((line, i) => (
+                  <p key={i} className="text-sm text-gray-700 leading-relaxed">{line}</p>
+                ))}
+              </div>
             ) : (
               <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic">Add a bio…</button>
             )}
@@ -1297,7 +1815,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 const firstImage = post.places[0]?.photoUrl;
                 if (!firstImage) return null;
                 return (
-                  <button key={post.id} onClick={() => setSelectedRealPost(post)} className="aspect-square bg-white relative">
+                  <button key={post.id} onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }} className="aspect-square bg-white relative">
                     <img src={firstImage} alt="" className="w-full h-full object-cover" />
                     {post.places.length > 1 && (
                       <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
@@ -1391,11 +1909,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 {realCollections.map(col => (
                   <button key={col.id} className="text-left" onClick={() => {
                       setSelectedRealCollection(col);
+                      setShowColMap(true);
+                      setColFilter('all');
+                      setCollectionCollaborators([]);
                       setLoadingCollectionPlaces(true);
                       getCollectionPlaces(col.id).then(places => {
                         setRealCollectionPlaces(places);
                         setLoadingCollectionPlaces(false);
                       });
+                      getCollectionCollaborators(col.id).then(setCollectionCollaborators);
                     }}>
                     <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
                       {col.coverImageUrl
@@ -1416,6 +1938,34 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <span className="text-4xl mb-3">🗂️</span>
                 <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
                 <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+              </div>
+            )}
+
+            {/* Shared with me */}
+            {sharedCollections.length > 0 && (
+              <div className="mt-6">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Shared with me</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+                  {sharedCollections.map(col => (
+                    <button key={col.id} className="text-left" onClick={() => {
+                      setSelectedRealCollection(col);
+                      setShowColMap(true);
+                      setColFilter('all');
+                      setCollectionCollaborators([]);
+                      setLoadingCollectionPlaces(true);
+                      getCollectionPlaces(col.id).then(places => { setRealCollectionPlaces(places); setLoadingCollectionPlaces(false); });
+                      getCollectionCollaborators(col.id).then(setCollectionCollaborators);
+                    }}>
+                      <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
+                        {col.coverImageUrl
+                          ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                          : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
