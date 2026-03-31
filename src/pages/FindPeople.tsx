@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle, MapPin } from 'lucide-react';
+import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle, MapPin, ChevronRight } from 'lucide-react';
 import { getDiscoverProfiles, getFollowing, followUser, unfollowUser, getUserPosts, type DiscoverProfile, type RealPost } from '../lib/supabase';
+import ImageCarousel from '../components/ImageCarousel';
 
 interface Props {
   currentUserId: string;
@@ -460,11 +461,13 @@ function ProfileRow({ profile, isFollowing, onToggle, onViewProfile }: { profile
 
 function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { profile: DiscoverProfile; isFollowing: boolean; onToggleFollow: () => void; onBack: () => void }) {
   const [posts, setPosts] = useState<RealPost[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
   const [following, setFollowing] = useState(isFollowing);
+  const [selectedPost, setSelectedPost] = useState<RealPost | null>(null);
   const initials = profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   useEffect(() => {
-    getUserPosts(profile.id).then(setPosts);
+    getUserPosts(profile.id).then(p => { setPosts(p); setLoadingPosts(false); });
   }, [profile.id]);
 
   const handleFollow = () => {
@@ -472,17 +475,85 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
     onToggleFollow();
   };
 
+  const totalPlaces = posts.reduce((n, p) => n + p.places.length, 0);
+  const totalCountries = new Set(posts.flatMap(p => p.places.map(pl => pl.country))).size;
+
+  // ── Post detail view ─────────────────────────────────────────────
+  if (selectedPost) {
+    const images = selectedPost.places.map(pl => pl.photoUrl).filter(Boolean);
+    const labels = selectedPost.places.map(pl => pl.name);
+    return (
+      <div className="bg-white min-h-screen">
+        <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
+          <button onClick={() => setSelectedPost(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
+            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          {profile.avatarUrl ? (
+            <img src={profile.avatarUrl} alt={profile.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+              <span className="text-xs font-bold text-slate-400">{initials}</span>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 leading-tight">{profile.name}</p>
+            <p className="text-xs text-gray-400">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+          </div>
+        </div>
+
+        {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
+
+        <div className="px-4 pt-3 pb-4 border-b border-gray-100">
+          <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
+          {selectedPost.locationLabel && (
+            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+              <MapPin size={10} strokeWidth={1.5} />{selectedPost.locationLabel}
+            </p>
+          )}
+        </div>
+
+        <div className="px-4 pt-4 pb-10">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+            {selectedPost.places.length} Place{selectedPost.places.length !== 1 ? 's' : ''}
+          </p>
+          <div className="space-y-3">
+            {selectedPost.places.map(place => (
+              <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                {place.photoUrl && (
+                  <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                  <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+                    {place.city}, {place.country}
+                  </p>
+                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white min-h-screen">
-      <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
+      {/* Top nav */}
+      <div className="flex items-center justify-between px-4 pt-5 pb-3">
         <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
           <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
         </button>
-        <h2 className="text-base font-bold text-gray-900 flex-1">@{profile.username}</h2>
+        <div className="text-center">
+          <h2 className="text-base font-bold text-gray-900 leading-tight">{profile.name}</h2>
+          <p className="text-xs text-gray-400">@{profile.username}</p>
+        </div>
+        <div className="w-9" /> {/* spacer */}
       </div>
 
       {/* Profile header */}
-      <div className="px-4 pt-5 pb-4 border-b border-gray-100">
+      <div className="px-4 pb-4">
         <div className="flex items-center gap-4">
           {profile.avatarUrl ? (
             <img src={profile.avatarUrl} alt={profile.name} className="w-16 h-16 rounded-full object-cover flex-shrink-0" />
@@ -492,36 +563,70 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-base font-bold text-gray-900">{profile.name}</p>
-            <p className="text-sm text-gray-400">@{profile.username}</p>
+            <button
+              onClick={handleFollow}
+              className={`flex items-center gap-1.5 px-5 py-2 rounded-full text-sm font-semibold transition-colors ${
+                following ? 'bg-gray-100 text-gray-600' : 'bg-slate-900 text-white'
+              }`}
+            >
+              {following ? <><Check size={13} strokeWidth={2} />Following</> : <>Follow</>}
+            </button>
           </div>
-          <button
-            onClick={handleFollow}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${
-              following ? 'bg-gray-100 text-gray-600' : 'bg-slate-900 text-white'
-            }`}
-          >
-            {following ? <><Check size={13} strokeWidth={2} />Following</> : <>Follow</>}
-          </button>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-2 mt-4">
+          {[
+            { value: posts.length, label: 'Posts' },
+            { value: totalPlaces, label: 'Places' },
+            { value: totalCountries, label: 'Countries' },
+            { value: 0, label: 'Followers' },
+          ].map(stat => (
+            <div key={stat.label} className="text-center">
+              <p className="text-base font-black text-gray-900">{stat.value}</p>
+              <p className="text-xs text-gray-400">{stat.label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
+      {/* Posts tab header */}
+      <div className="border-t border-b border-gray-100 py-3 px-4">
+        <p className="text-sm font-bold text-gray-900">Posts</p>
+      </div>
+
       {/* Posts grid */}
-      {posts.length === 0 ? (
+      {loadingPosts ? (
+        <div className="grid grid-cols-3 gap-px bg-gray-100 mt-px">
+          {[0,1,2,3,4,5].map(i => (
+            <div key={i} className="aspect-square bg-gray-50 animate-pulse" />
+          ))}
+        </div>
+      ) : posts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center px-6">
           <MapPin size={28} strokeWidth={1.5} className="text-gray-300 mb-3" />
           <p className="text-sm font-semibold text-gray-900 mb-1">No posts yet</p>
           <p className="text-xs text-gray-400">When {profile.name.split(' ')[0]} posts, you'll see them here</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-0.5 pt-0.5">
-          {posts.map(post =>
-            post.places.filter(pl => pl.photoUrl).slice(0, 1).map(pl => (
-              <div key={post.id} className="aspect-square bg-gray-100 overflow-hidden">
-                <img src={pl.photoUrl} alt={pl.name} className="w-full h-full object-cover" />
-              </div>
-            ))
-          )}
+        <div className="grid grid-cols-3 gap-px bg-gray-100 mt-px">
+          {posts.map(post => {
+            const firstImage = post.places[0]?.photoUrl;
+            if (!firstImage) return null;
+            return (
+              <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative">
+                <img src={firstImage} alt="" className="w-full h-full object-cover" />
+                {post.places.length > 1 && (
+                  <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                    <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
+                      <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                      <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                    </div>
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
