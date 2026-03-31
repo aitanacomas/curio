@@ -39,7 +39,15 @@ function FitBounds({ places }: { places: MapPlace[] }) {
 function FitWorld() {
   const map = useMap();
   useEffect(() => {
-    map.fitBounds([[-58, -178], [72, 178]], { padding: [0, 0], animate: false });
+    // Get the zoom that fits the world width, then add 10% (log2(1.1) ≈ 0.137)
+    const baseZoom = map.getBoundsZoom([[-58, -178], [72, 178]]);
+    const zoom = baseZoom + Math.log2(1.1);
+    const containerHeight = map.getSize().y;
+    // Position so the southernmost land tip (~-56°) sits at the bottom edge
+    const southPt = map.project([-56, 0], zoom);
+    const centerY = southPt.y - containerHeight / 2;
+    const center = map.unproject([map.project([0, 0], zoom).x, centerY], zoom);
+    map.setView([center.lat, 0], zoom, { animate: false });
   }, [map]);
   return null;
 }
@@ -60,6 +68,7 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       className="rounded-xl z-0"
       zoomControl={true}
       attributionControl={false}
+      zoomSnap={0}
       maxBounds={[[-60, -220], [72, 220]]}
       maxBoundsViscosity={1.0}
     >
