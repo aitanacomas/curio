@@ -982,21 +982,38 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           if (!item.name || item.name.length < 2) continue;
 
           try {
-            // ── Fast path: item has address but neighborhood is missing or plain (no ", City") ──
-            // For truly generic items (Boat Day etc) that won't match well in Places search,
-            // parse what we can from the address string.
-            if (item.address && !item.neighborhood) {
-              const neighborhood = extractNeighborhood([], item.address);
-              if (neighborhood) {
-                const ok = await updatePlanItem(item.id, { neighborhood });
-                if (ok) applyPatch(item.id, day.id, { neighborhood });
+            // ── Address path: item has address → use it to get proper "Area, City" neighborhood ──
+            if (item.address) {
+              const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+                body: JSON.stringify({ input: item.address, languageCode: 'en' }),
+              });
+              const acData = await acRes.json();
+              const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
+              if (placeId) {
+                const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+                  headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'addressComponents,formattedAddress', 'X-Goog-LanguageCode': 'en' },
+                });
+                const det = await detRes.json();
+                const newNeighborhood = extractNeighborhood(det.addressComponents ?? [], det.formattedAddress);
+                if (newNeighborhood && newNeighborhood !== item.neighborhood) {
+                  const ok = await updatePlanItem(item.id, { neighborhood: newNeighborhood });
+                  if (ok) applyPatch(item.id, day.id, { neighborhood: newNeighborhood });
+                }
+              } else {
+                // No Places result — parse from address string directly
+                const neighborhood = extractNeighborhood([], item.address);
+                if (neighborhood && neighborhood !== item.neighborhood) {
+                  const ok = await updatePlanItem(item.id, { neighborhood });
+                  if (ok) applyPatch(item.id, day.id, { neighborhood });
+                }
               }
-              continue; // no API call needed
+              await new Promise(r => setTimeout(r, 150));
+              continue;
             }
-            // item.address exists but neighborhood is plain (no comma) → fall through to slow path
-            // so Google Places can give us proper "Area, City" from address components
 
-            // ── Slow path: no address → search Google Places by name ──
+            // ── Name path: no address → search Google Places by name ──
             const query = plan.country ? `${item.name} ${plan.country}` : item.name;
             const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
               method: 'POST',
