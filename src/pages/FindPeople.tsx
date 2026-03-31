@@ -33,6 +33,8 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
   const [showWhoDidYouSend, setShowWhoDidYouSend] = useState(false);
   const [whoName, setWhoName] = useState('');
   const phoneInputRef = useRef<HTMLInputElement>(null);
+  const [unfollowTarget, setUnfollowTarget] = useState<DiscoverProfile | null>(null);
+  const [unfollowing, setUnfollowing] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -335,7 +337,7 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
             <div className="space-y-1">
               {referredProfiles.map(p => (
                 <div key={p.id} className="relative">
-                  <ProfileRow profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} onViewProfile={() => setViewingProfile(p)} />
+                  <ProfileRow profile={p} isFollowing={following.has(p.id)} onFollow={() => toggleFollow(p.id)} onUnfollow={() => setUnfollowTarget(p)} onViewProfile={() => setViewingProfile(p)} />
                   <span className="absolute top-3 right-14 text-[10px] font-medium text-green-600 bg-green-50 rounded-full px-2 py-0.5">Joined</span>
                 </div>
               ))}
@@ -352,7 +354,7 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
                 const profile = profiles.find(p => p.email?.toLowerCase() === invite.email)!;
                 return (
                   <div key={invite.email} className="relative">
-                    <ProfileRow profile={profile} isFollowing={following.has(profile.id)} onToggle={() => toggleFollow(profile.id)} onViewProfile={() => setViewingProfile(profile)} />
+                    <ProfileRow profile={profile} isFollowing={following.has(profile.id)} onFollow={() => toggleFollow(profile.id)} onUnfollow={() => setUnfollowTarget(profile)} onViewProfile={() => setViewingProfile(profile)} />
                     <span className="absolute top-3 right-14 text-[10px] font-medium text-green-600 bg-green-50 rounded-full px-2 py-0.5">Joined</span>
                   </div>
                 );
@@ -397,7 +399,7 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
             </p>
             <div className="space-y-1">
               {contactMatches.map(p => (
-                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} onViewProfile={() => setViewingProfile(p)} />
+                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onFollow={() => toggleFollow(p.id)} onUnfollow={() => setUnfollowTarget(p)} onViewProfile={() => setViewingProfile(p)} />
               ))}
             </div>
           </div>
@@ -437,17 +439,65 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
           ) : (
             <div className="space-y-1">
               {filtered.map(p => (
-                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onToggle={() => toggleFollow(p.id)} onViewProfile={() => setViewingProfile(p)} />
+                <ProfileRow key={p.id} profile={p} isFollowing={following.has(p.id)} onFollow={() => toggleFollow(p.id)} onUnfollow={() => setUnfollowTarget(p)} onViewProfile={() => setViewingProfile(p)} />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Unfollow confirmation sheet */}
+      {unfollowTarget && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setUnfollowTarget(null)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-4">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex flex-col items-center px-6 pb-2">
+              {unfollowTarget.avatarUrl ? (
+                <img src={unfollowTarget.avatarUrl} alt={unfollowTarget.name} className="w-16 h-16 rounded-full object-cover mb-3" />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+                  <span className="text-xl font-bold text-slate-400">
+                    {unfollowTarget.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <p className="text-base font-bold text-gray-900 mb-1">Unfollow {unfollowTarget.name.split(' ')[0]}?</p>
+              <p className="text-sm text-gray-400 text-center mb-6">Their posts will no longer appear in your feed.</p>
+              <button
+                disabled={unfollowing}
+                onClick={async () => {
+                  setUnfollowing(true);
+                  const target = unfollowTarget;
+                  setUnfollowTarget(null);
+                  setFollowing(prev => { const s = new Set(prev); s.delete(target.id); return s; });
+                  onFollowChange?.(-1);
+                  const { error } = await supabase.from('follows').delete()
+                    .eq('follower_id', currentUserId).eq('following_id', target.id);
+                  if (error) {
+                    setFollowing(prev => new Set(prev).add(target.id));
+                    onFollowChange?.(1);
+                  }
+                  setUnfollowing(false);
+                }}
+                className="w-full py-3.5 bg-red-500 text-white rounded-2xl text-sm font-bold mb-3 disabled:opacity-50"
+              >
+                {unfollowing ? 'Unfollowing…' : 'Unfollow'}
+              </button>
+              <button onClick={() => setUnfollowTarget(null)} className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ProfileRow({ profile, isFollowing, onToggle, onViewProfile }: { profile: DiscoverProfile; isFollowing: boolean; onToggle: () => void; onViewProfile: () => void }) {
+function ProfileRow({ profile, isFollowing, onFollow, onUnfollow, onViewProfile }: { profile: DiscoverProfile; isFollowing: boolean; onFollow: () => void; onUnfollow: () => void; onViewProfile: () => void }) {
   const initials = profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
     <div className="flex items-center gap-3 py-2.5 cursor-pointer" onClick={onViewProfile}>
@@ -463,7 +513,7 @@ function ProfileRow({ profile, isFollowing, onToggle, onViewProfile }: { profile
         <p className="text-xs text-gray-400 truncate">@{profile.username}</p>
       </div>
       <button
-        onClick={e => { e.stopPropagation(); onToggle(); }}
+        onClick={e => { e.stopPropagation(); isFollowing ? onUnfollow() : onFollow(); }}
         className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${
           isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-slate-900 text-white'
         }`}

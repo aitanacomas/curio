@@ -242,3 +242,42 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
       })),
   }));
 }
+
+// ── Collections ───────────────────────────────────────────────────────────────
+export interface RealCollection {
+  id: string;
+  userId: string;
+  name: string;
+  emoji: string;
+  description: string;
+  createdAt: string;
+}
+
+export async function getUserCollections(userId: string): Promise<RealCollection[]> {
+  const { data } = await supabase
+    .from('user_collections')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    userId: r.user_id,
+    name: r.name ?? '',
+    emoji: r.emoji ?? '📍',
+    description: r.description ?? '',
+    createdAt: r.created_at,
+  }));
+}
+
+export async function createCollection(userId: string, payload: { name: string; emoji: string; description: string }): Promise<{ data: RealCollection | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('user_collections')
+    .insert({ user_id: userId, name: payload.name, emoji: payload.emoji, description: payload.description })
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return {
+    data: { id: data.id, userId: data.user_id, name: data.name, emoji: data.emoji, description: data.description ?? '', createdAt: data.created_at },
+    error: null,
+  };
+}

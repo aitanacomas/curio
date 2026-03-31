@@ -6,7 +6,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, type RealPost, type FollowProfile } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, type RealPost, type FollowProfile, type RealCollection } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -76,14 +76,30 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [unfollowTarget, setUnfollowTarget] = useState<FollowProfile | null>(null);
   const [unfollowing, setUnfollowing] = useState(false);
+  const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
+  const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
+  const [showCreateCollection, setShowCreateCollection] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const [newColEmoji, setNewColEmoji] = useState('📍');
+  const [newColDesc, setNewColDesc] = useState('');
+  const [savingCollection, setSavingCollection] = useState(false);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
       getUserPosts(appUser.id).then(setRealPosts);
+      getUserCollections(appUser.id).then(setRealCollections);
       getFollowCounts(appUser.id).then(({ followers, following }) => {
         setRealFollowerCount(followers);
         setRealFollowingCount(following);
       });
+      // Real-time: refresh posts when a new one is added
+      const channel = supabase
+        .channel('profile-posts')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts', filter: `user_id=eq.${appUser.id}` }, () => {
+          getUserPosts(appUser.id).then(setRealPosts);
+        })
+        .subscribe();
+      return () => { supabase.removeChannel(channel); };
     }
   }, [appUser]);
 
@@ -126,6 +142,60 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
   if (viewingUserId && appUser) {
     return <UserProfile userId={viewingUserId} currentUserId={appUser.id} onBack={() => setViewingUserId(null)} onFollowChange={onFollowingCountChange} />;
+  }
+
+  // ── Real Post Detail ────────────────────────────────────────────
+  if (selectedRealPost) {
+    const images = selectedRealPost.places.map(pl => pl.photoUrl).filter(Boolean);
+    const labels = selectedRealPost.places.map(pl => pl.name);
+    return (
+      <div className="bg-white min-h-screen">
+        <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
+          <button onClick={() => setSelectedRealPost(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
+            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          {(avatarPreview ?? appUser?.avatar) ? (
+            <img src={avatarPreview ?? appUser!.avatar!} alt={displayUser.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+              <span className="text-xs font-bold text-slate-400">{displayUser.name[0]?.toUpperCase()}</span>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 leading-tight">{displayUser.name}</p>
+            <p className="text-xs text-gray-400">{new Date(selectedRealPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+          </div>
+        </div>
+        {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
+        <div className="px-4 pt-3 pb-4 border-b border-gray-100">
+          <p className="text-sm text-gray-800 leading-relaxed">{selectedRealPost.caption}</p>
+          {selectedRealPost.locationLabel && (
+            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+              <MapPin size={10} strokeWidth={1.5} />{selectedRealPost.locationLabel}
+            </p>
+          )}
+        </div>
+        <div className="px-4 pt-4 pb-10">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+            {selectedRealPost.places.length} Place{selectedRealPost.places.length !== 1 ? 's' : ''}
+          </p>
+          <div className="space-y-3">
+            {selectedRealPost.places.map(place => (
+              <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                  <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{place.city}, {place.country}
+                  </p>
+                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // ── Edit Profile Sheet ──────────────────────────────────────────
@@ -817,12 +887,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {activeTab === 'Posts' && (
         isNewUser ? (
           realPosts.length > 0 ? (
-            <div className="grid grid-cols-3 gap-px bg-gray-100">
+            <div className="grid grid-cols-3 gap-px bg-white border-t border-gray-100">
               {realPosts.map(post => {
                 const firstImage = post.places[0]?.photoUrl;
                 if (!firstImage) return null;
                 return (
-                  <div key={post.id} className="aspect-square bg-white relative">
+                  <button key={post.id} onClick={() => setSelectedRealPost(post)} className="aspect-square bg-white relative">
                     <img src={firstImage} alt="" className="w-full h-full object-cover" />
                     {post.places.length > 1 && (
                       <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
@@ -832,9 +902,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                         </div>
                       </div>
                     )}
-                  </div>
+                  </button>
                 );
-              })}
+              }).filter(Boolean)}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 px-6">
@@ -872,32 +942,28 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         const mapPlaces = isNewUser
           ? realPosts.flatMap(post => post.places.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country })))
           : visitedPlaces;
+        const mapHeight = 'calc(100vh - 420px)';
         return (
-        <div className="px-4 pt-4 pb-6">
-          <p className="text-sm font-bold text-gray-900 mb-1">Your Travel Map</p>
-          <p className="text-xs text-gray-400 mb-3">Every place you've been, on one map.</p>
-          {mapPlaces.length > 0 ? (
-            <Suspense fallback={<div className="h-72 bg-gray-100 rounded-xl animate-pulse" />}>
-              <MapView places={mapPlaces} height="280px" />
-            </Suspense>
-          ) : (
-            <div className="h-72 bg-gray-50 rounded-xl flex flex-col items-center justify-center gap-2">
-              <span className="text-3xl">🗺️</span>
-              <p className="text-sm font-semibold text-gray-600">No places on your map yet</p>
-              <p className="text-xs text-gray-400 text-center max-w-[200px]">Add posts with photos to start building your travel map</p>
+        <div className="flex flex-col">
+          <Suspense fallback={<div style={{ height: mapHeight }} className="bg-gray-100 animate-pulse" />}>
+            <MapView places={mapPlaces} height={mapHeight} />
+          </Suspense>
+          <div className="px-4 pt-4 pb-6">
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: isNewUser ? new Set(realPosts.flatMap(p => p.places.map(pl => pl.country))).size : actualCountriesCount, label: 'Countries' },
+                { value: isNewUser ? realPosts.reduce((n, p) => n + p.places.length, 0) : actualPlacesCount, label: 'Places' },
+                { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts' },
+              ].map(stat => (
+                <div key={stat.label} className="text-center bg-gray-50 rounded-xl py-3">
+                  <p className="text-lg font-black text-gray-900">{stat.value}</p>
+                  <p className="text-xs text-gray-400">{stat.label}</p>
+                </div>
+              ))}
             </div>
-          )}
-          <div className="grid grid-cols-3 gap-2 mt-4">
-            {[
-              { value: isNewUser ? new Set(realPosts.flatMap(p => p.places.map(pl => pl.country))).size : actualCountriesCount, label: 'Countries' },
-              { value: isNewUser ? realPosts.reduce((n, p) => n + p.places.length, 0) : actualPlacesCount, label: 'Places' },
-              { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts' },
-            ].map(stat => (
-              <div key={stat.label} className="text-center bg-gray-50 rounded-xl py-3">
-                <p className="text-lg font-black text-gray-900">{stat.value}</p>
-                <p className="text-xs text-gray-400">{stat.label}</p>
-              </div>
-            ))}
+            {mapPlaces.length === 0 && isNewUser && (
+              <p className="text-xs text-gray-400 text-center mt-3">Your places will appear on the map as you add posts</p>
+            )}
           </div>
         </div>
         );
@@ -906,12 +972,32 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Collections Tab */}
       {activeTab === 'Collections' && (
         isNewUser ? (
-          <div className="flex flex-col items-center justify-center py-16 px-6">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-              <span className="text-3xl">🗂️</span>
+          <div className="px-4 pt-4 pb-6">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-bold text-gray-900">My Collections</p>
+              <button onClick={() => { setNewColName(''); setNewColEmoji('📍'); setNewColDesc(''); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
+                <Plus size={12} strokeWidth={2.5} /> New
+              </button>
             </div>
-            <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
-            <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+            {realCollections.length > 0 ? (
+              <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+                {realCollections.map(col => (
+                  <div key={col.id} className="text-left">
+                    <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center">
+                      <span className="text-5xl">{col.emoji}</span>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
+                    {col.description ? <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{col.description}</p> : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 px-6">
+                <span className="text-4xl mb-3">🗂️</span>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+              </div>
+            )}
           </div>
         ) : (
         <div className="px-4 pt-4 pb-6">
@@ -935,6 +1021,69 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
         </div>
         )
+      )}
+
+      {/* Create Collection Sheet */}
+      {showCreateCollection && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCreateCollection(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex items-center justify-between px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900">New Collection</h3>
+              <button
+                onClick={async () => {
+                  if (!newColName.trim() || !appUser) return;
+                  setSavingCollection(true);
+                  const { data, error } = await createCollection(appUser.id, { name: newColName.trim(), emoji: newColEmoji, description: newColDesc.trim() });
+                  setSavingCollection(false);
+                  if (!error && data) {
+                    setRealCollections(prev => [data, ...prev]);
+                    setShowCreateCollection(false);
+                  }
+                }}
+                disabled={!newColName.trim() || savingCollection}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-40"
+              >
+                {savingCollection ? 'Saving…' : 'Create'}
+              </button>
+            </div>
+            <div className="px-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl flex-shrink-0">
+                  {newColEmoji}
+                </div>
+                <input
+                  value={newColName}
+                  onChange={e => setNewColName(e.target.value)}
+                  placeholder="Collection name"
+                  className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+                />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Emoji</p>
+                <div className="flex gap-2 flex-wrap">
+                  {['📍','🌍','🏖️','🏔️','🍽️','☕','🏛️','🛍️','🌿','🎯','🌊','🏙️','❤️','⭐'].map(e => (
+                    <button key={e} onClick={() => setNewColEmoji(e)} className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-colors ${newColEmoji === e ? 'bg-gray-900' : 'bg-gray-100'}`}>
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Description (optional)</p>
+                <input
+                  value={newColDesc}
+                  onChange={e => setNewColDesc(e.target.value)}
+                  placeholder="What's this collection about?"
+                  className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Menu Bottom Sheet */}
