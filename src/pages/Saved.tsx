@@ -1016,18 +1016,20 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             });
             const det = await detRes.json();
 
-            // Verify result loosely matches item name
+            // Verify result is a genuine match — require significant word overlap
             const placeName = (det.displayName?.text ?? '').toLowerCase();
-            const itemFirst = item.name.toLowerCase().split(' ')[0];
-            if (placeName && itemFirst.length > 2
-              && !placeName.includes(itemFirst)
-              && !item.name.toLowerCase().includes(placeName.split(' ')[0])) continue;
+            const itemWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+            const placeWords = placeName.split(/\s+/).filter((w: string) => w.length > 2);
+            const overlap = itemWords.filter(w => placeWords.some((pw: string) => pw.includes(w) || w.includes(pw)));
+            // Need at least half the item's significant words to match
+            if (placeName && itemWords.length > 0 && overlap.length < Math.ceil(itemWords.length / 2)) continue;
 
             const newAddress = det.formattedAddress ?? '';
             const newNeighborhood = extractNeighborhood(det.addressComponents ?? [], det.formattedAddress);
             const photoName = det.photos?.[0]?.name;
-            const isDefaultImg = !item.image || item.image.includes('unsplash.com/photo-1476514525535');
-            const newImage = isDefaultImg && photoName
+            // Only replace image if item has no image at all (never overwrite user-set or previously enriched photos)
+            const hasNoImage = !item.image || item.image.includes('unsplash.com/photo-1476514525535');
+            const newImage = hasNoImage && photoName
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
               : '';
 

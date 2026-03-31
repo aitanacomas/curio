@@ -682,9 +682,11 @@ export async function createPlanItem(
     .single();
   // Retry stripping optional columns that may not be migrated yet
   if (error || !item) {
+    console.error('[createPlanItem] initial insert error:', error?.message);
     const { notes: _n, status: _s, check_in: _ci, check_out: _co,
             address: _a, neighborhood: _nb, time_end: _te, location: _loc, ...minimal } = payload as any;
     const retry = await supabase.from('plan_items').insert(minimal).select().single();
+    if (retry.error) console.error('[createPlanItem] retry error:', retry.error.message);
     item = retry.data;
     error = retry.error;
   }
@@ -705,10 +707,13 @@ export async function updatePlanItem(
 ): Promise<boolean> {
   const { error } = await supabase.from('plan_items').update(data).eq('id', itemId);
   if (!error) return true;
-  // Retry stripping newer optional columns that may not be migrated yet
+  console.error('[updatePlanItem] error:', error.message, '| data keys:', Object.keys(data));
+  // Retry without newer columns in case migration hasn't run yet
   const { address: _a, neighborhood: _nb, time_end: _te, location: _loc,
           notes: _n, status: _s, check_in: _ci, check_out: _co, ...minimal } = data as any;
+  if (Object.keys(minimal).length === 0) return false;
   const { error: retryError } = await supabase.from('plan_items').update(minimal).eq('id', itemId);
+  if (retryError) console.error('[updatePlanItem] retry error:', retryError.message);
   return !retryError;
 }
 
