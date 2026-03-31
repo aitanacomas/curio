@@ -1,8 +1,6 @@
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { useEffect } from 'react';
-import type { Place } from '../types';
-
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
@@ -18,7 +16,16 @@ const createDotIcon = () =>
     iconAnchor: [7, 7],
   });
 
-function FitBounds({ places }: { places: Place[] }) {
+interface MapPlace {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  city: string;
+  country: string;
+}
+
+function FitBounds({ places }: { places: MapPlace[] }) {
   const map = useMap();
   useEffect(() => {
     if (places.length > 1) {
@@ -30,7 +37,7 @@ function FitBounds({ places }: { places: Place[] }) {
 }
 
 interface Props {
-  places: Place[];
+  places: MapPlace[];
   center?: [number, number];
   zoom?: number;
   height?: string;

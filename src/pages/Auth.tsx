@@ -63,6 +63,7 @@ export default function Auth({ onAuth }: AuthProps) {
       name: profile?.name ?? data.user.email ?? '',
       username: profile?.username ?? '',
       avatar: profile?.avatar_url ?? null,
+      bio: profile?.bio ?? '',
       isDemo: false,
       followingCount: profile?.following_count ?? 0,
     }, false);
@@ -118,6 +119,7 @@ export default function Auth({ onAuth }: AuthProps) {
       name: `${firstName} ${lastName}`.trim(),
       username,
       avatar: avatarUrl,
+      bio: '',
       isDemo: false,
       followingCount: 0,
     }, true);
@@ -126,7 +128,7 @@ export default function Auth({ onAuth }: AuthProps) {
 
   // ── Demo ─────────────────────────────────────────────────────────
   const handleDemoLogin = () => {
-    onAuth({ id: 'demo-user', name: 'Aitana Comas', username: 'aitanacomas', avatar: '/aitana-avatar.jpg', isDemo: false, followingCount: 0 }, true);
+    onAuth({ id: 'demo-user', name: 'Aitana Comas', username: 'aitanacomas', avatar: '/aitana-avatar.jpg', bio: '', isDemo: false, followingCount: 0 }, true);
   };
 
   const StepDots = ({ current }: { current: number }) => (

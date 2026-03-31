@@ -42,7 +42,7 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
-export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null }) => void; onFollowingCountChange?: (delta: number) => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
@@ -106,7 +106,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     avatar: appUser.avatar || user.avatar,
     followersCount: 0,
     followingCount: appUser.followingCount,
-    bio: '',
+    bio: appUser?.bio ?? '',
   } : user;
 
   const getPlaceById = (id: string) => places.find(p => p.id === id)!;
@@ -166,6 +166,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           name: updates.name!,
           username: updates.username!,
           avatar: newAvatarUrl ?? appUser.avatar,
+          bio: updates.bio ?? '',
         });
         setAvatarFile(null);
         setAvatarPreview(null);
@@ -735,11 +736,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
           </button>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-500 flex items-center gap-1">
-              <MapPin size={11} strokeWidth={1.5} className="flex-shrink-0" />
-              Based in San Francisco, CA
-            </p>
-            <p className="text-xs text-gray-500 mt-0.5">{displayUser.bio}</p>
+            {displayUser.bio ? (
+              <p className="text-xs text-gray-500 leading-relaxed">{displayUser.bio}</p>
+            ) : (
+              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic">Add a bio…</button>
+            )}
           </div>
         </div>
 
@@ -842,13 +843,25 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       )}
 
       {/* Map Tab */}
-      {activeTab === 'Map' && (
+      {activeTab === 'Map' && (() => {
+        const mapPlaces = isNewUser
+          ? realPosts.flatMap(post => post.places.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country })))
+          : visitedPlaces;
+        return (
         <div className="px-4 pt-4 pb-6">
           <p className="text-sm font-bold text-gray-900 mb-1">Your Travel Map</p>
           <p className="text-xs text-gray-400 mb-3">Every place you've been, on one map.</p>
-          <Suspense fallback={<div className="h-72 bg-gray-100 rounded-xl animate-pulse" />}>
-            <MapView places={visitedPlaces} height="280px" />
-          </Suspense>
+          {mapPlaces.length > 0 ? (
+            <Suspense fallback={<div className="h-72 bg-gray-100 rounded-xl animate-pulse" />}>
+              <MapView places={mapPlaces} height="280px" />
+            </Suspense>
+          ) : (
+            <div className="h-72 bg-gray-50 rounded-xl flex flex-col items-center justify-center gap-2">
+              <span className="text-3xl">🗺️</span>
+              <p className="text-sm font-semibold text-gray-600">No places on your map yet</p>
+              <p className="text-xs text-gray-400 text-center max-w-[200px]">Add posts with photos to start building your travel map</p>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-2 mt-4">
             {[
               { value: isNewUser ? new Set(realPosts.flatMap(p => p.places.map(pl => pl.country))).size : actualCountriesCount, label: 'Countries' },
@@ -862,7 +875,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Collections Tab */}
       {activeTab === 'Collections' && (

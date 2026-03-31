@@ -20,6 +20,8 @@ interface IdentifiedPlace {
   country: string;
   analyzing: boolean;
   expanded: boolean;
+  lat?: number;
+  lng?: number;
 }
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
@@ -126,7 +128,7 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
       if (comp.types?.includes('locality')) city = comp.longText ?? '';
       if (comp.types?.includes('country')) country = comp.longText ?? '';
     }
-    return { name, category, city, country };
+    return { name, category, city, country, lat, lng };
   } catch { return null; }
 }
 
@@ -186,7 +188,7 @@ function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>
       const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
         headers: {
           'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-          'X-Goog-FieldMask': 'displayName,types,addressComponents',
+          'X-Goog-FieldMask': 'displayName,types,addressComponents,location',
         },
       });
       const place = await res.json();
@@ -198,7 +200,9 @@ function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>
         if (comp.types?.includes('locality')) city = comp.longText ?? '';
         if (comp.types?.includes('country')) country = comp.longText ?? '';
       }
-      onSelect({ name, category, city, country });
+      const lat: number | undefined = place.location?.latitude;
+      const lng: number | undefined = place.location?.longitude;
+      onSelect({ name, category, city, country, lat, lng });
     } catch { onSelect({ name: text }); }
   };
 
@@ -499,9 +503,14 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
     entries.forEach(async (entry, i) => {
       const file = files[i];
       let result: Partial<IdentifiedPlace> | null = null;
-      if (file && GOOGLE_PLACES_KEY) {
+      if (file) {
         const gps = await readExifGps(file);
-        if (gps) result = await lookupPlaceFromGps(gps.lat, gps.lng);
+        if (gps) {
+          if (GOOGLE_PLACES_KEY) {
+            result = await lookupPlaceFromGps(gps.lat, gps.lng);
+          }
+          result = { ...(result ?? {}), lat: gps.lat, lng: gps.lng };
+        }
       }
       setPlaces(prev => prev.map(p =>
         p.id === entry.id ? { ...p, ...(result ?? {}), analyzing: false } : p
@@ -589,6 +598,8 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
         country: p.country,
         photo_url: p.photoUrl,
         position: i,
+        lat: p.lat ?? null,
+        lng: p.lng ?? null,
       }));
       const { error: placesErr } = await supabase.from('post_places').insert(placesRows);
       if (placesErr) throw placesErr;

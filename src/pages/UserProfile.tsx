@@ -24,6 +24,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [showFollowList, setShowFollowList] = useState<'followers' | 'following' | null>(null);
   const [followList, setFollowList] = useState<{ id: string; name: string; username: string; avatarUrl: string | null }[]>([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [showUnfollowConfirm, setShowUnfollowConfirm] = useState(false);
+  const [unfollowing, setUnfollowing] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -42,18 +44,32 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
     });
   }, [userId, currentUserId]);
 
-  const handleFollow = async () => {
-    const nowFollowing = !following;
-    setFollowing(nowFollowing);
-    setFollowerCount(c => c + (nowFollowing ? 1 : -1));
-    onFollowChange?.(nowFollowing ? 1 : -1);
-    if (nowFollowing) {
-      const { error } = await supabase.from('follows').insert({ follower_id: currentUserId, following_id: userId });
-      if (error) { setFollowing(false); setFollowerCount(c => c - 1); onFollowChange?.(-1); }
+  const handleFollow = () => {
+    if (following) {
+      setShowUnfollowConfirm(true);
     } else {
-      const { error } = await supabase.from('follows').delete().eq('follower_id', currentUserId).eq('following_id', userId);
-      if (error) { setFollowing(true); setFollowerCount(c => c + 1); onFollowChange?.(1); }
+      doFollow();
     }
+  };
+
+  const doFollow = async () => {
+    setFollowing(true);
+    setFollowerCount(c => c + 1);
+    onFollowChange?.(1);
+    const { error } = await supabase.from('follows').insert({ follower_id: currentUserId, following_id: userId });
+    if (error) { setFollowing(false); setFollowerCount(c => c - 1); onFollowChange?.(-1); }
+  };
+
+  const doUnfollow = async () => {
+    setUnfollowing(true);
+    const { error } = await supabase.from('follows').delete().eq('follower_id', currentUserId).eq('following_id', userId);
+    if (!error) {
+      setFollowing(false);
+      setFollowerCount(c => c - 1);
+      onFollowChange?.(-1);
+    }
+    setUnfollowing(false);
+    setShowUnfollowConfirm(false);
   };
 
   const openFollowList = async (type: 'followers' | 'following') => {
@@ -188,7 +204,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
 
   // ── Main profile view ─────────────────────────────────────────────
   return (
-    <div className="bg-white min-h-screen">
+    <div className="bg-white min-h-screen relative">
       {/* Top nav */}
       <div className="flex items-center justify-between px-4 pt-5 pb-3">
         <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
@@ -314,6 +330,39 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           <p className="text-slate-400 text-sm text-center max-w-[200px]">
             Collections {profile?.name.split(' ')[0]} creates will appear here
           </p>
+        </div>
+      )}
+
+      {/* Unfollow confirmation sheet */}
+      {showUnfollowConfirm && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowUnfollowConfirm(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-4">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex flex-col items-center px-6 pb-2">
+              {profile?.avatarUrl ? (
+                <img src={profile.avatarUrl} alt={profile.name} className="w-16 h-16 rounded-full object-cover mb-3" />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+                  <span className="text-xl font-bold text-slate-400">{initials || '?'}</span>
+                </div>
+              )}
+              <p className="text-base font-bold text-gray-900 mb-1">Unfollow {profile?.name.split(' ')[0]}?</p>
+              <p className="text-sm text-gray-400 text-center mb-6">Their posts will no longer appear in your feed.</p>
+              <button
+                disabled={unfollowing}
+                onClick={doUnfollow}
+                className="w-full py-3.5 bg-red-500 text-white rounded-2xl text-sm font-bold mb-3 disabled:opacity-50"
+              >
+                {unfollowing ? 'Unfollowing…' : 'Unfollow'}
+              </button>
+              <button onClick={() => setShowUnfollowConfirm(false)} className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold">
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

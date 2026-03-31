@@ -14,6 +14,8 @@ export interface RealPostPlace {
   country: string;
   photoUrl: string;
   position: number;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface RealPost {
@@ -58,7 +60,7 @@ export async function getFeedPosts(): Promise<RealPost[]> {
       created_at,
       hashtags,
       profiles ( name, username, avatar_url ),
-      post_places ( id, name, category, city, country, photo_url, position )
+      post_places ( id, name, category, city, country, photo_url, position, lat, lng )
     `)
     .eq('visibility', 'feed')
     .order('created_at', { ascending: false })
@@ -88,6 +90,8 @@ export async function getFeedPosts(): Promise<RealPost[]> {
         country: pl.country ?? '',
         photoUrl: pl.photo_url ?? '',
         position: pl.position ?? 0,
+        lat: pl.lat ?? null,
+        lng: pl.lng ?? null,
       })),
   }));
 }
@@ -204,7 +208,7 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
       created_at,
       hashtags,
       profiles ( name, username, avatar_url ),
-      post_places ( id, name, category, city, country, photo_url, position )
+      post_places ( id, name, category, city, country, photo_url, position, lat, lng )
     `)
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
@@ -233,6 +237,8 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
         country: pl.country ?? '',
         photoUrl: pl.photo_url ?? '',
         position: pl.position ?? 0,
+        lat: pl.lat ?? null,
+        lng: pl.lng ?? null,
       })),
   }));
 }

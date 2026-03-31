@@ -44,6 +44,7 @@ export default function App() {
             name: profile.name,
             username: profile.username,
             avatar: profile.avatar_url ?? null,
+            bio: profile.bio ?? '',
             isDemo: false,
             followingCount: profile.following_count ?? 0,
           });
@@ -143,7 +144,7 @@ export default function App() {
       case 'saved':
         return <Saved key={pageResetKey} isNewUser={appUser?.isDemo === false} />;
       case 'profile':
-        return <Profile key={pageResetKey} onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates) => setAppUser(prev => prev ? { ...prev, ...updates } : prev)} onFollowingCountChange={(delta) => setAppUser(prev => prev ? { ...prev, followingCount: prev.followingCount + delta } : prev)} />;
+        return <Profile key={pageResetKey} onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates: { name: string; username: string; avatar: string | null; bio: string }) => setAppUser(prev => prev ? { ...prev, name: updates.name, username: updates.username, avatar: updates.avatar, bio: updates.bio } : prev)} onFollowingCountChange={(delta) => setAppUser(prev => prev ? { ...prev, followingCount: prev.followingCount + delta } : prev)} />;
     }
   };
 
