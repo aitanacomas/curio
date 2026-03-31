@@ -5,6 +5,7 @@ import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
+import UserProfile from './UserProfile';
 import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, type RealPost, type FollowProfile } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -69,6 +70,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [followerProfiles, setFollowerProfiles] = useState<FollowProfile[]>([]);
   const [followingProfiles, setFollowingProfiles] = useState<FollowProfile[]>([]);
   const [loadingFollowList, setLoadingFollowList] = useState(false);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -110,6 +112,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   // ── Find People ─────────────────────────────────────────────────
   if (showFindPeople) {
     return <FindPeople currentUserId={appUser?.id ?? ''} onBack={() => setShowFindPeople(false)} onFollowChange={onFollowingCountChange} />;
+  }
+
+  if (viewingUserId && appUser) {
+    return <UserProfile userId={viewingUserId} currentUserId={appUser.id} onBack={() => setViewingUserId(null)} onFollowChange={onFollowingCountChange} />;
   }
 
   // ── Edit Profile Sheet ──────────────────────────────────────────
@@ -259,20 +265,29 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
           ) : list.length > 0 ? (
             list.map(u => {
-              const initials = u.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+              const ini = u.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+              const isMe = u.id === appUser?.id;
               return (
-                <div key={u.id} className="flex items-center gap-3 px-4 py-3.5">
+                <div key={u.id} className="flex items-center gap-3 px-4 py-3.5 cursor-pointer" onClick={() => !isMe && setViewingUserId(u.id)}>
                   {u.avatarUrl ? (
                     <img src={u.avatarUrl} alt={u.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
                   ) : (
                     <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-semibold text-slate-400">{initials || '?'}</span>
+                      <span className="text-sm font-semibold text-slate-400">{ini || '?'}</span>
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
                     <p className="text-xs text-gray-400">@{u.username}</p>
                   </div>
+                  {!isMe && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setViewingUserId(u.id); }}
+                      className="text-xs font-semibold bg-gray-100 text-gray-600 rounded-full px-3 py-1.5 flex-shrink-0"
+                    >
+                      {showFollowers === 'following' ? 'Following' : 'View'}
+                    </button>
+                  )}
                 </div>
               );
             })
