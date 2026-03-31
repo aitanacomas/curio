@@ -607,7 +607,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [plansLoading, setPlansLoading] = useState(false);
   const [realSavedPlaces, setRealSavedPlaces] = useState<SavedPlace[]>([]);
   const [realSavedPlaceIds, setRealSavedPlaceIds] = useState<Set<string>>(new Set());
-  const [planViewMode, setPlanViewMode] = useState<'itinerary' | 'list' | 'map'>('itinerary');
+  const [showMap, setShowMap] = useState(false);
   const [mapCoords, setMapCoords] = useState<Record<string, { lat: number; lng: number }>>({});
   const [mapLoading, setMapLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -1087,7 +1087,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
   // ── Geocode items for map view ──────────────────────────────────────────
   useEffect(() => {
-    if (planViewMode !== 'map' || !selectedTrip || !GOOGLE_PLACES_KEY) return;
+    if (!showMap || !selectedTrip || !GOOGLE_PLACES_KEY) return;
     const allItems = selectedTrip.days.flatMap(d => d.items);
     const toGeocode = allItems.filter(item => !mapCoords[item.id]);
     if (toGeocode.length === 0) return;
@@ -1120,7 +1120,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       }
     })();
     return () => { cancelled = true; };
-  }, [planViewMode, selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showMap, selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const savedPlaces = isNewUser
     ? places.filter(p => savedPlaceSet.has(p.id))
@@ -1263,21 +1263,46 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
 
 
-        {/* View toggle + place list — TRIP only (events returned early above) */}
+        {/* Place list — TRIP only (events returned early above) */}
         <div className="px-4 pt-4 pb-28">
-          <>
-          {/* Toggle */}
+
+          {/* Header row: place count + show/hide map */}
           {selectedTrip.days.length > 0 && (
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{totalItems} places</p>
-              <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5">
-                {(['itinerary', 'list', 'map'] as const).map(mode => (
-                  <button key={mode} onClick={() => setPlanViewMode(mode)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${planViewMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
-                    {mode === 'itinerary' ? 'By day' : mode === 'list' ? 'List' : 'Map'}
-                  </button>
-                ))}
-              </div>
+              <button
+                onClick={() => setShowMap(m => !m)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
+              >
+                <MapPin size={12} strokeWidth={2} />
+                {showMap ? 'Hide map' : 'Show map'}
+              </button>
+            </div>
+          )}
+
+          {/* Inline map — shown/hidden */}
+          {showMap && selectedTrip.days.length > 0 && (
+            <div className="rounded-2xl overflow-hidden mb-5" style={{ height: 260 }}>
+              <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
+                {mapLoading && Object.keys(mapCoords).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
+                    <Loader2 size={20} className="animate-spin text-gray-400" />
+                    <p className="text-xs text-gray-400">Finding places on map…</p>
+                  </div>
+                ) : (
+                  <MapView
+                    places={selectedTrip.days.flatMap(d => d.items).filter(i => mapCoords[i.id]).map(i => ({
+                      id: i.id,
+                      lat: mapCoords[i.id].lat,
+                      lng: mapCoords[i.id].lng,
+                      name: i.name,
+                      city: selectedTrip.destination,
+                      country: selectedTrip.country,
+                    }))}
+                    height="260px"
+                  />
+                )}
+              </Suspense>
             </div>
           )}
 
@@ -1295,34 +1320,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <Plus size={14} strokeWidth={2} /> Add a place
               </button>
             </div>
-          ) : planViewMode === 'map' ? (
-            <div className="rounded-2xl overflow-hidden" style={{ height: 420 }}>
-              <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
-                {mapLoading && Object.keys(mapCoords).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
-                    <Loader2 size={20} className="animate-spin text-gray-400" />
-                    <p className="text-xs text-gray-400">Finding places on map…</p>
-                  </div>
-                ) : (
-                  <MapView
-                    places={selectedTrip.days.flatMap(d => d.items).filter(i => mapCoords[i.id]).map(i => ({
-                      id: i.id,
-                      lat: mapCoords[i.id].lat,
-                      lng: mapCoords[i.id].lng,
-                      name: i.name,
-                      city: selectedTrip.destination,
-                      country: selectedTrip.country,
-                    }))}
-                    height="420px"
-                  />
-                )}
-              </Suspense>
-            </div>
-          ) : planViewMode === 'itinerary' ? (
+          ) : (
             <div className="space-y-6">
               {sortedDays
-                .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx) // deduplicate by label
-                .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length) // cap to trip date range
+                .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx)
+                .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length)
                 .map((day, di) => (
                 <div key={di}>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{day.label}</p>
@@ -1358,7 +1360,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                             {item.status === 'pending' && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
                           </div>
                         </div>
-
                       </div>
                     ))}
                     {day.items.length === 0 && (
@@ -1376,47 +1377,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <Plus size={14} strokeWidth={1.5} /> Add a day
               </button>
             </div>
-          ) : (
-            <div className="space-y-2.5">
-              {allItems.map(item => {
-                const itemDay = selectedTrip.days.find(d => d.items.some(i => i.id === item.id));
-                return (
-                <button key={item.id} onClick={() => { setDetailItem(item); setDetailItemDayId(itemDay?.id ?? null); setShowItemDetail(true); }} className="w-full bg-gray-50 rounded-2xl p-3 text-left">
-                  <div className="flex items-center gap-3">
-                    {item.image
-                      ? <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                      : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 text-xl">{categoryEmoji[item.category] ?? '📍'}</div>
-                    }
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
-                        {item.neighborhood ? ` · ${item.neighborhood}` : ''}
-                      </p>
-                      {item.time && (
-                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                          <Clock size={9} strokeWidth={1.5} />{item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
-                        </p>
-                      )}
-                      {(item.checkIn || item.checkOut) && (
-                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                          <CalendarDays size={9} strokeWidth={1.5} />{item.checkIn}{item.checkIn && item.checkOut ? ' → ' : ''}{item.checkOut}
-                        </p>
-                      )}
-                    </div>
-                    {(item.booked || item.status === 'booked')
-                      ? <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-1 rounded-full flex-shrink-0">Booked</span>
-                      : item.status === 'pending'
-                      ? <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-1 rounded-full flex-shrink-0">Pending</span>
-                      : null
-                    }
-                  </div>
-                </button>
-                );
-              })}
-            </div>
           )}
-          </>
         </div>
         </> /* end TRIP view */
         )}
@@ -3061,7 +3022,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 {plans.filter(t => t.status === 'dreaming').map(trip => (
                   trip.description?.startsWith('[event]')
                     ? <EventCard key={trip.id} trip={trip} onClick={() => { setSelectedEvent(trip); setShowEventSheet(true); }} />
-                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip); setPlanViewMode('itinerary'); }} />
+                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip);  }} />
                 ))}
               </div>
             </div>
@@ -3077,7 +3038,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   .map(trip => (
                   trip.description?.startsWith('[event]')
                     ? <EventCard key={trip.id} trip={trip} onClick={() => { setSelectedEvent(trip); setShowEventSheet(true); }} />
-                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip); setPlanViewMode('itinerary'); }} />
+                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip);  }} />
                 ))}
               </div>
             </div>
@@ -3091,7 +3052,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 {plans.filter(t => t.status === 'past')
                   .sort((a, b) => (parseTripStartDate(b.dates, b.status)?.getTime() ?? 0) - (parseTripStartDate(a.dates, a.status)?.getTime() ?? 0))
                   .map(trip => (
-                  <button key={trip.id} onClick={() => { setSelectedTrip(trip); setPlanViewMode('itinerary'); }}
+                  <button key={trip.id} onClick={() => { setSelectedTrip(trip);  }}
                     className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left">
                     <img src={trip.coverImage} alt={trip.destination} className="w-14 h-14 rounded-xl object-cover flex-shrink-0 opacity-40" />
                     <div className="flex-1 min-w-0">
@@ -3662,7 +3623,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   setShowEventSheet(true);
                 } else {
                   setSelectedTrip(newPlan);
-                  setPlanViewMode('itinerary');
+                  
                 }
               }}
               disabled={!newPlanName.trim()}

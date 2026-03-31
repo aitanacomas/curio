@@ -121,7 +121,9 @@
       "Bash(supabase --version)",
       "Bash(\"/Users/aitanacomas/Desktop/Social Media:*)",
       "Bash(vercel deploy:*)",
-      "Bash(vercel list:*)"
+      "Bash(vercel list:*)",
+      "Bash(sed -i '' 's/setPlanViewMode\\(''''itinerary''''\\);//g' src/pages/Saved.tsx)",
+      "Bash(sed -i '' 's/; setPlanViewMode\\(''''itinerary''''\\)//g' src/pages/Saved.tsx)"
     ]
   }
 }
