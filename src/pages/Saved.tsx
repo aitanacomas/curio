@@ -393,13 +393,14 @@ function extractNeighborhood(comps: any[], formattedAddress?: string): string {
   if (comps.length > 0) {
     const find = (...types: string[]) =>
       comps.find((c: any) => types.some(t => c.types?.includes(t)))?.longText ?? '';
-    // Specific area within city
+    // Specific area / neighborhood within city
     const area = find('neighborhood') || find('sublocality_level_1') || find('sublocality');
-    // Parent city
-    const city = find('locality') || find('administrative_area_level_2') || find('administrative_area_level_3');
-    // Build "Area, City" — if area already contains a comma it already has the city embedded
+    // Actual city (locality only — no county-level)
+    const city = find('locality');
+
+    // Build "Area, City" — if area already contains a comma it already embeds the city
     if (area && city) {
-      if (area.includes(',')) return area; // already "Polanco, Mexico City" format
+      if (area.includes(',')) return area; // already "Polanco, Mexico City" style
       if (area === city) return city;
       return `${area}, ${city}`;
     }
