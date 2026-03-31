@@ -388,17 +388,13 @@ function PlaceRow({ place, isLocked, isSaved, onToggleSave, onBook }: {
 }
 
 /** Extract a "Neighborhood, City" string from Google Places address components.
- *  Falls back to parsing the formatted address string if no components. */
+ *  When components are available they are always preferred over string parsing. */
 function extractNeighborhood(comps: any[], formattedAddress?: string): string {
   if (comps.length > 0) {
     const find = (...types: string[]) =>
       comps.find((c: any) => types.some(t => c.types?.includes(t)))?.longText ?? '';
-    // Specific area / neighborhood within city
     const area = find('neighborhood') || find('sublocality_level_1') || find('sublocality');
-    // Actual city (locality only — no county-level)
     const city = find('locality');
-
-    // Build "Area, City" — if area already contains a comma it already embeds the city
     if (area && city) {
       if (area.includes(',')) return area; // already "Polanco, Mexico City" style
       if (area === city) return city;
@@ -406,12 +402,19 @@ function extractNeighborhood(comps: any[], formattedAddress?: string): string {
     }
     if (area) return area;
     if (city) return city;
+    // Components exist but no neighborhood/city found — don't fall back to string parsing
+    return '';
   }
-  // Fallback: parse from "Street, Area, State, Country" address string
+  // No components — parse address string carefully
+  // Find the city by looking for the segment just before a state/province code
+  // e.g. "41 Lagorce Cir, Miami Beach, FL 33141, USA" → "Miami Beach"
   if (formattedAddress) {
+    const stateMatch = formattedAddress.match(/,\s*([^,]+),\s*[A-Z]{2}[\s,]/);
+    if (stateMatch) return stateMatch[1].trim();
+    // Non-US: return second-to-last segment (before country)
     const parts = formattedAddress.split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length >= 3) return `${parts[1]}, ${parts[2]}`; // "Area, State/City"
-    if (parts.length === 2) return parts[1];
+    if (parts.length >= 3) return parts[parts.length - 2];
+    if (parts.length === 2) return parts[0];
   }
   return '';
 }
