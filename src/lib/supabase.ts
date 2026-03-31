@@ -250,6 +250,7 @@ export interface RealCollection {
   name: string;
   emoji: string;
   description: string;
+  coverImageUrl: string | null;
   createdAt: string;
 }
 
@@ -265,19 +266,20 @@ export async function getUserCollections(userId: string): Promise<RealCollection
     name: r.name ?? '',
     emoji: r.emoji ?? '📍',
     description: r.description ?? '',
+    coverImageUrl: r.cover_image_url ?? null,
     createdAt: r.created_at,
   }));
 }
 
-export async function createCollection(userId: string, payload: { name: string; emoji: string; description: string }): Promise<{ data: RealCollection | null; error: string | null }> {
+export async function createCollection(userId: string, payload: { name: string; emoji: string; description: string; cover_image_url?: string | null }): Promise<{ data: RealCollection | null; error: string | null }> {
   const { data, error } = await supabase
     .from('user_collections')
-    .insert({ user_id: userId, name: payload.name, emoji: payload.emoji, description: payload.description })
+    .insert({ user_id: userId, name: payload.name, emoji: payload.emoji, description: payload.description, cover_image_url: payload.cover_image_url ?? null })
     .select()
     .single();
   if (error) return { data: null, error: error.message };
   return {
-    data: { id: data.id, userId: data.user_id, name: data.name, emoji: data.emoji, description: data.description ?? '', createdAt: data.created_at },
+    data: { id: data.id, userId: data.user_id, name: data.name, emoji: data.emoji, description: data.description ?? '', coverImageUrl: data.cover_image_url ?? null, createdAt: data.created_at },
     error: null,
   };
 }

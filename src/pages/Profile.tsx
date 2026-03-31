@@ -82,7 +82,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [newColName, setNewColName] = useState('');
   const [newColEmoji, setNewColEmoji] = useState('📍');
   const [newColDesc, setNewColDesc] = useState('');
+  const [newColCoverFile, setNewColCoverFile] = useState<File | null>(null);
+  const [newColCoverPreview, setNewColCoverPreview] = useState<string | null>(null);
   const [savingCollection, setSavingCollection] = useState(false);
+  const colCoverInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -1011,7 +1014,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           <div className="px-4 pt-4 pb-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-bold text-gray-900">My Collections</p>
-              <button onClick={() => { setNewColName(''); setNewColEmoji('📍'); setNewColDesc(''); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
+              <button onClick={() => { setNewColName(''); setNewColEmoji('📍'); setNewColDesc(''); setNewColCoverFile(null); setNewColCoverPreview(null); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
                 <Plus size={12} strokeWidth={2.5} /> New
               </button>
             </div>
@@ -1019,8 +1022,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <div className="grid grid-cols-2 gap-x-3 gap-y-5">
                 {realCollections.map(col => (
                   <div key={col.id} className="text-left">
-                    <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center">
-                      <span className="text-5xl">{col.emoji}</span>
+                    <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
+                      {col.coverImageUrl
+                        ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
+                        : <span className="text-5xl">{col.emoji || '🗂️'}</span>
+                      }
+                      {col.coverImageUrl && col.emoji && (
+                        <div className="absolute bottom-2 left-2 text-xl leading-none">{col.emoji}</div>
+                      )}
                     </div>
                     <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
                     {col.description ? <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{col.description}</p> : null}
@@ -1073,7 +1082,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 onClick={async () => {
                   if (!newColName.trim() || !appUser) return;
                   setSavingCollection(true);
-                  const { data, error } = await createCollection(appUser.id, { name: newColName.trim(), emoji: newColEmoji, description: newColDesc.trim() });
+                  let coverUrl: string | null = null;
+                  if (newColCoverFile) {
+                    const ext = newColCoverFile.name.split('.').pop() ?? 'jpg';
+                    const path = `collections/${appUser.id}/${Date.now()}.${ext}`;
+                    const { error: upErr } = await supabase.storage.from('avatars').upload(path, newColCoverFile, { upsert: true, contentType: newColCoverFile.type });
+                    if (!upErr) coverUrl = getPublicUrl('avatars', path);
+                  }
+                  const { data, error } = await createCollection(appUser.id, { name: newColName.trim(), emoji: newColEmoji, description: newColDesc.trim(), cover_image_url: coverUrl });
                   setSavingCollection(false);
                   if (!error && data) {
                     setRealCollections(prev => [data, ...prev]);
@@ -1087,20 +1103,40 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </button>
             </div>
             <div className="px-4 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl flex-shrink-0">
-                  {newColEmoji}
-                </div>
-                <input
-                  value={newColName}
-                  onChange={e => setNewColName(e.target.value)}
-                  placeholder="Collection name"
-                  className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
-                />
-              </div>
+              {/* Cover image */}
+              <input ref={colCoverInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                setNewColCoverFile(f);
+                setNewColCoverPreview(URL.createObjectURL(f));
+              }} />
+              <button
+                onClick={() => colCoverInputRef.current?.click()}
+                className="w-full h-32 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center relative"
+              >
+                {newColCoverPreview
+                  ? <img src={newColCoverPreview} className="w-full h-full object-cover" />
+                  : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Add cover photo</span></div>
+                }
+                {newColCoverPreview && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">Change photo</span>
+                  </div>
+                )}
+              </button>
+              {/* Name */}
+              <input
+                value={newColName}
+                onChange={e => setNewColName(e.target.value)}
+                placeholder="Collection name"
+                className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+              />
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Emoji</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Emoji <span className="normal-case font-normal">(optional)</span></p>
                 <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => setNewColEmoji('')} className={`w-9 h-9 rounded-xl text-xs font-semibold flex items-center justify-center transition-colors ${newColEmoji === '' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                    None
+                  </button>
                   {['📍','🌍','🏖️','🏔️','🍽️','☕','🏛️','🛍️','🌿','🎯','🌊','🏙️','❤️','⭐'].map(e => (
                     <button key={e} onClick={() => setNewColEmoji(e)} className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-colors ${newColEmoji === e ? 'bg-gray-900' : 'bg-gray-100'}`}>
                       {e}
