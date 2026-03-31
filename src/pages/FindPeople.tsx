@@ -48,13 +48,14 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
   }, [currentUserId]);
 
   const toggleFollow = async (profileId: string) => {
+    if (!currentUserId) return;
     if (following.has(profileId)) {
       setFollowing(prev => { const s = new Set(prev); s.delete(profileId); return s; });
       onFollowChange?.(-1);
       const { error } = await supabase.from('follows').delete()
         .eq('follower_id', currentUserId).eq('following_id', profileId);
       if (error) {
-        // revert on failure
+        console.error('Unfollow error:', error.message, error.code);
         setFollowing(prev => new Set(prev).add(profileId));
         onFollowChange?.(1);
       }
@@ -63,7 +64,7 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
       onFollowChange?.(1);
       const { error } = await supabase.from('follows').insert({ follower_id: currentUserId, following_id: profileId });
       if (error) {
-        // revert on failure
+        console.error('Follow error:', error.message, error.code);
         setFollowing(prev => { const s = new Set(prev); s.delete(profileId); return s; });
         onFollowChange?.(-1);
       }
@@ -483,6 +484,10 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
   const [activeTab, setActiveTab] = useState<'Posts' | 'Map' | 'Collections'>('Posts');
   const [followerCount, setFollowerCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
+  const [showFollowList, setShowFollowList] = useState<'followers' | 'following' | null>(null);
+  const [followerList, setFollowerList] = useState<{ id: string; name: string; username: string; avatarUrl: string | null }[]>([]);
+  const [followingList, setFollowingList] = useState<{ id: string; name: string; username: string; avatarUrl: string | null }[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
   const initials = profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   useEffect(() => {
@@ -496,6 +501,25 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
       setLoadingPosts(false);
     });
   }, [profile.id]);
+
+  const openFollowList = async (type: 'followers' | 'following') => {
+    setShowFollowList(type);
+    setLoadingList(true);
+    if (type === 'followers') {
+      const { data } = await supabase
+        .from('follows')
+        .select('follower:profiles!follower_id ( id, name, username, avatar_url )')
+        .eq('following_id', profile.id);
+      setFollowerList((data ?? []).map((r: any) => ({ id: r.follower.id, name: r.follower.name ?? '', username: r.follower.username ?? '', avatarUrl: r.follower.avatar_url ?? null })));
+    } else {
+      const { data } = await supabase
+        .from('follows')
+        .select('following:profiles!following_id ( id, name, username, avatar_url )')
+        .eq('follower_id', profile.id);
+      setFollowingList((data ?? []).map((r: any) => ({ id: r.following.id, name: r.following.name ?? '', username: r.following.username ?? '', avatarUrl: r.following.avatar_url ?? null })));
+    }
+    setLoadingList(false);
+  };
 
   const handleFollow = () => {
     const nowFollowing = !following;
@@ -566,6 +590,61 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
     );
   }
 
+  // ── Follow list view ─────────────────────────────────────────────
+  if (showFollowList) {
+    const list = showFollowList === 'followers' ? followerList : followingList;
+    const title = showFollowList === 'followers' ? 'Followers' : 'Following';
+    return (
+      <div className="bg-white min-h-screen">
+        <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
+          <button onClick={() => setShowFollowList(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          <h2 className="text-base font-bold text-gray-900 flex-1">{title}</h2>
+        </div>
+        <div className="divide-y divide-gray-50">
+          {loadingList ? (
+            <div className="space-y-4 px-4 pt-4">
+              {[0,1,2].map(i => (
+                <div key={i} className="flex items-center gap-3 animate-pulse">
+                  <div className="w-11 h-11 rounded-full bg-gray-100 flex-shrink-0" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 bg-gray-100 rounded w-28" />
+                    <div className="h-2.5 bg-gray-100 rounded w-20" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : list.length > 0 ? list.map(u => {
+            const ini = u.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+            return (
+              <div key={u.id} className="flex items-center gap-3 px-4 py-3.5">
+                {u.avatarUrl ? (
+                  <img src={u.avatarUrl} alt={u.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-semibold text-slate-400">{ini || '?'}</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                  <p className="text-xs text-gray-400">@{u.username}</p>
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+              <p className="text-3xl mb-3">{showFollowList === 'followers' ? '👥' : '🔍'}</p>
+              <p className="text-sm font-semibold text-gray-900 mb-1">
+                {showFollowList === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white min-h-screen">
       {/* Top nav — mirrors Profile.tsx */}
@@ -605,15 +684,15 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
         {/* Stats — Posts / Places / Followers / Following */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
-            { value: posts.length, label: 'Posts' },
-            { value: totalPlaces, label: 'Places' },
-            { value: followerCount, label: 'Followers' },
-            { value: followingCount, label: 'Following' },
+            { value: posts.length, label: 'Posts', action: null },
+            { value: totalPlaces, label: 'Places', action: null },
+            { value: followerCount, label: 'Followers', action: () => openFollowList('followers') },
+            { value: followingCount, label: 'Following', action: () => openFollowList('following') },
           ].map(stat => (
-            <div key={stat.label} className="text-center">
+            <button key={stat.label} onClick={stat.action ?? undefined} className="text-center">
               <p className="text-base font-black text-gray-900">{stat.value}</p>
               <p className="text-xs text-gray-400">{stat.label}</p>
-            </div>
+            </button>
           ))}
         </div>
       </div>
