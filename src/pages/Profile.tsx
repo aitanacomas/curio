@@ -6,7 +6,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, type RealPost, type FollowProfile, type RealCollection } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, type RealPost, type FollowProfile, type RealCollection } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -80,6 +80,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
   const [selectedRealCollection, setSelectedRealCollection] = useState<RealCollection | null>(null);
+  const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
+  const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
+  const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
   const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
   const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
@@ -195,6 +198,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     const images = selectedRealPost.places.map(pl => pl.photoUrl).filter(Boolean);
     const labels = selectedRealPost.places.map(pl => pl.name);
     return (
+      <>
       <div className="bg-white min-h-screen">
         <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
           <button onClick={() => setSelectedRealPost(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
@@ -262,11 +266,85 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   </p>
                   {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
                 </div>
+                {realCollections.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setAddToColPlace({ id: place.id, name: place.name });
+                      setLoadingPlaceCollections(true);
+                      getPlaceCollectionIds(place.id).then(ids => {
+                        setPlaceInCollections(ids);
+                        setLoadingPlaceCollections(false);
+                      });
+                    }}
+                    className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-white flex-shrink-0"
+                  >
+                    <Bookmark size={14} strokeWidth={1.5} className="text-gray-500" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      {/* Collection picker sheet */}
+      {addToColPlace && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setAddToColPlace(null)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900 mb-0.5">Save to collection</h3>
+              <p className="text-xs text-gray-400 truncate">{addToColPlace.name}</p>
+            </div>
+            {loadingPlaceCollections ? (
+              <div className="px-4 space-y-3 pb-4">
+                {[0, 1].map(i => <div key={i} className="h-14 bg-gray-100 rounded-2xl animate-pulse" />)}
+              </div>
+            ) : (
+              <div className="px-4 space-y-2 max-h-72 overflow-y-auto">
+                {realCollections.map(col => {
+                  const inCol = placeInCollections.has(col.id);
+                  return (
+                    <button
+                      key={col.id}
+                      onClick={async () => {
+                        if (inCol) {
+                          await removePlaceFromCollection(col.id, addToColPlace.id);
+                          setPlaceInCollections(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                          setRealCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                        } else {
+                          await addPlaceToCollection(col.id, addToColPlace.id);
+                          setPlaceInCollections(prev => new Set(prev).add(col.id));
+                          setRealCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: c.placesCount + 1 } : c));
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
+                    >
+                      <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                        {col.coverImageUrl
+                          ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
+                          : <span className="text-xl">{col.emoji || '🗂️'}</span>
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                        <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                      </div>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                        {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      </>
     );
   }
 

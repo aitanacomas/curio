@@ -286,6 +286,25 @@ export async function getUserCollections(userId: string): Promise<RealCollection
   }));
 }
 
+// ── Collection Places ─────────────────────────────────────────────────────────
+export async function addPlaceToCollection(collectionId: string, postPlaceId: string) {
+  await supabase.from('collection_places').insert({ collection_id: collectionId, post_place_id: postPlaceId });
+}
+
+export async function removePlaceFromCollection(collectionId: string, postPlaceId: string) {
+  await supabase.from('collection_places').delete()
+    .eq('collection_id', collectionId)
+    .eq('post_place_id', postPlaceId);
+}
+
+export async function getPlaceCollectionIds(postPlaceId: string): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('collection_places')
+    .select('collection_id')
+    .eq('post_place_id', postPlaceId);
+  return new Set((data ?? []).map((r: any) => r.collection_id));
+}
+
 // ── Likes ─────────────────────────────────────────────────────────────────────
 export async function getLikedPosts(userId: string): Promise<Set<string>> {
   const { data } = await supabase.from('post_likes').select('post_id').eq('user_id', userId);
