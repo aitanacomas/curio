@@ -79,6 +79,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
+  const [selectedRealCollection, setSelectedRealCollection] = useState<RealCollection | null>(null);
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
   const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
   const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
@@ -861,6 +862,52 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     );
   }
 
+  // ── Real Collection Detail ──────────────────────────────────────
+  if (selectedRealCollection) {
+    return (
+      <div className="bg-white min-h-screen">
+        {/* Hero */}
+        <div className="relative h-64">
+          {selectedRealCollection.coverImageUrl ? (
+            <img src={selectedRealCollection.coverImageUrl} alt={selectedRealCollection.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+              <span className="text-7xl">{selectedRealCollection.emoji || '🗂️'}</span>
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
+          <button
+            onClick={() => setSelectedRealCollection(null)}
+            className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+          >
+            <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          <div className="absolute bottom-4 left-4 right-4">
+            <h2 className="text-2xl font-black text-white">{selectedRealCollection.name}</h2>
+            {selectedRealCollection.description && (
+              <p className="text-white/70 text-xs mt-1">{selectedRealCollection.description}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Stats bar */}
+        <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
+          <div className="flex-1 py-3 text-center">
+            <p className="text-base font-black text-gray-900">{selectedRealCollection.placesCount}</p>
+            <p className="text-xs text-gray-400">Places</p>
+          </div>
+        </div>
+
+        {/* Empty state */}
+        <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+          <span className="text-4xl mb-3">📍</span>
+          <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
+          <p className="text-slate-400 text-sm max-w-[200px]">Save places from posts to add them to this collection</p>
+        </div>
+      </div>
+    );
+  }
+
   // ── Main Profile View ───────────────────────────────────────────
   return (
     <div className="bg-white min-h-screen">
@@ -1055,7 +1102,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             {realCollections.length > 0 ? (
               <div className="grid grid-cols-2 gap-x-3 gap-y-5">
                 {realCollections.map(col => (
-                  <div key={col.id} className="text-left">
+                  <button key={col.id} className="text-left" onClick={() => setSelectedRealCollection(col)}>
                     <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
                       {col.coverImageUrl
                         ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
@@ -1067,7 +1114,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     </div>
                     <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">{col.placesCount ?? 0} places</p>
-                  </div>
+                  </button>
                 ))}
               </div>
             ) : (

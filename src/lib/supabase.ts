@@ -334,7 +334,7 @@ export async function createCollection(userId: string, payload: { name: string; 
     .single();
   if (error) return { data: null, error: error.message };
   return {
-    data: { id: data.id, userId: data.user_id, name: data.name, emoji: data.emoji, description: data.description ?? '', coverImageUrl: data.cover_image_url ?? null, createdAt: data.created_at },
+    data: { id: data.id, userId: data.user_id, name: data.name, emoji: data.emoji, description: data.description ?? '', coverImageUrl: data.cover_image_url ?? null, placesCount: 0, createdAt: data.created_at },
     error: null,
   };
 }
