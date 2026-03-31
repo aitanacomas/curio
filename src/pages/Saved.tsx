@@ -607,7 +607,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [plansLoading, setPlansLoading] = useState(false);
   const [realSavedPlaces, setRealSavedPlaces] = useState<SavedPlace[]>([]);
   const [realSavedPlaceIds, setRealSavedPlaceIds] = useState<Set<string>>(new Set());
-  const [planViewMode, setPlanViewMode] = useState<'itinerary' | 'list'>('itinerary');
+  const [planViewMode, setPlanViewMode] = useState<'itinerary' | 'list' | 'map'>('itinerary');
+  const [mapCoords, setMapCoords] = useState<Record<string, { lat: number; lng: number }>>({});
+  const [mapLoading, setMapLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showEditPlan, setShowEditPlan] = useState(false);
   const [editPlanTrip, setEditPlanTrip] = useState<Trip | null>(null);
@@ -1032,7 +1034,26 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             }
 
             const newAddress = place.formattedAddress ?? '';
-            const newNeighborhood = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
+            let newNeighborhood = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
+            // Fallback: if Places didn't return a proper "Area, City", try Geocoding API
+            if ((!newNeighborhood || !newNeighborhood.includes(',')) && (newAddress || item.address)) {
+              try {
+                const addr = newAddress || item.address || '';
+                const geoRes = await fetch(
+                  `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GOOGLE_PLACES_KEY}`
+                );
+                const geoData = await geoRes.json();
+                const geoResult = geoData.results?.[0];
+                if (geoResult) {
+                  const geoComps = (geoResult.address_components ?? []).map((c: any) => ({
+                    types: c.types,
+                    longText: c.long_name,
+                  }));
+                  const geoNeighborhood = extractNeighborhood(geoComps, geoResult.formatted_address);
+                  if (geoNeighborhood && geoNeighborhood.includes(',')) newNeighborhood = geoNeighborhood;
+                }
+              } catch { /* silent */ }
+            }
             const photoName = place.photos?.[0]?.name;
             // Only replace image if item has no image at all (never overwrite user-set photos)
             const hasNoImage = !item.image || item.image.includes('unsplash.com/photo-1476514525535');
@@ -1063,6 +1084,43 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     })();
     return () => { cancelled = true; };
   }, [selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Geocode items for map view ──────────────────────────────────────────
+  useEffect(() => {
+    if (planViewMode !== 'map' || !selectedTrip || !GOOGLE_PLACES_KEY) return;
+    const allItems = selectedTrip.days.flatMap(d => d.items);
+    const toGeocode = allItems.filter(item => !mapCoords[item.id]);
+    if (toGeocode.length === 0) return;
+    let cancelled = false;
+    setMapLoading(true);
+    (async () => {
+      const newCoords: Record<string, { lat: number; lng: number }> = {};
+      for (const item of toGeocode) {
+        if (cancelled) break;
+        try {
+          const q = item.address ? `${item.name} ${item.address}` : `${item.name} ${selectedTrip.country}`;
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+              'X-Goog-FieldMask': 'places.location,places.displayName',
+            },
+            body: JSON.stringify({ textQuery: q, languageCode: 'en' }),
+          });
+          const data = await res.json();
+          const loc = data.places?.[0]?.location;
+          if (loc) newCoords[item.id] = { lat: loc.latitude, lng: loc.longitude };
+          await new Promise(r => setTimeout(r, 120));
+        } catch { /* silent */ }
+      }
+      if (!cancelled) {
+        setMapCoords(prev => ({ ...prev, ...newCoords }));
+        setMapLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [planViewMode, selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const savedPlaces = isNewUser
     ? places.filter(p => savedPlaceSet.has(p.id))
@@ -1213,10 +1271,10 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{totalItems} places</p>
               <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5">
-                {(['itinerary', 'list'] as const).map(mode => (
+                {(['itinerary', 'list', 'map'] as const).map(mode => (
                   <button key={mode} onClick={() => setPlanViewMode(mode)}
                     className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${planViewMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
-                    {mode === 'itinerary' ? 'By day' : 'List'}
+                    {mode === 'itinerary' ? 'By day' : mode === 'list' ? 'List' : 'Map'}
                   </button>
                 ))}
               </div>
@@ -1236,6 +1294,29 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-600 rounded-full text-sm font-semibold">
                 <Plus size={14} strokeWidth={2} /> Add a place
               </button>
+            </div>
+          ) : planViewMode === 'map' ? (
+            <div className="rounded-2xl overflow-hidden" style={{ height: 420 }}>
+              <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
+                {mapLoading && Object.keys(mapCoords).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
+                    <Loader2 size={20} className="animate-spin text-gray-400" />
+                    <p className="text-xs text-gray-400">Finding places on map…</p>
+                  </div>
+                ) : (
+                  <MapView
+                    places={selectedTrip.days.flatMap(d => d.items).filter(i => mapCoords[i.id]).map(i => ({
+                      id: i.id,
+                      lat: mapCoords[i.id].lat,
+                      lng: mapCoords[i.id].lng,
+                      name: i.name,
+                      city: selectedTrip.destination,
+                      country: selectedTrip.country,
+                    }))}
+                    height="420px"
+                  />
+                )}
+              </Suspense>
             </div>
           ) : planViewMode === 'itinerary' ? (
             <div className="space-y-6">
