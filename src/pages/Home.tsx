@@ -6,7 +6,7 @@ import { feedItems, users, places, collections } from '../data/mockData';
 import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
-import { getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, type RealPost } from '../lib/supabase';
+import { getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, type RealPost, type RealCollection } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -122,6 +122,11 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
   const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
   const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
+  const [userCollections, setUserCollections] = useState<RealCollection[]>([]);
+  const [expandedPlacesPostId, setExpandedPlacesPostId] = useState<string | null>(null);
+  const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
+  const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
+  const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
 
   // Fetch real posts from Supabase on mount
   useEffect(() => {
@@ -137,6 +142,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
     if (!appUser || appUser.isDemo) return;
     getLikedPosts(appUser.id).then(setLikedRealPosts);
     getSavedPosts(appUser.id).then(setSavedRealPosts);
+    getUserCollections(appUser.id).then(setUserCollections);
   }, [appUser]);
 
   useEffect(() => {
@@ -859,6 +865,47 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                     {post.hashtags.map(t => `#${t}`).join(' ')}
                   </p>
                 )}
+                {/* Places toggle */}
+                {post.places.length > 0 && (
+                  <button
+                    onClick={() => setExpandedPlacesPostId(p => p === post.id ? null : post.id)}
+                    className="mt-2 text-xs font-semibold text-gray-500 flex items-center gap-1"
+                  >
+                    <MapPin size={11} strokeWidth={1.5} />
+                    {post.places.length} place{post.places.length !== 1 ? 's' : ''}
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`transition-transform ${expandedPlacesPostId === post.id ? 'rotate-180' : ''}`}>
+                      <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                )}
+                {expandedPlacesPostId === post.id && (
+                  <div className="mt-2 space-y-2">
+                    {post.places.map(place => (
+                      <div key={place.id} className="flex items-center gap-2.5 bg-gray-50 rounded-2xl px-2.5 py-2">
+                        {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-900 truncate">{place.name}</p>
+                          <p className="text-[11px] text-gray-400 truncate">{place.city}, {place.country}</p>
+                        </div>
+                        {userCollections.length > 0 && (
+                          <button
+                            onClick={() => {
+                              setAddToColPlace({ id: place.id, name: place.name });
+                              setLoadingPlaceCollections(true);
+                              getPlaceCollectionIds(place.id).then(ids => {
+                                setPlaceInCollections(ids);
+                                setLoadingPlaceCollections(false);
+                              });
+                            }}
+                            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 bg-white flex-shrink-0"
+                          >
+                            <Bookmark size={12} strokeWidth={1.5} className="text-gray-500" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -1024,6 +1071,63 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
 
       {saveSheet}
       <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
+
+      {/* Collection picker sheet */}
+      {addToColPlace && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setAddToColPlace(null)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900 mb-0.5">Save to collection</h3>
+              <p className="text-xs text-gray-400 truncate">{addToColPlace.name}</p>
+            </div>
+            {loadingPlaceCollections ? (
+              <div className="px-4 space-y-3 pb-4">
+                {[0, 1].map(i => <div key={i} className="h-14 bg-gray-100 rounded-2xl animate-pulse" />)}
+              </div>
+            ) : (
+              <div className="px-4 space-y-2 max-h-72 overflow-y-auto">
+                {userCollections.map(col => {
+                  const inCol = placeInCollections.has(col.id);
+                  return (
+                    <button
+                      key={col.id}
+                      onClick={async () => {
+                        if (inCol) {
+                          await removePlaceFromCollection(col.id, addToColPlace.id);
+                          setPlaceInCollections(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                          setUserCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                        } else {
+                          await addPlaceToCollection(col.id, addToColPlace.id);
+                          setPlaceInCollections(prev => new Set(prev).add(col.id));
+                          setUserCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: c.placesCount + 1 } : c));
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
+                    >
+                      <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                        {col.coverImageUrl
+                          ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
+                          : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                        <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                      </div>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                        {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

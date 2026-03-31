@@ -287,6 +287,27 @@ export async function getUserCollections(userId: string): Promise<RealCollection
 }
 
 // ── Collection Places ─────────────────────────────────────────────────────────
+export async function getCollectionPlaces(collectionId: string): Promise<RealPostPlace[]> {
+  const { data } = await supabase
+    .from('collection_places')
+    .select('post_places ( id, name, category, city, country, photo_url, position, lat, lng )')
+    .eq('collection_id', collectionId);
+  return (data ?? [])
+    .map((r: any) => r.post_places)
+    .filter(Boolean)
+    .map((pl: any) => ({
+      id: pl.id,
+      name: pl.name ?? '',
+      category: pl.category ?? '',
+      city: pl.city ?? '',
+      country: pl.country ?? '',
+      photoUrl: pl.photo_url ?? '',
+      position: pl.position ?? 0,
+      lat: pl.lat ?? null,
+      lng: pl.lng ?? null,
+    }));
+}
+
 export async function addPlaceToCollection(collectionId: string, postPlaceId: string) {
   await supabase.from('collection_places').insert({ collection_id: collectionId, post_place_id: postPlaceId });
 }

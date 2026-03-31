@@ -6,7 +6,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, type RealPost, type FollowProfile, type RealCollection } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -80,6 +80,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
   const [selectedRealCollection, setSelectedRealCollection] = useState<RealCollection | null>(null);
+  const [realCollectionPlaces, setRealCollectionPlaces] = useState<RealPostPlace[]>([]);
+  const [loadingCollectionPlaces, setLoadingCollectionPlaces] = useState(false);
   const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
   const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
@@ -942,6 +944,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
   // ── Real Collection Detail ──────────────────────────────────────
   if (selectedRealCollection) {
+    const mapPlaces = realCollectionPlaces
+      .filter(pl => pl.lat != null && pl.lng != null)
+      .map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
+    const countries = new Set(realCollectionPlaces.map(pl => pl.country)).size;
+
     return (
       <div className="bg-white min-h-screen">
         {/* Hero */}
@@ -955,7 +962,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
           <button
-            onClick={() => setSelectedRealCollection(null)}
+            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); }}
             className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
           >
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
@@ -970,18 +977,58 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
         {/* Stats bar */}
         <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
-          <div className="flex-1 py-3 text-center">
-            <p className="text-base font-black text-gray-900">{selectedRealCollection.placesCount}</p>
-            <p className="text-xs text-gray-400">Places</p>
-          </div>
+          {[
+            { value: selectedRealCollection.placesCount, label: 'Places' },
+            { value: countries || 0, label: countries === 1 ? 'Country' : 'Countries' },
+          ].map(s => (
+            <div key={s.label} className="flex-1 py-3 text-center">
+              <p className="text-base font-black text-gray-900">{s.value}</p>
+              <p className="text-xs text-gray-400">{s.label}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Empty state */}
-        <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-          <span className="text-4xl mb-3">📍</span>
-          <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
-          <p className="text-slate-400 text-sm max-w-[200px]">Save places from posts to add them to this collection</p>
-        </div>
+        {loadingCollectionPlaces ? (
+          <div className="px-4 pt-4 space-y-3">
+            <div className="h-48 bg-gray-100 rounded-xl animate-pulse" />
+            {[0,1,2].map(i => <div key={i} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />)}
+          </div>
+        ) : realCollectionPlaces.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <span className="text-4xl mb-3">📍</span>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
+            <p className="text-slate-400 text-sm max-w-[220px]">Tap the bookmark on any place card in a post to add it here</p>
+          </div>
+        ) : (
+          <div className="px-4 pt-4 pb-10">
+            {/* Map */}
+            {mapPlaces.length > 0 && (
+              <div className="mb-4 rounded-xl overflow-hidden">
+                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
+                  <MapView places={mapPlaces} height="200px" />
+                </Suspense>
+              </div>
+            )}
+            {/* Place list */}
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+              {realCollectionPlaces.length} Place{realCollectionPlaces.length !== 1 ? 's' : ''}
+            </p>
+            <div className="space-y-3">
+              {realCollectionPlaces.map(place => (
+                <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                  {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                    <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                      <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{place.city}, {place.country}
+                    </p>
+                    {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1180,7 +1227,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             {realCollections.length > 0 ? (
               <div className="grid grid-cols-2 gap-x-3 gap-y-5">
                 {realCollections.map(col => (
-                  <button key={col.id} className="text-left" onClick={() => setSelectedRealCollection(col)}>
+                  <button key={col.id} className="text-left" onClick={() => {
+                      setSelectedRealCollection(col);
+                      setLoadingCollectionPlaces(true);
+                      getCollectionPlaces(col.id).then(places => {
+                        setRealCollectionPlaces(places);
+                        setLoadingCollectionPlaces(false);
+                      });
+                    }}>
                     <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
                       {col.coverImageUrl
                         ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
