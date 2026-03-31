@@ -88,24 +88,30 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     if (appUser && !appUser.isDemo) {
       getUserPosts(appUser.id).then(async posts => {
         setRealPosts(posts);
-        // Auto-geocode any places missing lat/lng
+        // Auto-geocode any places missing lat/lng (in memory + DB)
         const missing = posts.flatMap(p => p.places.filter(pl => pl.lat == null || pl.lng == null));
         if (missing.length === 0) return;
-        const updates: { id: string; lat: number; lng: number }[] = [];
+        const coords: Record<string, { lat: number; lng: number }> = {};
         for (const pl of missing) {
           try {
+            await new Promise(r => setTimeout(r, 1100)); // Nominatim 1 req/s limit
             const q = encodeURIComponent(`${pl.name}, ${pl.city}, ${pl.country}`);
             const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
               headers: { 'Accept-Language': 'en', 'User-Agent': 'CurioApp/1.0' },
             });
             const data = await res.json();
-            if (data[0]) updates.push({ id: pl.id, lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+            if (data[0]) coords[pl.id] = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
           } catch { /* skip */ }
         }
-        if (updates.length > 0) {
-          await Promise.all(updates.map(u => supabase.from('post_places').update({ lat: u.lat, lng: u.lng }).eq('id', u.id)));
-          getUserPosts(appUser.id).then(setRealPosts);
-        }
+        if (Object.keys(coords).length === 0) return;
+        // Update DB (best effort) and update local state immediately
+        Object.entries(coords).forEach(([id, c]) =>
+          supabase.from('post_places').update({ lat: c.lat, lng: c.lng }).eq('id', id)
+        );
+        setRealPosts(prev => prev.map(post => ({
+          ...post,
+          places: post.places.map(pl => coords[pl.id] ? { ...pl, ...coords[pl.id] } : pl),
+        })));
       });
       getUserCollections(appUser.id).then(setRealCollections);
       getFollowCounts(appUser.id).then(({ followers, following }) => {
