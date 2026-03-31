@@ -188,7 +188,7 @@ export async function getFollowCounts(userId: string): Promise<{ followers: numb
 }
 
 // ── Update profile ────────────────────────────────────────────────────────────
-export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string; avatar_url?: string }) {
+export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string }) {
   const { error } = await supabase
     .from('profiles')
     .update(updates)

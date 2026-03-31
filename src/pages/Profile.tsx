@@ -42,7 +42,7 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
-export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
@@ -52,6 +52,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
+  const [editLocation, setEditLocation] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -107,7 +108,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     followersCount: 0,
     followingCount: appUser.followingCount,
     bio: appUser?.bio ?? '',
-  } : user;
+    location: appUser?.location ?? '',
+  } : { ...user, location: '' };
 
   const getPlaceById = (id: string) => places.find(p => p.id === id)!;
   const getUserById = (id: string) => users.find(u => u.id === id)!;
@@ -150,10 +152,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         if (!uploadError) newAvatarUrl = getPublicUrl('avatars', path);
       }
 
-      const updates: { name?: string; username?: string; bio?: string; avatar_url?: string } = {
+      const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string } = {
         name: editName.trim() || displayUser.name,
         username: editUsername.trim().replace('@', '') || displayUser.username,
         bio: editBio.trim(),
+        location: editLocation.trim(),
       };
       if (newAvatarUrl) updates.avatar_url = newAvatarUrl;
 
@@ -167,6 +170,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           username: updates.username!,
           avatar: newAvatarUrl ?? appUser.avatar,
           bio: updates.bio ?? '',
+          location: updates.location ?? '',
         });
         setAvatarFile(null);
         setAvatarPreview(null);
@@ -231,10 +235,20 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Bio</p>
-            <input
+            <textarea
               value={editBio}
               onChange={e => setEditBio(e.target.value)}
-              placeholder={displayUser.bio || 'Add a bio…'}
+              placeholder={displayUser.bio || 'Tell people about yourself…'}
+              rows={3}
+              className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors resize-none"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Location</p>
+            <input
+              value={editLocation}
+              onChange={e => setEditLocation(e.target.value)}
+              placeholder={displayUser.location || 'City, Country'}
               className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
             />
           </div>
@@ -729,18 +743,24 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Profile Header */}
       <div className="px-4 pb-4">
         <div className="flex items-center gap-4">
-          <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
+          <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
             <img src={displayUser.avatar} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
             <div className="absolute bottom-0 right-0 w-5 h-5 bg-gray-900 rounded-full flex items-center justify-center">
               <Plus size={11} strokeWidth={2.5} className="text-white" />
             </div>
           </button>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 space-y-1">
             {displayUser.bio ? (
-              <p className="text-xs text-gray-500 leading-relaxed">{displayUser.bio}</p>
+              <p className="text-xs text-gray-600 leading-relaxed">{displayUser.bio}</p>
             ) : (
-              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic">Add a bio…</button>
+              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic">Add a bio…</button>
             )}
+            {displayUser.location ? (
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+                {displayUser.location}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -922,7 +942,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <div className="px-4 pt-2 space-y-1">
               {[
-                { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setShowEditProfile(true); }; } },
+                { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); } },
                 { icon: Share2, label: 'Share Profile', action: () => setShowMenu(false) },
                 { icon: Settings, label: 'Settings', action: () => setShowMenu(false) },
                 { icon: Mail, label: 'Messages', action: () => { setShowMenu(false); onOpenMessages?.(); } },

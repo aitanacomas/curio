@@ -64,6 +64,7 @@ export default function Auth({ onAuth }: AuthProps) {
       username: profile?.username ?? '',
       avatar: profile?.avatar_url ?? null,
       bio: profile?.bio ?? '',
+      location: profile?.location ?? '',
       isDemo: false,
       followingCount: profile?.following_count ?? 0,
     }, false);
@@ -120,6 +121,7 @@ export default function Auth({ onAuth }: AuthProps) {
       username,
       avatar: avatarUrl,
       bio: '',
+      location: '',
       isDemo: false,
       followingCount: 0,
     }, true);
@@ -128,7 +130,7 @@ export default function Auth({ onAuth }: AuthProps) {
 
   // ── Demo ─────────────────────────────────────────────────────────
   const handleDemoLogin = () => {
-    onAuth({ id: 'demo-user', name: 'Aitana Comas', username: 'aitanacomas', avatar: '/aitana-avatar.jpg', bio: '', isDemo: false, followingCount: 0 }, true);
+    onAuth({ id: 'demo-user', name: 'Aitana Comas', username: 'aitanacomas', avatar: '/aitana-avatar.jpg', bio: '', location: '', isDemo: false, followingCount: 0 }, true);
   };
 
   const StepDots = ({ current }: { current: number }) => (
