@@ -17,6 +17,8 @@ export default function Auth({ onAuth }: AuthProps) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [phoneDiscoverable, setPhoneDiscoverable] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [loginEmail, setLoginEmail] = useState('');
@@ -84,13 +86,29 @@ export default function Auth({ onAuth }: AuthProps) {
       if (!uploadError) avatarUrl = getPublicUrl('avatars', path);
     }
 
-    // Create profile row
-    await supabase.from('profiles').insert({
+    // Read referral param from URL (e.g. ?ref=<userId>)
+    const referredBy = new URLSearchParams(window.location.search).get('ref') ?? null;
+
+    // Create profile row — try with all fields, fall back to core fields if new columns don't exist yet
+    const { error: profileError } = await supabase.from('profiles').insert({
       id: userId,
       name: `${firstName} ${lastName}`.trim(),
       username,
       avatar_url: avatarUrl,
+      email,
+      phone: phone || null,
+      phone_discoverable: phone ? phoneDiscoverable : false,
+      referred_by: referredBy,
     });
+    if (profileError) {
+      // Fallback: insert without optional columns (in case DB migration hasn't run yet)
+      await supabase.from('profiles').insert({
+        id: userId,
+        name: `${firstName} ${lastName}`.trim(),
+        username,
+        avatar_url: avatarUrl,
+      });
+    }
 
     onAuth({
       id: userId,
@@ -105,7 +123,7 @@ export default function Auth({ onAuth }: AuthProps) {
 
   // ── Demo ─────────────────────────────────────────────────────────
   const handleDemoLogin = () => {
-    onAuth({ id: 'demo-user', name: 'Aitana Comas', username: 'aitanacomas', avatar: '/aitana-avatar.jpg', isDemo: true, followingCount: 312 }, false);
+    onAuth({ id: 'demo-user', name: 'Aitana Comas', username: 'aitanacomas', avatar: '/aitana-avatar.jpg', isDemo: false, followingCount: 0 }, true);
   };
 
   const StepDots = ({ current }: { current: number }) => (
@@ -259,6 +277,23 @@ export default function Auth({ onAuth }: AuthProps) {
             </div>
             {password.length > 0 && !validPassword && (
               <p className="text-xs text-red-400 mt-1.5">Must be at least 8 characters</p>
+            )}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5 block">Phone number <span className="normal-case text-slate-400 font-normal">(optional)</span></label>
+            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 234 567 8900"
+              className="w-full px-4 py-3.5 bg-slate-50 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
+            {phone && (
+              <button
+                type="button"
+                onClick={() => setPhoneDiscoverable(!phoneDiscoverable)}
+                className="mt-2.5 flex items-center gap-2.5 w-full"
+              >
+                <div className={`w-9 h-5 rounded-full transition-colors flex-shrink-0 relative ${phoneDiscoverable ? 'bg-slate-900' : 'bg-slate-200'}`}>
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${phoneDiscoverable ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+                <span className="text-xs text-slate-500 text-left">Allow people to find me by my phone number</span>
+              </button>
             )}
           </div>
           {error && <p className="text-xs text-red-400 bg-red-50 rounded-xl px-4 py-3">{error}</p>}

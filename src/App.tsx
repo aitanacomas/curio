@@ -114,13 +114,14 @@ export default function App() {
   const renderPage = () => {
     switch (activeTab) {
       case 'home':
-        return <Home showMessages={showMessages} onMessagesClose={() => setShowMessages(false)} isNewUser={appUser?.isDemo === false} />;
+        return <Home showMessages={showMessages} onMessagesClose={() => setShowMessages(false)} isNewUser={appUser?.isDemo === false} appUser={appUser ?? undefined} onNavigate={setActiveTab} />;
       case 'explore':
-        return <Explore onOpenMessages={openMessages} />;
+        return <Explore onOpenMessages={openMessages} appUser={appUser ?? undefined} />;
       case 'add':
         return (
           <Add
             userId={appUser?.id ?? ''}
+            userAvatar={appUser?.avatar ?? null}
             onComplete={({ visibility, placesCount }) => {
               const label = visibility === 'feed' ? 'Posted to curio' : visibility === 'profile' ? 'Shared with followers' : 'Saved privately';
               setPostToast({ label, sub: `${placesCount} place${placesCount > 1 ? 's' : ''} tagged` });

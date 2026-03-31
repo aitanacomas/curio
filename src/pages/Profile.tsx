@@ -1,9 +1,10 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus } from 'lucide-react';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
+import { getUserPosts, type RealPost } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -54,6 +55,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout }: { onOpenM
   const [showMap, setShowMap] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [colCategoryFilter, setColCategoryFilter] = useState<Category | 'all'>('all');
+  const [realPosts, setRealPosts] = useState<RealPost[]>([]);
+
+  useEffect(() => {
+    if (appUser && !appUser.isDemo) {
+      getUserPosts(appUser.id).then(setRealPosts);
+    }
+  }, [appUser]);
 
   const visitedPlaces = places.filter(p => myVisitedPlaceIds.includes(p.id));
   const user = currentUser;
@@ -560,16 +568,38 @@ export default function Profile({ onOpenMessages, appUser, onLogout }: { onOpenM
       {/* Posts Grid */}
       {activeTab === 'Posts' && (
         isNewUser ? (
-          <div className="flex flex-col items-center justify-center py-16 px-6">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-              <span className="text-3xl">📍</span>
+          realPosts.length > 0 ? (
+            <div className="grid grid-cols-3 gap-px bg-gray-100">
+              {realPosts.map(post => {
+                const firstImage = post.places[0]?.photoUrl;
+                if (!firstImage) return null;
+                return (
+                  <div key={post.id} className="aspect-square bg-white relative">
+                    <img src={firstImage} alt="" className="w-full h-full object-cover" />
+                    {post.places.length > 1 && (
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                        <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
+                          <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                          <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <p className="text-slate-800 font-semibold text-base mb-1.5">No posts yet</p>
-            <p className="text-slate-400 text-sm text-center max-w-[200px] mb-6">Share a place you love and it'll appear here</p>
-            <button className="px-6 py-2.5 bg-slate-900 text-white rounded-full text-sm font-semibold">
-              Create first post
-            </button>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <span className="text-3xl">📍</span>
+              </div>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">No posts yet</p>
+              <p className="text-slate-400 text-sm text-center max-w-[200px] mb-6">Share a place you love and it'll appear here</p>
+              <button className="px-6 py-2.5 bg-slate-900 text-white rounded-full text-sm font-semibold">
+                Create first post
+              </button>
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-3 gap-px bg-gray-100">
             {myPosts.map(post => (

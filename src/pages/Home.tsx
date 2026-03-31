@@ -1,9 +1,12 @@
 import { lazy, Suspense, useState, useEffect } from 'react';
-import { Heart, MessageCircle, Send, MapPin, BadgeCheck, ArrowLeft, Bookmark, Map, X, Link, Copy, Mail, Check } from 'lucide-react';
+import { Heart, MessageCircle, Send, MapPin, ArrowLeft, Bookmark, Map, X, Link, Copy, Mail, Check, Users, Plus } from 'lucide-react';
+import type { Tab } from '../types/index';
+import FindPeople from './FindPeople';
 import { feedItems, users, places, collections } from '../data/mockData';
-import type { FeedItem, User, Collection, Place } from '../types';
+import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
+import { getFeedPosts, type RealPost } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -89,9 +92,11 @@ interface Props {
   showMessages?: boolean;
   onMessagesClose?: () => void;
   isNewUser?: boolean;
+  appUser?: AppUser;
+  onNavigate?: (tab: Tab) => void;
 }
 
-export default function Home({ showMessages = false, onMessagesClose, isNewUser }: Props) {
+export default function Home({ showMessages = false, onMessagesClose, isNewUser, appUser, onNavigate }: Props) {
   const [feed, setFeed] = useState(feedItems);
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Set<string>>(new Set(['place-28', 'place-29', 'place-30', 'place-31', 'place-32']));
@@ -112,6 +117,13 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser 
   const [dmThreads, setDmThreads] = useState(mockDMs);
   const [showAllComments, setShowAllComments] = useState(false);
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
+  const [realPosts, setRealPosts] = useState<RealPost[]>([]);
+  const [showFindPeople, setShowFindPeople] = useState(false);
+
+  // Fetch real posts from Supabase on mount
+  useEffect(() => {
+    getFeedPosts().then(setRealPosts);
+  }, []);
 
   useEffect(() => {
     if (!saveTarget) return;
@@ -265,6 +277,16 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser 
     );
   }
 
+  // ── Find People ──────────────────────────────────────────────────
+  if (showFindPeople) {
+    return (
+      <FindPeople
+        currentUserId={appUser?.id ?? ''}
+        onBack={() => setShowFindPeople(false)}
+      />
+    );
+  }
+
   // ── Inbox View ───────────────────────────────────────────────────
   if (showInbox) {
     return (
@@ -276,24 +298,34 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser 
           <h2 className="text-base font-bold text-gray-900 flex-1">Messages</h2>
         </div>
         <div className="divide-y divide-gray-50">
-          {friends.map(friend => {
-            const thread = dmThreads[friend.id] ?? [];
-            const last = thread[thread.length - 1];
-            return (
-              <button
-                key={friend.id}
-                onClick={() => setActiveChat(friend.id)}
-                className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 text-left"
-              >
-                <img src={friend.avatar} alt={friend.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" style={{ objectPosition: friend.avatarPosition ?? 'top' }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900">{friend.name}</p>
-                  <p className="text-xs text-gray-400 truncate mt-0.5">{last ? last.text : 'No messages yet'}</p>
-                </div>
-                {last && <span className="text-[11px] text-gray-300 flex-shrink-0">{last.time}</span>}
-              </button>
-            );
-          })}
+          {isNewUser ? (
+            <div className="flex flex-col items-center justify-center py-24 px-8 text-center">
+              <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                <Send size={22} strokeWidth={1.5} className="text-gray-400" />
+              </div>
+              <p className="text-sm font-semibold text-gray-900 mb-1">No messages yet</p>
+              <p className="text-xs text-gray-400 leading-relaxed">Follow people to start conversations and share places you love.</p>
+            </div>
+          ) : (
+            friends.map(friend => {
+              const thread = dmThreads[friend.id] ?? [];
+              const last = thread[thread.length - 1];
+              return (
+                <button
+                  key={friend.id}
+                  onClick={() => setActiveChat(friend.id)}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 text-left"
+                >
+                  <img src={friend.avatar} alt={friend.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" style={{ objectPosition: friend.avatarPosition ?? 'top' }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{friend.name}</p>
+                    <p className="text-xs text-gray-400 truncate mt-0.5">{last ? last.text : 'No messages yet'}</p>
+                  </div>
+                  {last && <span className="text-[11px] text-gray-300 flex-shrink-0">{last.time}</span>}
+                </button>
+              );
+            })
+          )}
         </div>
       </div>
     );
@@ -715,41 +747,143 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser 
         </button>
       </div>
 
-      {/* Stories Row */}
-      <div className="bg-white px-4 pt-3 pb-3 border-b border-gray-100">
-        <div className="flex gap-4 overflow-x-auto scrollbar-none">
-          {friends.map(friend => (
-            <button
-              key={friend.id}
-              onClick={() => setStoryUser(friend)}
-              className="flex flex-col items-center gap-1.5 flex-shrink-0"
-            >
-              <div className="w-14 h-14 rounded-full p-0.5 bg-gradient-to-tr from-gray-400 to-gray-600">
-                <img
-                  src={friend.avatar}
-                  alt={friend.name}
-                  className="w-full h-full rounded-full object-cover border-2 border-white"
-                  style={{ objectPosition: friend.avatarPosition ?? 'top' }}
-                />
-              </div>
-              <span className="text-xs text-gray-600 font-medium">{friend.name.split(' ')[0]}</span>
-            </button>
-          ))}
+      {/* Stories Row — only for demo users */}
+      {!isNewUser && (
+        <div className="bg-white px-4 pt-3 pb-3 border-b border-gray-100">
+          <div className="flex gap-4 overflow-x-auto scrollbar-none">
+            {friends.map(friend => (
+              <button
+                key={friend.id}
+                onClick={() => setStoryUser(friend)}
+                className="flex flex-col items-center gap-1.5 flex-shrink-0"
+              >
+                <div className="w-14 h-14 rounded-full p-0.5 bg-gradient-to-tr from-gray-400 to-gray-600">
+                  <img
+                    src={friend.avatar}
+                    alt={friend.name}
+                    className="w-full h-full rounded-full object-cover border-2 border-white"
+                    style={{ objectPosition: friend.avatarPosition ?? 'top' }}
+                  />
+                </div>
+                <span className="text-xs text-gray-600 font-medium">{friend.name.split(' ')[0]}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Feed */}
       <div className="px-4 pt-3 space-y-4 pb-6">
-        {isNewUser && (
-          <div className="mx-0 mb-2 p-3.5 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
-            <span className="text-xl">🌍</span>
-            <div className="flex-1">
-              <p className="text-xs font-semibold text-amber-900">Discover mode</p>
-              <p className="text-xs text-amber-700/80">Follow travelers to personalize your feed</p>
+        {/* Real posts from Supabase */}
+        {realPosts.map(post => {
+          const images = post.places.map(p => p.photoUrl).filter(Boolean);
+          const firstPlace = post.places[0];
+          if (!images.length || !firstPlace) return null;
+          const locationLabel = post.places.length === 1
+            ? `${firstPlace.name} · ${firstPlace.city}`
+            : `${firstPlace.name} +${post.places.length - 1} · ${firstPlace.city}`;
+          const timeAgo = (() => {
+            const diff = Date.now() - new Date(post.createdAt).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 60) return `${mins}m`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `${hrs}h`;
+            return `${Math.floor(hrs / 24)}d`;
+          })();
+          const avatarSrc = post.profile.avatarUrl ?? '/aitana-avatar.jpg';
+          return (
+            <div key={post.id} className="bg-white rounded-3xl overflow-hidden shadow-sm">
+              <div className="flex items-start gap-3 px-4 pt-3 pb-2">
+                <img src={avatarSrc} alt={post.profile.name} className="w-8 h-8 rounded-full object-cover object-top flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 leading-tight">{post.profile.name}</p>
+                  <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
+                    <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    {locationLabel}
+                  </p>
+                </div>
+                <p className="text-xs text-gray-400 flex-shrink-0">{timeAgo}</p>
+              </div>
+              <ImageCarousel images={images} labels={post.places.map(p => p.name)} />
+              <div className="px-4 pt-2 pb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-4">
+                    <button className="flex items-center gap-1.5">
+                      <Heart size={22} strokeWidth={1.5} className="text-gray-700" />
+                      <span className="text-xs text-gray-500">0</span>
+                    </button>
+                    <button className="flex items-center gap-1.5">
+                      <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
+                      <span className="text-xs text-gray-500">0</span>
+                    </button>
+                    <Send size={22} strokeWidth={1.5} className="text-gray-700" />
+                  </div>
+                  <button className="px-5 py-1.5 rounded-full border border-gray-900 text-sm font-semibold text-gray-900">Save</button>
+                </div>
+                {post.caption ? (
+                  <p className="text-sm text-gray-700 leading-snug line-clamp-2">{post.caption}</p>
+                ) : null}
+                {post.hashtags.length > 0 && (
+                  <p className="text-xs text-slate-400 mt-1 line-clamp-1">
+                    {post.hashtags.map(t => `#${t}`).join(' ')}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Empty state for real users with no posts yet */}
+        {isNewUser && realPosts.length === 0 && (
+          <div className="px-5 pt-8 pb-6">
+            <div className="mb-6">
+              <p className="text-slate-800 font-bold text-lg mb-1">
+                Welcome{appUser?.name ? `, ${appUser.name.split(' ')[0]}` : ''}
+              </p>
+              <p className="text-slate-400 text-sm">Here's how to get started on curio</p>
+            </div>
+
+            {/* Action cards */}
+            <div className="space-y-3">
+              {/* Find people */}
+              <button
+                onClick={() => setShowFindPeople(true)}
+                className="w-full flex items-center gap-4 bg-slate-50 rounded-2xl px-4 py-4 text-left active:bg-slate-100 transition-colors"
+              >
+                <div className="w-11 h-11 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
+                  <Users size={20} strokeWidth={1.5} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">Find people to follow</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Discover travellers with great taste</p>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-slate-300 flex-shrink-0">
+                  <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+
+              {/* Add a post */}
+              <button
+                onClick={() => onNavigate?.('add')}
+                className="w-full flex items-center gap-4 bg-slate-50 rounded-2xl px-4 py-4 text-left active:bg-slate-100 transition-colors"
+              >
+                <div className="w-11 h-11 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
+                  <Plus size={20} strokeWidth={1.5} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">Share your first place</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Post a restaurant, hotel, or spot you love</p>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-slate-300 flex-shrink-0">
+                  <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
             </div>
           </div>
         )}
-        {feed.map(item => {
+
+        {/* Mock feed — only for demo account */}
+        {!isNewUser && feed.map(item => {
           const user = getUserById(item.userId);
           const place = getPlaceById(item.placeId);
           if (!user || !place) return null;

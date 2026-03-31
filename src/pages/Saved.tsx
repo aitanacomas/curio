@@ -186,7 +186,7 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [placeCategory, setPlaceCategory] = useState<Category | 'all'>('all');
-  const [savedPlaceSet, setSavedPlaceSet] = useState<Set<string>>(new Set(savedPlaceIds));
+  const [savedPlaceSet, setSavedPlaceSet] = useState<Set<string>>(new Set(isNewUser ? [] : savedPlaceIds));
   const [colViewMode, setColViewMode] = useState<'list' | 'area'>('list');
   const [colCategoryFilter, setColCategoryFilter] = useState<Category | 'all'>('all');
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
@@ -195,8 +195,10 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
   const [addSearch, setAddSearch] = useState('');
   const [addCatFilter, setAddCatFilter] = useState('all');
 
-  const savedPlaces = places.filter(p => savedPlaceIds.includes(p.id));
-  const myCollections = collections.filter(c => c.curatorId === 'user-1');
+  const savedPlaces = isNewUser
+    ? places.filter(p => savedPlaceSet.has(p.id))
+    : places.filter(p => savedPlaceIds.includes(p.id));
+  const myCollections = isNewUser ? [] : collections.filter(c => c.curatorId === 'user-1');
   const followingCollections = collections.filter(c => c.curatorId !== 'user-1');
 
   // ── Trip Detail ───────────────────────────────────────────────
@@ -637,7 +639,7 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
             return filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center px-8">
                 <p className="text-4xl mb-3">{placeCategories.find(c => c.id === placeCategory)?.emoji ?? '🔖'}</p>
-                <p className="text-base font-bold text-gray-900">No saved {placeCategories.find(c => c.id === placeCategory)?.label.toLowerCase()}s</p>
+                <p className="text-base font-bold text-gray-900">{placeCategory === 'all' ? 'No saved places' : `No saved ${placeCategories.find(c => c.id === placeCategory)?.label.toLowerCase()}s`}</p>
                 <p className="text-sm text-gray-400 mt-1">Save places from the explore page to see them here.</p>
               </div>
             ) : (
@@ -661,6 +663,15 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
 
       {/* Collections Tab */}
       {activeTab === 'Collections' && (
+        isNewUser && myCollections.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <span className="text-3xl">🗂️</span>
+            </div>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
+            <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+          </div>
+        ) : (
         <div className="px-4 pt-4 pb-6 space-y-6">
           {/* Mine */}
           <div>
@@ -715,6 +726,7 @@ export default function Saved({ isNewUser }: { isNewUser?: boolean }) {
             </div>
           </div>
         </div>
+        )
       )}
 
       {/* Trips Tab */}
