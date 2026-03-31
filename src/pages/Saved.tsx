@@ -1774,25 +1774,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       </button>
                     </div>
                   ) : (
-                    <button onClick={() => addPlaceImageRef.current?.click()} className="w-full h-24 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-1 text-gray-400">
+                    <label className="w-full h-24 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-1 text-gray-400 cursor-pointer">
                       <Plus size={18} strokeWidth={1.5} />
                       <span className="text-xs">Add your own photo</span>
-                    </button>
+                      <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const preview = URL.createObjectURL(file);
+                        setAddPlaceCustomImage(preview);
+                        if (userId) {
+                          const path = `plan-items/${userId}/${Date.now()}.jpg`;
+                          const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                          if (!error) setAddPlaceCustomImage(getPublicUrl('avatars', path));
+                        }
+                      }} />
+                    </label>
                   )}
-                  <input ref={addPlaceImageRef} type="file" accept="image/*" className="hidden" onChange={async e => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    // Show preview immediately so the user gets instant feedback
-                    const preview = URL.createObjectURL(file);
-                    setAddPlaceCustomImage(preview);
-                    // Try to upload to Supabase for persistence; fall back to blob URL
-                    if (userId) {
-                      const path = `plan-items/${userId}/${Date.now()}.jpg`;
-                      const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
-                      if (!error) setAddPlaceCustomImage(getPublicUrl('avatars', path));
-                      // else: blob URL preview stays — good enough for current session
-                    }
-                  }} />
                 </div>
 
                 {/* Category */}
@@ -2033,24 +2030,24 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         {categoryEmoji[editItem.category] ?? '📍'}
                       </div>
                     )}
-                    <button
-                      onClick={() => editItemImageRef.current?.click()}
-                      className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 text-white text-xs font-semibold px-3 py-1.5 rounded-full"
-                    >
+                    <label className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 text-white text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer">
                       <Pencil size={11} strokeWidth={2} /> Change photo
-                    </button>
+                      <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        let url = URL.createObjectURL(file);
+                        setEditItem(prev => prev ? { ...prev, image: url } : prev);
+                        if (userId) {
+                          const path = `plan-items/${userId}/${Date.now()}.jpg`;
+                          const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                          if (!error) {
+                            const publicUrl = getPublicUrl('avatars', path);
+                            setEditItem(prev => prev ? { ...prev, image: publicUrl } : prev);
+                          }
+                        }
+                      }} />
+                    </label>
                   </div>
-                  <input ref={editItemImageRef} type="file" accept="image/*" className="hidden" onChange={async e => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    let url = URL.createObjectURL(file);
-                    if (userId) {
-                      const path = `plan-items/${userId}/${Date.now()}.jpg`;
-                      const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
-                      if (!error) url = getPublicUrl('avatars', path);
-                    }
-                    setEditItem(prev => prev ? { ...prev, image: url } : prev);
-                  }} />
                 </div>
                 {/* Name */}
                 <div className="mb-4">
