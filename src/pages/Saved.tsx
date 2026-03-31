@@ -985,84 +985,67 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           if (!item.name || item.name.length < 2) continue;
 
           try {
-            // ── Address path: item has address → use it to get proper "Area, City" neighborhood ──
-            if (item.address) {
-              const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-                body: JSON.stringify({ input: item.address, languageCode: 'en' }),
-              });
-              const acData = await acRes.json();
-              const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
-              if (placeId) {
-                const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-                  headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'addressComponents,formattedAddress', 'X-Goog-LanguageCode': 'en' },
-                });
-                const det = await detRes.json();
-                const newNeighborhood = extractNeighborhood(det.addressComponents ?? [], det.formattedAddress);
-                if (newNeighborhood && newNeighborhood !== item.neighborhood) {
-                  const ok = await updatePlanItem(item.id, { neighborhood: newNeighborhood });
-                  if (ok) applyPatch(item.id, day.id, { neighborhood: newNeighborhood });
-                }
-              } else {
-                // No Places result — parse from address string directly
+            // ── Use searchText API for reliable establishment + neighborhood data ──
+            const searchQuery = item.address
+              ? `${item.name} ${item.address}`
+              : plan.country ? `${item.name} ${plan.country}` : item.name;
+
+            const stRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents,places.photos',
+              },
+              body: JSON.stringify({ textQuery: searchQuery, languageCode: 'en' }),
+            });
+            const stData = await stRes.json();
+            const place = stData.places?.[0];
+            if (!place) {
+              // No result — fall back to string parsing if we have an address
+              if (item.address) {
                 const neighborhood = extractNeighborhood([], item.address);
                 if (neighborhood && neighborhood !== item.neighborhood) {
                   const ok = await updatePlanItem(item.id, { neighborhood });
                   if (ok) applyPatch(item.id, day.id, { neighborhood });
                 }
               }
-              await new Promise(r => setTimeout(r, 150));
+              await new Promise(r => setTimeout(r, 200));
               continue;
             }
 
-            // ── Name path: no address → search Google Places by name ──
-            const query = plan.country ? `${item.name} ${plan.country}` : item.name;
-            const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-              body: JSON.stringify({ input: query, languageCode: 'en' }),
-            });
-            const acData = await acRes.json();
-            const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
-            if (!placeId) continue;
-
-            const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-              headers: {
-                'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents,photos',
-                'X-Goog-LanguageCode': 'en',
-              },
-            });
-            const det = await detRes.json();
-
             // Verify result is a genuine match — require significant word overlap
-            const placeName = (det.displayName?.text ?? '').toLowerCase();
-            const itemWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+            const placeName = (place.displayName?.text ?? '').toLowerCase();
+            const itemWords = item.name.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
             const placeWords = placeName.split(/\s+/).filter((w: string) => w.length > 2);
-            const overlap = itemWords.filter(w => placeWords.some((pw: string) => pw.includes(w) || w.includes(pw)));
-            // Need at least half the item's significant words to match
-            if (placeName && itemWords.length > 0 && overlap.length < Math.ceil(itemWords.length / 2)) continue;
+            const overlap = itemWords.filter((w: string) => placeWords.some((pw: string) => pw.includes(w) || w.includes(pw)));
+            if (placeName && itemWords.length > 0 && overlap.length < Math.ceil(itemWords.length / 2)) {
+              await new Promise(r => setTimeout(r, 200));
+              continue;
+            }
 
-            const newAddress = det.formattedAddress ?? '';
-            const newNeighborhood = extractNeighborhood(det.addressComponents ?? [], det.formattedAddress);
-            const photoName = det.photos?.[0]?.name;
-            // Only replace image if item has no image at all (never overwrite user-set or previously enriched photos)
+            const newAddress = place.formattedAddress ?? '';
+            const newNeighborhood = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
+            const photoName = place.photos?.[0]?.name;
+            // Only replace image if item has no image at all (never overwrite user-set photos)
             const hasNoImage = !item.image || item.image.includes('unsplash.com/photo-1476514525535');
             const newImage = hasNoImage && photoName
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
               : '';
 
             const dbUpdates: Record<string, string> = {};
-            if (newAddress) dbUpdates.address = newAddress;
+            if (newAddress && !item.address) dbUpdates.address = newAddress;
             if (newNeighborhood) dbUpdates.neighborhood = newNeighborhood;
             if (newImage) dbUpdates.image_url = newImage;
-            if (Object.keys(dbUpdates).length === 0) continue;
+            if (Object.keys(dbUpdates).length === 0) {
+              await new Promise(r => setTimeout(r, 200));
+              continue;
+            }
 
             const ok = await updatePlanItem(item.id, dbUpdates);
             if (!ok) continue;
             applyPatch(item.id, day.id, {
-              ...(newAddress ? { address: newAddress } : {}),
+              ...(dbUpdates.address ? { address: dbUpdates.address } : {}),
               ...(newNeighborhood ? { neighborhood: newNeighborhood } : {}),
               ...(newImage ? { image: newImage } : {}),
             });
