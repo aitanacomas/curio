@@ -851,9 +851,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </Suspense>
           <div className="grid grid-cols-3 gap-2 mt-4">
             {[
-              { value: actualCountriesCount, label: 'Countries' },
-              { value: actualPlacesCount, label: 'Places' },
-              { value: '3', label: 'Continents' },
+              { value: isNewUser ? new Set(realPosts.flatMap(p => p.places.map(pl => pl.country))).size : actualCountriesCount, label: 'Countries' },
+              { value: isNewUser ? realPosts.reduce((n, p) => n + p.places.length, 0) : actualPlacesCount, label: 'Places' },
+              { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts' },
             ].map(stat => (
               <div key={stat.label} className="text-center bg-gray-50 rounded-xl py-3">
                 <p className="text-lg font-black text-gray-900">{stat.value}</p>
