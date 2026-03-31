@@ -142,6 +142,15 @@ export async function unfollowUser(followerId: string, followingId: string) {
     .eq('following_id', followingId);
 }
 
+// ── Update profile ────────────────────────────────────────────────────────────
+export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string }) {
+  const { error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', userId);
+  return error;
+}
+
 // ── Posts by a single user ────────────────────────────────────────────────────
 export async function getUserPosts(userId: string): Promise<RealPost[]> {
   const { data: posts, error } = await supabase

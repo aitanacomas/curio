@@ -5,7 +5,7 @@ import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
-import { getUserPosts, type RealPost } from '../lib/supabase';
+import { getUserPosts, updateProfile, type RealPost } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -48,6 +48,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
   const [showMenu, setShowMenu] = useState(false);
   const [showFollowers, setShowFollowers] = useState<'followers' | 'following' | null>(null);
   const [showFindPeople, setShowFindPeople] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [showCreatorOnboard, setShowCreatorOnboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
@@ -103,6 +108,23 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
 
   // ── Edit Profile Sheet ──────────────────────────────────────────
   if (showEditProfile) {
+    const handleSave = async () => {
+      if (!appUser?.id) return;
+      setSaving(true);
+      setSaveError('');
+      const error = await updateProfile(appUser.id, {
+        name: editName.trim() || displayUser.name,
+        username: editUsername.trim().replace('@', '') || displayUser.username,
+        bio: editBio.trim(),
+      });
+      setSaving(false);
+      if (error) {
+        setSaveError('Username may already be taken. Try another.');
+      } else {
+        setShowEditProfile(false);
+      }
+    };
+
     return (
       <div className="bg-white min-h-screen">
         <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
@@ -110,7 +132,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
             <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
           </button>
           <h2 className="text-base font-bold text-gray-900 flex-1">Edit Profile</h2>
-          <button className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full">Save</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
         </div>
         <div className="px-4 pt-6 space-y-5">
           {/* Avatar */}
@@ -124,22 +152,37 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
             <button className="text-sm font-semibold text-gray-500">Change photo</button>
           </div>
           {/* Fields */}
-          {[
-            { label: 'Name', value: displayUser.name },
-            { label: 'Username', value: displayUser.username },
-            { label: 'Bio', value: displayUser.bio ?? '' },
-            { label: 'Location', value: '' },
-            { label: 'Website', value: '' },
-          ].map(field => (
-            <div key={field.label}>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{field.label}</p>
-              <input
-                defaultValue={field.value}
-                placeholder={field.label}
-                className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
-              />
-            </div>
-          ))}
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Name</p>
+            <input
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              placeholder={displayUser.name}
+              className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Username</p>
+            <input
+              value={editUsername}
+              onChange={e => setEditUsername(e.target.value)}
+              placeholder={displayUser.username}
+              autoCapitalize="none"
+              className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Bio</p>
+            <input
+              value={editBio}
+              onChange={e => setEditBio(e.target.value)}
+              placeholder={displayUser.bio || 'Add a bio…'}
+              className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+            />
+          </div>
+          {saveError && (
+            <p className="text-xs text-red-400 bg-red-50 rounded-xl px-4 py-3">{saveError}</p>
+          )}
         </div>
       </div>
     );
@@ -538,7 +581,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
       {/* Profile Header */}
       <div className="px-4 pb-4">
         <div className="flex items-center gap-4">
-          <button onClick={() => setShowEditProfile(true)} className="relative flex-shrink-0">
+          <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
             <img src={displayUser.avatar} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
             <div className="absolute bottom-0 right-0 w-5 h-5 bg-gray-900 rounded-full flex items-center justify-center">
               <Plus size={11} strokeWidth={2.5} className="text-white" />
@@ -706,7 +749,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
             </div>
             <div className="px-4 pt-2 space-y-1">
               {[
-                { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); setShowEditProfile(true); } },
+                { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setShowEditProfile(true); }; } },
                 { icon: Share2, label: 'Share Profile', action: () => setShowMenu(false) },
                 { icon: Settings, label: 'Settings', action: () => setShowMenu(false) },
                 { icon: Mail, label: 'Messages', action: () => { setShowMenu(false); onOpenMessages?.(); } },
