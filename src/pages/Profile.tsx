@@ -1132,19 +1132,6 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
               />
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Emoji <span className="normal-case font-normal">(optional)</span></p>
-                <div className="flex gap-2 flex-wrap">
-                  <button onClick={() => setNewColEmoji('')} className={`w-9 h-9 rounded-xl text-xs font-semibold flex items-center justify-center transition-colors ${newColEmoji === '' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-400'}`}>
-                    None
-                  </button>
-                  {['📍','🌍','🏖️','🏔️','🍽️','☕','🏛️','🛍️','🌿','🎯','🌊','🏙️','❤️','⭐'].map(e => (
-                    <button key={e} onClick={() => setNewColEmoji(e)} className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-colors ${newColEmoji === e ? 'bg-gray-900' : 'bg-gray-100'}`}>
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Description (optional)</p>
                 <input
                   value={newColDesc}
