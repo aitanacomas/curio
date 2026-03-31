@@ -4,6 +4,7 @@ import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems }
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
+import FindPeople from './FindPeople';
 import { getUserPosts, type RealPost } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -46,6 +47,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showFollowers, setShowFollowers] = useState<'followers' | 'following' | null>(null);
+  const [showFindPeople, setShowFindPeople] = useState(false);
   const [showCreatorOnboard, setShowCreatorOnboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
@@ -93,6 +95,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
     const ids = item.placeIds ?? [item.placeId];
     return ids.map(id => getPlaceById(id)).filter(Boolean);
   };
+
+  // ── Find People ─────────────────────────────────────────────────
+  if (showFindPeople) {
+    return <FindPeople currentUserId={appUser?.id ?? ''} onBack={() => setShowFindPeople(false)} />;
+  }
 
   // ── Edit Profile Sheet ──────────────────────────────────────────
   if (showEditProfile) {
@@ -508,7 +515,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
     <div className="bg-white min-h-screen">
       {/* Top Nav */}
       <div className="flex items-center justify-between px-4 pt-5 pb-3">
-        <button onClick={() => setShowFollowers('followers')} className="w-9 h-9 flex items-center justify-center">
+        <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center">
           <UserPlus size={22} strokeWidth={1.5} className="text-gray-700" />
         </button>
         <div className="text-center">
