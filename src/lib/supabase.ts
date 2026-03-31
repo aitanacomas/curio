@@ -258,17 +258,30 @@ export interface RealCollection {
 export async function getUserCollections(userId: string): Promise<RealCollection[]> {
   const { data } = await supabase
     .from('user_collections')
-    .select('*, collection_places(count)')
+    .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
-  return (data ?? []).map((r: any) => ({
+  if (!data) return [];
+
+  // Try to get place counts — table may not exist yet
+  const ids = data.map((r: any) => r.id);
+  const counts: Record<string, number> = {};
+  if (ids.length > 0) {
+    const { data: cp } = await supabase
+      .from('collection_places')
+      .select('collection_id')
+      .in('collection_id', ids);
+    for (const r of cp ?? []) counts[(r as any).collection_id] = (counts[(r as any).collection_id] ?? 0) + 1;
+  }
+
+  return data.map((r: any) => ({
     id: r.id,
     userId: r.user_id,
     name: r.name ?? '',
     emoji: r.emoji ?? '',
     description: r.description ?? '',
     coverImageUrl: r.cover_image_url ?? null,
-    placesCount: r.collection_places?.[0]?.count ?? 0,
+    placesCount: counts[r.id] ?? 0,
     createdAt: r.created_at,
   }));
 }
