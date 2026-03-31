@@ -86,7 +86,27 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
-      getUserPosts(appUser.id).then(setRealPosts);
+      getUserPosts(appUser.id).then(async posts => {
+        setRealPosts(posts);
+        // Auto-geocode any places missing lat/lng
+        const missing = posts.flatMap(p => p.places.filter(pl => pl.lat == null || pl.lng == null));
+        if (missing.length === 0) return;
+        const updates: { id: string; lat: number; lng: number }[] = [];
+        for (const pl of missing) {
+          try {
+            const q = encodeURIComponent(`${pl.name}, ${pl.city}, ${pl.country}`);
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
+              headers: { 'Accept-Language': 'en', 'User-Agent': 'CurioApp/1.0' },
+            });
+            const data = await res.json();
+            if (data[0]) updates.push({ id: pl.id, lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+          } catch { /* skip */ }
+        }
+        if (updates.length > 0) {
+          await Promise.all(updates.map(u => supabase.from('post_places').update({ lat: u.lat, lng: u.lng }).eq('id', u.id)));
+          getUserPosts(appUser.id).then(setRealPosts);
+        }
+      });
       getUserCollections(appUser.id).then(setRealCollections);
       getFollowCounts(appUser.id).then(({ followers, following }) => {
         setRealFollowerCount(followers);
@@ -947,7 +967,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         <div className="flex flex-col px-4 pt-4 pb-6 gap-4">
           <Suspense fallback={<div style={{ height: mapHeight }} className="bg-gray-100 rounded-xl animate-pulse" />}>
             <div className="rounded-xl overflow-hidden" style={{ height: mapHeight }}>
-              <MapView places={mapPlaces} height={mapHeight} />
+              <MapView places={mapPlaces} height={mapHeight} center={mapPlaces.length === 0 ? [10, 0] : undefined} />
             </div>
           </Suspense>
           <div>
