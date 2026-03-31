@@ -116,7 +116,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
           {/* Avatar */}
           <div className="flex flex-col items-center gap-3">
             <div className="relative">
-              <img src={user.avatar} alt={user.name} className="w-20 h-20 rounded-full object-cover object-top" />
+              <img src={displayUser.avatar} alt={displayUser.name} className="w-20 h-20 rounded-full object-cover object-top" />
               <button className="absolute bottom-0 right-0 w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center">
                 <Edit3 size={13} strokeWidth={1.5} className="text-white" />
               </button>
@@ -125,10 +125,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate 
           </div>
           {/* Fields */}
           {[
-            { label: 'Name', value: user.name },
-            { label: 'Username', value: `@${user.username}` },
-            { label: 'Bio', value: user.bio ?? '' },
-            { label: 'Location', value: 'San Francisco, CA' },
+            { label: 'Name', value: displayUser.name },
+            { label: 'Username', value: displayUser.username },
+            { label: 'Bio', value: displayUser.bio ?? '' },
+            { label: 'Location', value: '' },
             { label: 'Website', value: '' },
           ].map(field => (
             <div key={field.label}>
