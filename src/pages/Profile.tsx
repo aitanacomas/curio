@@ -1,12 +1,12 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check } from 'lucide-react';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -82,6 +82,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [selectedRealCollection, setSelectedRealCollection] = useState<RealCollection | null>(null);
   const [realCollectionPlaces, setRealCollectionPlaces] = useState<RealPostPlace[]>([]);
   const [loadingCollectionPlaces, setLoadingCollectionPlaces] = useState(false);
+  const [showEditCollection, setShowEditCollection] = useState(false);
+  const [editColName, setEditColName] = useState('');
+  const [editColDesc, setEditColDesc] = useState('');
+  const [editColCoverFile, setEditColCoverFile] = useState<File | null>(null);
+  const [editColCoverPreview, setEditColCoverPreview] = useState<string | null>(null);
+  const [savingEditCollection, setSavingEditCollection] = useState(false);
+  const editColCoverInputRef = useRef<HTMLInputElement>(null);
+  const [showAddPlacesSheet, setShowAddPlacesSheet] = useState(false);
+  const [colPlaceIds, setColPlaceIds] = useState<Set<string>>(new Set());
+  const [linkCopied, setLinkCopied] = useState(false);
   const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
   const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
@@ -947,9 +957,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     const mapPlaces = realCollectionPlaces
       .filter(pl => pl.lat != null && pl.lng != null)
       .map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
-    const countries = new Set(realCollectionPlaces.map(pl => pl.country)).size;
+    // All post_places across user's posts (for the add sheet)
+    const allUserPlaces = realPosts.flatMap(p => p.places);
 
     return (
+      <>
       <div className="bg-white min-h-screen">
         {/* Hero */}
         <div className="relative h-64">
@@ -962,11 +974,29 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
           <button
-            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); }}
+            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); setShowEditCollection(false); setShowAddPlacesSheet(false); }}
             className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
           >
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
+          {/* Top right actions */}
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                navigator.clipboard.writeText(url).then(() => { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); });
+              }}
+              className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+            >
+              {linkCopied ? <Check size={14} strokeWidth={2} className="text-green-600" /> : <Share2 size={14} strokeWidth={1.5} className="text-gray-700" />}
+            </button>
+            <button
+              onClick={() => { setEditColName(selectedRealCollection.name); setEditColDesc(selectedRealCollection.description); setEditColCoverFile(null); setEditColCoverPreview(null); setShowEditCollection(true); }}
+              className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+            >
+              <Edit3 size={14} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+          </div>
           <div className="absolute bottom-4 left-4 right-4">
             <h2 className="text-2xl font-black text-white">{selectedRealCollection.name}</h2>
             {selectedRealCollection.description && (
@@ -976,16 +1006,17 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         </div>
 
         {/* Stats bar */}
-        <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
-          {[
-            { value: selectedRealCollection.placesCount, label: 'Places' },
-            { value: countries || 0, label: countries === 1 ? 'Country' : 'Countries' },
-          ].map(s => (
-            <div key={s.label} className="flex-1 py-3 text-center">
-              <p className="text-base font-black text-gray-900">{s.value}</p>
-              <p className="text-xs text-gray-400">{s.label}</p>
-            </div>
-          ))}
+        <div className="flex items-center border-b border-gray-100 px-4 py-3 justify-between">
+          <p className="text-sm font-bold text-gray-900">{realCollectionPlaces.length} place{realCollectionPlaces.length !== 1 ? 's' : ''}</p>
+          <button
+            onClick={() => {
+              setColPlaceIds(new Set(realCollectionPlaces.map(p => p.id)));
+              setShowAddPlacesSheet(true);
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full"
+          >
+            <Plus size={12} strokeWidth={2.5} /> Add places
+          </button>
         </div>
 
         {loadingCollectionPlaces ? (
@@ -997,11 +1028,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
             <span className="text-4xl mb-3">📍</span>
             <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
-            <p className="text-slate-400 text-sm max-w-[220px]">Tap the bookmark on any place card in a post to add it here</p>
+            <p className="text-slate-400 text-sm max-w-[220px]">Tap "Add places" to start building your collection</p>
           </div>
         ) : (
           <div className="px-4 pt-4 pb-10">
-            {/* Map */}
             {mapPlaces.length > 0 && (
               <div className="mb-4 rounded-xl overflow-hidden">
                 <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
@@ -1009,10 +1039,6 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 </Suspense>
               </div>
             )}
-            {/* Place list */}
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-              {realCollectionPlaces.length} Place{realCollectionPlaces.length !== 1 ? 's' : ''}
-            </p>
             <div className="space-y-3">
               {realCollectionPlaces.map(place => (
                 <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
@@ -1024,12 +1050,148 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     </p>
                     {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
                   </div>
+                  <button
+                    onClick={async () => {
+                      await removePlaceFromCollection(selectedRealCollection.id, place.id);
+                      setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
+                      setRealCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                      setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
+                    }}
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0"
+                  >
+                    <X size={12} strokeWidth={2} className="text-gray-500" />
+                  </button>
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      {/* Edit collection sheet */}
+      {showEditCollection && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditCollection(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900">Edit Collection</h3>
+              <button
+                disabled={savingEditCollection}
+                onClick={async () => {
+                  if (!selectedRealCollection) return;
+                  setSavingEditCollection(true);
+                  let coverUrl: string | undefined = undefined;
+                  if (editColCoverFile && appUser) {
+                    const ext = editColCoverFile.name.split('.').pop() ?? 'jpg';
+                    const path = `collections/${appUser.id}/${Date.now()}.${ext}`;
+                    const { error: upErr } = await supabase.storage.from('avatars').upload(path, editColCoverFile, { upsert: true, contentType: editColCoverFile.type });
+                    if (!upErr) coverUrl = getPublicUrl('avatars', path);
+                  }
+                  const payload: { name?: string; description?: string; cover_image_url?: string } = {
+                    name: editColName.trim() || selectedRealCollection.name,
+                    description: editColDesc.trim(),
+                  };
+                  if (coverUrl) payload.cover_image_url = coverUrl;
+                  await updateCollection(selectedRealCollection.id, payload);
+                  const updated = { ...selectedRealCollection, name: payload.name!, description: payload.description!, coverImageUrl: coverUrl ?? selectedRealCollection.coverImageUrl };
+                  setSelectedRealCollection(updated);
+                  setRealCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
+                  setSavingEditCollection(false);
+                  setShowEditCollection(false);
+                }}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-40"
+              >{savingEditCollection ? 'Saving…' : 'Save'}</button>
+            </div>
+            <div className="px-4 space-y-4">
+              <input ref={editColCoverInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+                const f = e.target.files?.[0]; if (!f) return;
+                setEditColCoverFile(f); setEditColCoverPreview(URL.createObjectURL(f));
+              }} />
+              <button onClick={() => editColCoverInputRef.current?.click()} className="w-full h-32 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center relative">
+                {(editColCoverPreview ?? selectedRealCollection.coverImageUrl)
+                  ? <img src={editColCoverPreview ?? selectedRealCollection.coverImageUrl!} className="w-full h-full object-cover" />
+                  : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Change cover photo</span></div>
+                }
+                {(editColCoverPreview ?? selectedRealCollection.coverImageUrl) && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">Change photo</span>
+                  </div>
+                )}
+              </button>
+              <input value={editColName} onChange={e => setEditColName(e.target.value)} placeholder="Collection name" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              <input value={editColDesc} onChange={e => setEditColDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              <button
+                onClick={async () => {
+                  if (!selectedRealCollection) return;
+                  await deleteCollection(selectedRealCollection.id);
+                  setRealCollections(prev => prev.filter(c => c.id !== selectedRealCollection.id));
+                  setSelectedRealCollection(null);
+                  setRealCollectionPlaces([]);
+                  setShowEditCollection(false);
+                }}
+                className="w-full py-3 text-sm font-semibold text-red-500 bg-red-50 rounded-xl"
+              >Delete collection</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add places sheet */}
+      {showAddPlacesSheet && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddPlacesSheet(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8 max-h-[80vh] flex flex-col">
+            <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-4 flex-shrink-0">
+              <h3 className="text-base font-bold text-gray-900">Add places</h3>
+              <button onClick={() => setShowAddPlacesSheet(false)} className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full">Done</button>
+            </div>
+            {allUserPlaces.length === 0 ? (
+              <div className="px-4 pb-4 text-center">
+                <p className="text-sm text-gray-400">Post some places first to add them here</p>
+              </div>
+            ) : (
+              <div className="px-4 space-y-2 overflow-y-auto pb-4">
+                {allUserPlaces.map(place => {
+                  const inCol = colPlaceIds.has(place.id);
+                  return (
+                    <button
+                      key={place.id}
+                      onClick={async () => {
+                        if (inCol) {
+                          await removePlaceFromCollection(selectedRealCollection.id, place.id);
+                          setColPlaceIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
+                          setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
+                          setRealCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                          setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
+                        } else {
+                          await addPlaceToCollection(selectedRealCollection.id, place.id);
+                          setColPlaceIds(prev => new Set(prev).add(place.id));
+                          setRealCollectionPlaces(prev => [...prev, { id: place.id, name: place.name, category: place.category, city: place.city, country: place.country, photoUrl: place.photoUrl, position: place.position, lat: place.lat, lng: place.lng }]);
+                          setRealCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: c.placesCount + 1 } : c));
+                          setSelectedRealCollection(prev => prev ? { ...prev, placesCount: prev.placesCount + 1 } : prev);
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
+                    >
+                      {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                        <p className="text-xs text-gray-400">{place.city}, {place.country}</p>
+                      </div>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                        {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      </>
     );
   }
 

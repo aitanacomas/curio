@@ -366,6 +366,15 @@ export async function unsavePost(userId: string, postId: string) {
   await supabase.from('post_saves').delete().eq('user_id', userId).eq('post_id', postId);
 }
 
+export async function updateCollection(id: string, payload: { name?: string; description?: string; cover_image_url?: string | null }): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('user_collections').update(payload).eq('id', id);
+  return { error: error?.message ?? null };
+}
+
+export async function deleteCollection(id: string) {
+  await supabase.from('user_collections').delete().eq('id', id);
+}
+
 export async function createCollection(userId: string, payload: { name: string; emoji: string; description: string; cover_image_url?: string | null }): Promise<{ data: RealCollection | null; error: string | null }> {
   const { data, error } = await supabase
     .from('user_collections')
