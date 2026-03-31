@@ -48,6 +48,7 @@ function FitWorld() {
     const centerY = southPt.y - containerHeight / 2;
     const center = map.unproject([map.project([0, 0], zoom).x, centerY], zoom);
     map.setView([center.lat, 0], zoom, { animate: false });
+    map.setMinZoom(zoom);
   }, [map]);
   return null;
 }
@@ -72,7 +73,8 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       maxBounds={[[-60, -220], [72, 220]]}
       maxBoundsViscosity={1.0}
     >
-      <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+      <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
+      <TileLayer url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png" minZoom={6} />
       {places.length === 0 && <FitWorld />}
       {places.length > 1 && <FitBounds places={places} />}
       {places.map(place => (
