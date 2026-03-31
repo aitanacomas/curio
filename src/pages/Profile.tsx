@@ -91,16 +91,24 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         // Auto-geocode any places missing lat/lng (in memory + DB)
         const missing = posts.flatMap(p => p.places.filter(pl => pl.lat == null || pl.lng == null));
         if (missing.length === 0) return;
+        const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
         const coords: Record<string, { lat: number; lng: number }> = {};
         for (const pl of missing) {
           try {
-            await new Promise(r => setTimeout(r, 1100)); // Nominatim 1 req/s limit
-            const q = encodeURIComponent(`${pl.name}, ${pl.city}, ${pl.country}`);
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
-              headers: { 'Accept-Language': 'en', 'User-Agent': 'CurioApp/1.0' },
+            const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY },
+              body: JSON.stringify({ input: `${pl.name}, ${pl.city}, ${pl.country}` }),
             });
-            const data = await res.json();
-            if (data[0]) coords[pl.id] = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+            const acData = await acRes.json();
+            const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
+            if (!placeId) continue;
+            const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+              headers: { 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'location' },
+            });
+            const det = await detRes.json();
+            if (det.location?.latitude != null)
+              coords[pl.id] = { lat: det.location.latitude, lng: det.location.longitude };
           } catch { /* skip */ }
         }
         if (Object.keys(coords).length === 0) return;
