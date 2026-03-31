@@ -661,6 +661,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [detailItemDayId, setDetailItemDayId] = useState<string | null>(null);
   const [showEditItem, setShowEditItem] = useState(false);
   const [editItem, setEditItem] = useState<TripItem | null>(null);
+  const [showDuplicatePicker, setShowDuplicatePicker] = useState(false);
   const [editItemDayId, setEditItemDayId] = useState<string | null>(null);
   const [editItemAddressSearch, setEditItemAddressSearch] = useState('');
   const [editItemAddressSuggestions, setEditItemAddressSuggestions] = useState<{ placeId: string; text: string }[]>([]);
@@ -699,6 +700,67 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     if (types.some(t => ['museum', 'art_gallery', 'tourist_attraction', 'landmark'].includes(t))) return 'attraction';
     if (types.some(t => ['stadium', 'sports_complex', 'gym', 'fitness_center'].includes(t))) return 'sports';
     return 'experience';
+  };
+
+  // Parse a loose date string like "Mar 11" or "March 11" or "2025-03-11" into a Date
+  const parseFlexDate = (str: string): Date | null => {
+    if (!str) return null;
+    const year = new Date().getFullYear();
+    const d1 = new Date(`${str} ${year}`);
+    if (!isNaN(d1.getTime())) return d1;
+    const d2 = new Date(str);
+    if (!isNaN(d2.getTime())) return d2;
+    return null;
+  };
+
+  // Extract date from a day label like "Day 1 · Mar 11" or "Day 1 · Tue Mar 11"
+  const getDayDateFromLabel = (label: string): Date | null => {
+    const match = label.match(/·\s*(?:\w{3}\s+)?(\w+\s+\d+)$/);
+    if (!match) return null;
+    return parseFlexDate(match[1]);
+  };
+
+  // Auto-add a stay item to all days between checkIn and checkOut (exclusive)
+  const autoPopulateStay = async (
+    item: TripItem,
+    sourceDayId: string | null,
+    trip: Trip,
+  ): Promise<Trip> => {
+    const stayCategories = ['hotel', 'stay', 'Hotel'];
+    if (!stayCategories.includes(item.category) || !item.checkIn || !item.checkOut) return trip;
+    const checkIn = parseFlexDate(item.checkIn);
+    const checkOut = parseFlexDate(item.checkOut);
+    if (!checkIn || !checkOut || checkOut <= checkIn) return trip;
+
+    let updatedDays = trip.days;
+    for (const day of trip.days) {
+      if (!day.id || day.id === sourceDayId) continue;
+      const dayDate = getDayDateFromLabel(day.label);
+      if (!dayDate) continue;
+      // Include check-in day up to (not including) check-out day
+      const inRange = dayDate >= checkIn && dayDate < checkOut;
+      if (!inRange) continue;
+      const alreadyHas = day.items.some(i => i.name === item.name);
+      if (alreadyHas) continue;
+      const dbItem = await createPlanItem(trip.id, day.id, {
+        name: item.name, category: item.category, image_url: item.image ?? '',
+        time_label: item.time ?? '', time_end: item.timeEnd ?? '',
+        notes: item.notes ?? '', address: item.address ?? '', neighborhood: item.neighborhood ?? '',
+        status: item.status ?? 'none', check_in: item.checkIn, check_out: item.checkOut,
+        position: day.items.length,
+      });
+      if (dbItem) {
+        const newItem: TripItem = {
+          id: dbItem.id, name: dbItem.name, category: dbItem.category, image: dbItem.imageUrl,
+          address: dbItem.address, neighborhood: dbItem.neighborhood,
+          time: dbItem.timeLabel, timeEnd: dbItem.timeEnd, notes: dbItem.notes,
+          status: dbItem.status as TripItem['status'], checkIn: dbItem.checkIn, checkOut: dbItem.checkOut,
+          booked: dbItem.booked,
+        };
+        updatedDays = updatedDays.map(d => d.id === day.id ? { ...d, items: [...d.items, newItem] } : d);
+      }
+    }
+    return { ...trip, days: updatedDays };
   };
 
   const getTripDayLabel = (trip: Trip, dayIndex: number): string => {
@@ -846,7 +908,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       }
 
       updatedDays[dayIndex] = { ...day, items: [...day.items, newItem] };
-      const updated: Trip = { ...selectedTrip, days: updatedDays };
+      let updated: Trip = { ...selectedTrip, days: updatedDays };
+      // Auto-populate stay to all days in check-in/check-out range
+      updated = await autoPopulateStay(newItem, targetDayId, updated);
       setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
       setSelectedTrip(updated);
       setAddPlaceSearch('');
@@ -1956,7 +2020,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         {/* Item Detail — bottom sheet */}
         {showItemDetail && detailItem && (
           <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
-            <div className="absolute inset-0 bg-black/40" onClick={() => setShowItemDetail(false)} />
+            <div className="absolute inset-0 bg-black/40" onClick={() => { setShowItemDetail(false); setShowDuplicatePicker(false); }} />
             <div className="relative bg-white rounded-t-3xl flex flex-col overflow-hidden" style={{ maxHeight: '88vh' }}>
             {/* Photo header */}
             <div className="relative flex-shrink-0">
@@ -2026,6 +2090,61 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <div className="bg-gray-50 rounded-2xl px-4 py-4 mb-4">
                   <p className="text-xs font-semibold text-gray-400 mb-1.5">Notes</p>
                   <p className="text-base text-gray-800 leading-relaxed">{detailItem.notes}</p>
+                </div>
+              )}
+
+              {/* Duplicate to another day */}
+              {selectedTrip && selectedTrip.days.length > 1 && (
+                <div className="mt-4 mb-2">
+                  {!showDuplicatePicker ? (
+                    <button
+                      onClick={() => setShowDuplicatePicker(true)}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-gray-100 text-sm text-gray-500 font-semibold"
+                    >
+                      <Plus size={14} strokeWidth={2} /> Duplicate to another day
+                    </button>
+                  ) : (
+                    <div className="bg-gray-50 rounded-2xl p-4">
+                      <p className="text-xs font-semibold text-gray-400 mb-3">Copy to which day?</p>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {selectedTrip.days.filter(d => d.id !== detailItemDayId).map(day => (
+                          <button
+                            key={day.id ?? day.label}
+                            onClick={async () => {
+                              if (!day.id || !selectedTrip || !detailItem) return;
+                              const dbItem = await createPlanItem(selectedTrip.id, day.id, {
+                                name: detailItem.name, category: detailItem.category, image_url: detailItem.image ?? '',
+                                time_label: detailItem.time ?? '', time_end: detailItem.timeEnd ?? '',
+                                notes: detailItem.notes ?? '', address: detailItem.address ?? '', neighborhood: detailItem.neighborhood ?? '',
+                                status: detailItem.status ?? 'none', check_in: detailItem.checkIn, check_out: detailItem.checkOut,
+                                position: day.items.length,
+                              });
+                              if (dbItem) {
+                                const newItem: TripItem = {
+                                  id: dbItem.id, name: dbItem.name, category: dbItem.category, image: dbItem.imageUrl,
+                                  address: dbItem.address, neighborhood: dbItem.neighborhood,
+                                  time: dbItem.timeLabel, timeEnd: dbItem.timeEnd, notes: dbItem.notes,
+                                  status: dbItem.status as TripItem['status'], checkIn: dbItem.checkIn, checkOut: dbItem.checkOut,
+                                  booked: dbItem.booked,
+                                };
+                                const updatedDays = selectedTrip.days.map(d =>
+                                  d.id === day.id ? { ...d, items: [...d.items, newItem] } : d
+                                );
+                                const updated = { ...selectedTrip, days: updatedDays };
+                                setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                                setSelectedTrip(updated);
+                              }
+                              setShowDuplicatePicker(false);
+                            }}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold bg-white border border-gray-200 text-gray-700"
+                          >
+                            {day.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => setShowDuplicatePicker(false)} className="text-xs text-gray-400 font-medium">Cancel</button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2281,10 +2400,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       check_in: editItem.checkIn ?? '', check_out: editItem.checkOut ?? '',
                     });
                   }
-                  const updatedDays = selectedTrip.days.map(d => ({
+                  let updatedDays = selectedTrip.days.map(d => ({
                     ...d, items: d.items.map(i => i.id === editItem.id ? editItem : i),
                   }));
-                  const updated = { ...selectedTrip, days: updatedDays };
+                  let updated = { ...selectedTrip, days: updatedDays };
+                  // Auto-populate stay to all days in check-in/check-out range
+                  updated = await autoPopulateStay(editItem, editItemDayId, updated);
                   setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
                   setSelectedTrip(updated);
                   // Keep detail view in sync
