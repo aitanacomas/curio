@@ -298,7 +298,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                           : 'bg-gray-100 text-gray-600'
                       }`}
                     >
-                      {showFollowers === 'following' ? 'Following' : 'View'}
+                      {showFollowers === 'following'
+                        ? <span className="flex items-center gap-1"><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>Following</span>
+                        : 'View'}
                     </button>
                   )}
                 </div>
