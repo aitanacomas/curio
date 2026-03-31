@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle, MapPin, ChevronRight } from 'lucide-react';
-import { getDiscoverProfiles, getFollowing, followUser, unfollowUser, getUserPosts, type DiscoverProfile, type RealPost } from '../lib/supabase';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Search, UserPlus, Check, Share2, Phone, Clock, MessageCircle, MapPin } from 'lucide-react';
+import { getDiscoverProfiles, getFollowing, followUser, unfollowUser, getUserPosts, getFollowCounts, type DiscoverProfile, type RealPost } from '../lib/supabase';
 import ImageCarousel from '../components/ImageCarousel';
+
+const MapView = lazy(() => import('../components/MapView'));
 
 interface Props {
   currentUserId: string;
   onBack: () => void;
+  onFollowChange?: (delta: number) => void;
 }
 
 interface PendingInvite {
@@ -15,7 +18,7 @@ interface PendingInvite {
   sentAt: string;
 }
 
-export default function FindPeople({ currentUserId, onBack }: Props) {
+export default function FindPeople({ currentUserId, onBack, onFollowChange }: Props) {
   const [profiles, setProfiles] = useState<DiscoverProfile[]>([]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -47,9 +50,11 @@ export default function FindPeople({ currentUserId, onBack }: Props) {
   const toggleFollow = async (profileId: string) => {
     if (following.has(profileId)) {
       setFollowing(prev => { const s = new Set(prev); s.delete(profileId); return s; });
+      onFollowChange?.(-1);
       await unfollowUser(currentUserId, profileId);
     } else {
       setFollowing(prev => new Set(prev).add(profileId));
+      onFollowChange?.(1);
       await followUser(currentUserId, profileId);
     }
   };
@@ -464,19 +469,31 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [following, setFollowing] = useState(isFollowing);
   const [selectedPost, setSelectedPost] = useState<RealPost | null>(null);
+  const [activeTab, setActiveTab] = useState<'Posts' | 'Map' | 'Collections'>('Posts');
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
   const initials = profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   useEffect(() => {
-    getUserPosts(profile.id).then(p => { setPosts(p); setLoadingPosts(false); });
+    Promise.all([
+      getUserPosts(profile.id),
+      getFollowCounts(profile.id),
+    ]).then(([p, counts]) => {
+      setPosts(p);
+      setFollowerCount(counts.followers);
+      setFollowingCount(counts.following);
+      setLoadingPosts(false);
+    });
   }, [profile.id]);
 
   const handleFollow = () => {
-    setFollowing(f => !f);
+    const nowFollowing = !following;
+    setFollowing(nowFollowing);
+    setFollowerCount(c => c + (nowFollowing ? 1 : -1));
     onToggleFollow();
   };
 
   const totalPlaces = posts.reduce((n, p) => n + p.places.length, 0);
-  const totalCountries = new Set(posts.flatMap(p => p.places.map(pl => pl.country))).size;
 
   // ── Post detail view ─────────────────────────────────────────────
   if (selectedPost) {
@@ -540,7 +557,7 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
 
   return (
     <div className="bg-white min-h-screen">
-      {/* Top nav */}
+      {/* Top nav — mirrors Profile.tsx */}
       <div className="flex items-center justify-between px-4 pt-5 pb-3">
         <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
           <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
@@ -549,14 +566,14 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
           <h2 className="text-base font-bold text-gray-900 leading-tight">{profile.name}</h2>
           <p className="text-xs text-gray-400">@{profile.username}</p>
         </div>
-        <div className="w-9" /> {/* spacer */}
+        <div className="w-9" />
       </div>
 
       {/* Profile header */}
       <div className="px-4 pb-4">
         <div className="flex items-center gap-4">
           {profile.avatarUrl ? (
-            <img src={profile.avatarUrl} alt={profile.name} className="w-16 h-16 rounded-full object-cover flex-shrink-0" />
+            <img src={profile.avatarUrl} alt={profile.name} className="w-16 h-16 rounded-full object-cover object-top flex-shrink-0" />
           ) : (
             <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
               <span className="text-xl font-bold text-slate-400">{initials || '?'}</span>
@@ -574,13 +591,13 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats — Posts / Places / Followers / Following */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
             { value: posts.length, label: 'Posts' },
             { value: totalPlaces, label: 'Places' },
-            { value: totalCountries, label: 'Countries' },
-            { value: 0, label: 'Followers' },
+            { value: followerCount, label: 'Followers' },
+            { value: followingCount, label: 'Following' },
           ].map(stat => (
             <div key={stat.label} className="text-center">
               <p className="text-base font-black text-gray-900">{stat.value}</p>
@@ -590,43 +607,83 @@ function UserProfileView({ profile, isFollowing, onToggleFollow, onBack }: { pro
         </div>
       </div>
 
-      {/* Posts tab header */}
-      <div className="border-t border-b border-gray-100 py-3 px-4">
-        <p className="text-sm font-bold text-gray-900">Posts</p>
+      {/* Tabs — identical to Profile.tsx */}
+      <div className="grid grid-cols-3 border-b border-gray-100 border-t">
+        {(['Posts', 'Map', 'Collections'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`py-3 text-sm font-medium transition-colors ${
+              activeTab === tab ? 'text-gray-900 font-bold border-b-2 border-gray-900 -mb-px' : 'text-gray-400'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
-      {/* Posts grid */}
-      {loadingPosts ? (
-        <div className="grid grid-cols-3 gap-px bg-gray-100 mt-px">
-          {[0,1,2,3,4,5].map(i => (
-            <div key={i} className="aspect-square bg-gray-50 animate-pulse" />
-          ))}
-        </div>
-      ) : posts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center px-6">
-          <MapPin size={28} strokeWidth={1.5} className="text-gray-300 mb-3" />
-          <p className="text-sm font-semibold text-gray-900 mb-1">No posts yet</p>
-          <p className="text-xs text-gray-400">When {profile.name.split(' ')[0]} posts, you'll see them here</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-3 gap-px bg-gray-100 mt-px">
-          {posts.map(post => {
-            const firstImage = post.places[0]?.photoUrl;
-            if (!firstImage) return null;
-            return (
-              <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative">
-                <img src={firstImage} alt="" className="w-full h-full object-cover" />
-                {post.places.length > 1 && (
-                  <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
-                    <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
-                      <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
-                      <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+      {/* Posts tab */}
+      {activeTab === 'Posts' && (
+        loadingPosts ? (
+          <div className="grid grid-cols-3 gap-px bg-gray-100 mt-px">
+            {[0,1,2,3,4,5].map(i => <div key={i} className="aspect-square bg-gray-50 animate-pulse" />)}
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <span className="text-3xl">📍</span>
+            </div>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No posts yet</p>
+            <p className="text-slate-400 text-sm text-center max-w-[200px]">
+              When {profile.name.split(' ')[0]} posts, you'll see them here
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-px bg-gray-100">
+            {posts.map(post => {
+              const firstImage = post.places[0]?.photoUrl;
+              if (!firstImage) return null;
+              return (
+                <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative">
+                  <img src={firstImage} alt="" className="w-full h-full object-cover" />
+                  {post.places.length > 1 && (
+                    <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                      <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
+                        <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                        <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                      </div>
                     </div>
-                  </div>
-                )}
-              </button>
-            );
-          })}
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* Map tab */}
+      {activeTab === 'Map' && (
+        <div className="flex flex-col items-center justify-center py-16 px-6">
+          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+            <span className="text-3xl">🗺️</span>
+          </div>
+          <p className="text-slate-800 font-semibold text-base mb-1.5">Travel map</p>
+          <p className="text-slate-400 text-sm text-center max-w-[200px]">
+            {profile.name.split(' ')[0]}'s travel map will appear here
+          </p>
+        </div>
+      )}
+
+      {/* Collections tab */}
+      {activeTab === 'Collections' && (
+        <div className="flex flex-col items-center justify-center py-16 px-6">
+          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+            <span className="text-3xl">🗂️</span>
+          </div>
+          <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
+          <p className="text-slate-400 text-sm text-center max-w-[200px]">
+            Collections {profile.name.split(' ')[0]} creates will appear here
+          </p>
         </div>
       )}
     </div>

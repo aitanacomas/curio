@@ -133,7 +133,7 @@ export default function App() {
       case 'saved':
         return <Saved isNewUser={appUser?.isDemo === false} />;
       case 'profile':
-        return <Profile onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates) => setAppUser(prev => prev ? { ...prev, ...updates } : prev)} />;
+        return <Profile onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates) => setAppUser(prev => prev ? { ...prev, ...updates } : prev)} onFollowingCountChange={(delta) => setAppUser(prev => prev ? { ...prev, followingCount: prev.followingCount + delta } : prev)} />;
     }
   };
 

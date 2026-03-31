@@ -142,6 +142,14 @@ export async function unfollowUser(followerId: string, followingId: string) {
     .eq('following_id', followingId);
 }
 
+export async function getFollowCounts(userId: string): Promise<{ followers: number; following: number }> {
+  const [{ count: followers }, { count: following }] = await Promise.all([
+    supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
+    supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
+  ]);
+  return { followers: followers ?? 0, following: following ?? 0 };
+}
+
 // ── Update profile ────────────────────────────────────────────────────────────
 export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string; avatar_url?: string }) {
   const { error } = await supabase
