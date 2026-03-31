@@ -48,10 +48,12 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
     <MapContainer
       center={center}
       zoom={zoom}
-      style={{ height, width: '100%' }}
+      style={{ height, width: '100%', background: '#D5DADC' }}
       className="rounded-xl z-0"
       zoomControl={true}
       attributionControl={false}
+      maxBounds={[[-55, -220], [55, 220]]}
+      maxBoundsViscosity={1.0}
     >
       <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
       <FitBounds places={places} />
