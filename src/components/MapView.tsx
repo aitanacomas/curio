@@ -36,6 +36,14 @@ function FitBounds({ places }: { places: MapPlace[] }) {
   return null;
 }
 
+function FitWorld() {
+  const map = useMap();
+  useEffect(() => {
+    map.fitBounds([[-58, -178], [72, 178]], { padding: [0, 0], animate: false });
+  }, [map]);
+  return null;
+}
+
 interface Props {
   places: MapPlace[];
   center?: [number, number];
@@ -52,11 +60,12 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       className="rounded-xl z-0"
       zoomControl={true}
       attributionControl={false}
-      maxBounds={[[-55, -220], [55, 220]]}
+      maxBounds={[[-60, -220], [72, 220]]}
       maxBoundsViscosity={1.0}
     >
       <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-      <FitBounds places={places} />
+      {places.length === 0 && <FitWorld />}
+      {places.length > 1 && <FitBounds places={places} />}
       {places.map(place => (
         <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon()}>
           <Popup>
