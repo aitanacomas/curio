@@ -942,13 +942,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         const mapPlaces = isNewUser
           ? realPosts.flatMap(post => post.places.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country })))
           : visitedPlaces;
-        const mapHeight = 'calc(100vh - 420px)';
+        const mapHeight = 'calc(100vh - 460px)';
         return (
-        <div className="flex flex-col">
-          <Suspense fallback={<div style={{ height: mapHeight }} className="bg-gray-100 animate-pulse" />}>
-            <MapView places={mapPlaces} height={mapHeight} />
+        <div className="flex flex-col px-4 pt-4 pb-6 gap-4">
+          <Suspense fallback={<div style={{ height: mapHeight }} className="bg-gray-100 rounded-xl animate-pulse" />}>
+            <div className="rounded-xl overflow-hidden" style={{ height: mapHeight }}>
+              <MapView places={mapPlaces} height={mapHeight} />
+            </div>
           </Suspense>
-          <div className="px-4 pt-4 pb-6">
+          <div>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { value: isNewUser ? new Set(realPosts.flatMap(p => p.places.map(pl => pl.country))).size : actualCountriesCount, label: 'Countries' },
