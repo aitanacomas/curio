@@ -26,9 +26,12 @@ export default function Auth({ onAuth }: AuthProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const usernameEdited = useRef(false);
 
   const handleUsernameFromName = (first: string) => {
-    setUsername(first.toLowerCase().replace(/\s+/g, '') + Math.floor(Math.random() * 99));
+    if (!usernameEdited.current) {
+      setUsername(first.toLowerCase().replace(/\s+/g, '') + Math.floor(Math.random() * 99));
+    }
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -233,7 +236,7 @@ export default function Auth({ onAuth }: AuthProps) {
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5 block">Username</label>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm">@</span>
-              <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="sofiareyes"
+              <input type="text" value={username} onChange={e => { usernameEdited.current = true; setUsername(e.target.value); }} placeholder="sofiareyes"
                 className="w-full pl-8 pr-4 py-3.5 bg-slate-50 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
             </div>
           </div>
