@@ -21,8 +21,17 @@ export default function App() {
   const [authStage, setAuthStage] = useState<AuthStage>('loading');
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [pageResetKey, setPageResetKey] = useState(0);
   const [showMessages, setShowMessages] = useState(false);
   const [postToast, setPostToast] = useState<PostToast | null>(null);
+
+  const handleTabChange = (tab: Tab) => {
+    if (tab === activeTab) {
+      setPageResetKey(k => k + 1); // same tab tapped — reset the page
+    } else {
+      setActiveTab(tab);
+    }
+  };
 
   // ── Restore session on mount ──────────────────────────────────────
   useEffect(() => {
@@ -114,12 +123,13 @@ export default function App() {
   const renderPage = () => {
     switch (activeTab) {
       case 'home':
-        return <Home showMessages={showMessages} onMessagesClose={() => setShowMessages(false)} isNewUser={appUser?.isDemo === false} appUser={appUser ?? undefined} onNavigate={setActiveTab} />;
+        return <Home key={pageResetKey} showMessages={showMessages} onMessagesClose={() => setShowMessages(false)} isNewUser={appUser?.isDemo === false} appUser={appUser ?? undefined} onNavigate={setActiveTab} />;
       case 'explore':
-        return <Explore onOpenMessages={openMessages} appUser={appUser ?? undefined} />;
+        return <Explore key={pageResetKey} onOpenMessages={openMessages} appUser={appUser ?? undefined} />;
       case 'add':
         return (
           <Add
+            key={pageResetKey}
             userId={appUser?.id ?? ''}
             userAvatar={appUser?.avatar ?? null}
             onComplete={({ visibility, placesCount }) => {
@@ -131,9 +141,9 @@ export default function App() {
           />
         );
       case 'saved':
-        return <Saved isNewUser={appUser?.isDemo === false} />;
+        return <Saved key={pageResetKey} isNewUser={appUser?.isDemo === false} />;
       case 'profile':
-        return <Profile onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates) => setAppUser(prev => prev ? { ...prev, ...updates } : prev)} onFollowingCountChange={(delta) => setAppUser(prev => prev ? { ...prev, followingCount: prev.followingCount + delta } : prev)} />;
+        return <Profile key={pageResetKey} onOpenMessages={openMessages} appUser={appUser ?? undefined} onLogout={handleLogout} onNavigate={setActiveTab} onProfileUpdate={(updates) => setAppUser(prev => prev ? { ...prev, ...updates } : prev)} onFollowingCountChange={(delta) => setAppUser(prev => prev ? { ...prev, followingCount: prev.followingCount + delta } : prev)} />;
     }
   };
 
@@ -143,7 +153,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto pb-20">
           {renderPage()}
         </main>
-        <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+        <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
 
         {/* Post toast */}
         <div
