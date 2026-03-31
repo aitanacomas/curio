@@ -6,7 +6,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, type RealPost, type FollowProfile } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, type RealPost, type FollowProfile } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -67,6 +67,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [commentText, setCommentText] = useState('');
   const [colCategoryFilter, setColCategoryFilter] = useState<Category | 'all'>('all');
   const [realPosts, setRealPosts] = useState<RealPost[]>([]);
+  const [realFollowerCount, setRealFollowerCount] = useState(0);
+  const [realFollowingCount, setRealFollowingCount] = useState(0);
   const [followerProfiles, setFollowerProfiles] = useState<FollowProfile[]>([]);
   const [followingProfiles, setFollowingProfiles] = useState<FollowProfile[]>([]);
   const [loadingFollowList, setLoadingFollowList] = useState(false);
@@ -77,6 +79,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
       getUserPosts(appUser.id).then(setRealPosts);
+      getFollowCounts(appUser.id).then(({ followers, following }) => {
+        setRealFollowerCount(followers);
+        setRealFollowingCount(following);
+      });
     }
   }, [appUser]);
 
@@ -353,6 +359,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       .eq('following_id', unfollowTarget.id);
                     if (!error) {
                       setFollowingProfiles(prev => prev.filter(p => p.id !== unfollowTarget.id));
+                      setRealFollowingCount(c => c - 1);
                       onFollowingCountChange?.(-1);
                     }
                     setUnfollowing(false);
@@ -739,16 +746,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         {/* Stats */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
-            { value: isNewUser ? 0 : actualPlacesCount, label: 'Places', action: null },
-            { value: isNewUser ? 0 : actualCountriesCount, label: 'Countries', action: null },
-            { value: displayUser.followersCount.toLocaleString(), label: 'Followers', action: () => {
+            { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts', action: null },
+            { value: isNewUser ? realPosts.reduce((n, p) => n + p.places.length, 0) : actualPlacesCount, label: 'Places', action: null },
+            { value: isNewUser ? realFollowerCount : displayUser.followersCount, label: 'Followers', action: () => {
               if (isNewUser && appUser) {
                 setLoadingFollowList(true);
                 getFollowerProfiles(appUser.id).then(p => { setFollowerProfiles(p); setLoadingFollowList(false); });
               }
               setShowFollowers('followers');
             }},
-            { value: displayUser.followingCount.toLocaleString(), label: 'Following', action: () => {
+            { value: isNewUser ? realFollowingCount : displayUser.followingCount, label: 'Following', action: () => {
               if (isNewUser && appUser) {
                 setLoadingFollowList(true);
                 getFollowingProfiles(appUser.id).then(p => { setFollowingProfiles(p); setLoadingFollowList(false); });
