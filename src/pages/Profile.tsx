@@ -71,6 +71,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [followingProfiles, setFollowingProfiles] = useState<FollowProfile[]>([]);
   const [loadingFollowList, setLoadingFollowList] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [unfollowTarget, setUnfollowTarget] = useState<FollowProfile | null>(null);
+  const [unfollowing, setUnfollowing] = useState(false);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -282,8 +284,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   </div>
                   {!isMe && (
                     <button
-                      onClick={e => { e.stopPropagation(); setViewingUserId(u.id); }}
-                      className="text-xs font-semibold bg-gray-100 text-gray-600 rounded-full px-3 py-1.5 flex-shrink-0"
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (showFollowers === 'following') {
+                          setUnfollowTarget(u);
+                        } else {
+                          setViewingUserId(u.id);
+                        }
+                      }}
+                      className={`text-xs font-semibold rounded-full px-3 py-1.5 flex-shrink-0 ${
+                        showFollowers === 'following'
+                          ? 'bg-gray-100 text-gray-600'
+                          : 'bg-gray-100 text-gray-600'
+                      }`}
                     >
                       {showFollowers === 'following' ? 'Following' : 'View'}
                     </button>
@@ -305,6 +318,55 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
           )}
         </div>
+
+        {/* Unfollow confirmation sheet */}
+        {unfollowTarget && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setUnfollowTarget(null)} />
+            <div className="relative bg-white rounded-t-3xl pb-8">
+              <div className="flex justify-center pt-3 pb-4">
+                <div className="w-10 h-1 rounded-full bg-gray-200" />
+              </div>
+              <div className="flex flex-col items-center px-6 pb-2">
+                {unfollowTarget.avatarUrl ? (
+                  <img src={unfollowTarget.avatarUrl} alt={unfollowTarget.name} className="w-16 h-16 rounded-full object-cover mb-3" />
+                ) : (
+                  <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+                    <span className="text-xl font-bold text-slate-400">
+                      {unfollowTarget.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <p className="text-base font-bold text-gray-900 mb-1">Unfollow {unfollowTarget.name.split(' ')[0]}?</p>
+                <p className="text-sm text-gray-400 text-center mb-6">
+                  Their posts will no longer appear in your feed.
+                </p>
+                <button
+                  disabled={unfollowing}
+                  onClick={async () => {
+                    if (!appUser) return;
+                    setUnfollowing(true);
+                    const { error } = await supabase.from('follows').delete()
+                      .eq('follower_id', appUser.id)
+                      .eq('following_id', unfollowTarget.id);
+                    if (!error) {
+                      setFollowingProfiles(prev => prev.filter(p => p.id !== unfollowTarget.id));
+                      onFollowingCountChange?.(-1);
+                    }
+                    setUnfollowing(false);
+                    setUnfollowTarget(null);
+                  }}
+                  className="w-full py-3.5 bg-red-500 text-white rounded-2xl text-sm font-bold mb-3 disabled:opacity-50"
+                >
+                  {unfollowing ? 'Unfollowing…' : 'Unfollow'}
+                </button>
+                <button onClick={() => setUnfollowTarget(null)} className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
