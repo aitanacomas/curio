@@ -634,6 +634,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [addPlaceSearching, setAddPlaceSearching] = useState(false);
   const [addPlaceSaving, setAddPlaceSaving] = useState(false);
   const addPlaceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addPlaceSuggestionsRef = useRef<HTMLDivElement | null>(null);
+  const addPlaceScrollRef = useRef<HTMLDivElement | null>(null);
   const [addPlaceSelectedId, setAddPlaceSelectedId] = useState('');
   const [addPlaceSelectedName, setAddPlaceSelectedName] = useState('');
   const [addPlaceTime, setAddPlaceTime] = useState('');
@@ -659,6 +661,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [editItemAddressSuggestions, setEditItemAddressSuggestions] = useState<{ placeId: string; text: string }[]>([]);
   const [editItemAddressSearching, setEditItemAddressSearching] = useState(false);
   const editItemAddressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editItemSuggestionsRef = useRef<HTMLDivElement | null>(null);
+  const editItemScrollRef = useRef<HTMLDivElement | null>(null);
   const [showItemInvite, setShowItemInvite] = useState(false);
   const [itemInviteSearch, setItemInviteSearch] = useState('');
   const [itemInviteSuggestions, setItemInviteSuggestions] = useState<FollowProfile[]>([]);
@@ -1618,7 +1622,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               </div>
 
               {/* scrollable body */}
-              <div className="flex-1 overflow-y-auto px-5 pb-8">
+              <div ref={addPlaceScrollRef} className="flex-1 overflow-y-auto px-5 pb-8">
                 {/* Day selector */}
                 {selectedTrip && selectedTrip.days.length > 0 && (
                   <div className="mb-5">
@@ -1690,7 +1694,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         {addPlaceSearching && <Loader2 size={14} className="text-gray-400 animate-spin flex-shrink-0" />}
                       </div>
                       {addPlaceSuggestions.length > 0 && (
-                        <div className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden">
+                        <div
+                          ref={el => {
+                            addPlaceSuggestionsRef.current = el;
+                            if (el && addPlaceScrollRef.current) {
+                              setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+                            }
+                          }}
+                          className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden"
+                        >
                           {addPlaceSuggestions.map(s => (
                             <button
                               key={s.placeId}
@@ -2007,7 +2019,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Edit place / plan</p>
                 <button onClick={() => setShowEditItem(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><X size={15} strokeWidth={2} className="text-gray-500" /></button>
               </div>
-              <div className="flex-1 overflow-y-auto px-5 pb-8">
+              <div ref={editItemScrollRef} className="flex-1 overflow-y-auto px-5 pb-8">
                 {/* Photo */}
                 <div className="mb-4">
                   <p className="text-xs font-semibold text-gray-400 mb-2">Photo</p>
@@ -2083,7 +2095,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       {editItemAddressSearching && <Loader2 size={13} className="text-gray-400 animate-spin flex-shrink-0" />}
                     </div>
                     {editItemAddressSuggestions.length > 0 && (
-                      <div className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden">
+                      <div
+                        ref={el => {
+                          editItemSuggestionsRef.current = el;
+                          if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+                        }}
+                        className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden"
+                      >
                         {editItemAddressSuggestions.map(s => (
                           <button
                             key={s.placeId}
