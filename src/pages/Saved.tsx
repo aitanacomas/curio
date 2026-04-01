@@ -674,6 +674,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [showEditItem, setShowEditItem] = useState(false);
   const [editItem, setEditItem] = useState<TripItem | null>(null);
   const [showDuplicatePicker, setShowDuplicatePicker] = useState(false);
+  const [moveToDay, setMoveToDay] = useState<string | null>(null); // target day id when moving item
   const [editItemDayId, setEditItemDayId] = useState<string | null>(null);
   const [editItemAddressSearch, setEditItemAddressSearch] = useState('');
   const [editItemAddressSuggestions, setEditItemAddressSuggestions] = useState<{ placeId: string; text: string }[]>([]);
@@ -1067,7 +1068,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             !/,\s*[A-Z]{2}(\s*\d{5})?$/.test(item.neighborhood) && // not ", FL" or ", FL 33141"
             !/\d/.test(item.neighborhood) &&                         // no digits (zip codes, street numbers)
             !streetTypeRx.test(item.neighborhood.split(',')[0]);     // first part is not a street name
-          if (hasCleanNeighborhood) continue;
+          const isUserPhoto = item.image?.includes('leooulgankktjapregei.supabase.co');
+          const needsImage = !isUserPhoto && (
+            !item.image ||
+            item.image.includes('unsplash.com/photo-1476514525535') ||
+            item.image.includes('places.googleapis.com')
+          );
+          // Skip API entirely if both neighborhood and image are already good
+          if (hasCleanNeighborhood && !needsImage) continue;
 
           try {
             // ── Use searchText API for reliable establishment + neighborhood data ──
@@ -1131,15 +1139,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               } catch { /* silent */ }
             }
             const photoName = place.photos?.[0]?.name;
-            // Protect only user-uploaded photos (Supabase storage). Allow overwriting
-            // empty, placeholder, or previously auto-assigned Google Places photos (which may be wrong).
-            const isUserPhoto = item.image?.includes('leooulgankktjapregei.supabase.co');
-            const hasNoImage = !isUserPhoto && (
-              !item.image ||
-              item.image.includes('unsplash.com/photo-1476514525535') ||
-              item.image.includes('places.googleapis.com')
-            );
-            const newImage = hasNoImage && photoName
+            const newImage = needsImage && photoName
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
               : '';
 
@@ -1270,7 +1270,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <button onClick={() => { openEditPlan(selectedTrip); }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
               <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
-            <button className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
+            <button onClick={() => {
+              const text = `${selectedTrip.destination} trip — ${selectedTrip.dates}`;
+              const url = window.location.href;
+              if (navigator.share) {
+                navigator.share({ title: text, url }).catch(() => {});
+              } else {
+                navigator.clipboard?.writeText(url).then(() => alert('Link copied!')).catch(() => {});
+              }
+            }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
               <Share2 size={15} strokeWidth={1.5} className="text-gray-700" />
             </button>
           </div>
@@ -1409,7 +1417,21 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length)
                 .map((day, di) => (
                 <div key={di}>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{day.label}</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
+                    {day.id && (
+                      <button onClick={async () => {
+                        if (!selectedTrip) return;
+                        if (!window.confirm(`Delete ${day.label} and all its places?`)) return;
+                        if (userId) await deletePlanDay(day.id!);
+                        const updated = { ...selectedTrip, days: selectedTrip.days.filter(d => d.id !== day.id) };
+                        setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                        setSelectedTrip(updated);
+                      }} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    )}
+                  </div>
                   <div className="space-y-2.5">
                     {day.items.map(item => (
                       <div key={item.id} className="bg-gray-50 rounded-2xl p-3" onClick={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}>
@@ -1417,7 +1439,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                           <ItemThumb image={item.image} name={item.name} category={item.category} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</p>
-                            <p className="text-xs text-gray-400 mt-0.5">
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">
                               {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
                               {item.neighborhood ? ` · ${item.neighborhood}` : ''}
                             </p>
@@ -2056,6 +2078,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 setShowItemDetail(false);
                 setEditItem(detailItem);
                 setEditItemDayId(detailItemDayId);
+                setMoveToDay(null);
                 setEditItemAddressSearch(detailItem.address ?? '');
                 setEditItemAddressSuggestions([]);
                 setShowEditItem(true);
@@ -2405,9 +2428,29 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     rows={3} className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none resize-none placeholder:text-gray-400"
                     placeholder="Who you went with, what you ordered…" />
                 </div>
+                {/* Move to day */}
+                {selectedTrip && selectedTrip.days.length > 1 && (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-400 mb-2">Day</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {selectedTrip.days.map(day => (
+                        <button key={day.id ?? day.label}
+                          onClick={() => setMoveToDay(day.id === editItemDayId ? null : (day.id ?? null))}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                            (moveToDay === day.id || (!moveToDay && day.id === editItemDayId))
+                              ? 'bg-gray-900 text-white border-gray-900'
+                              : 'bg-white text-gray-600 border-gray-200'
+                          }`}>
+                          {day.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {/* Save */}
                 <button onClick={async () => {
                   if (!editItem || !selectedTrip) return;
+                  const targetDayId = moveToDay ?? editItemDayId;
                   if (userId) {
                     await updatePlanItem(editItem.id, {
                       name: editItem.name, category: editItem.category,
@@ -2417,18 +2460,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       address: editItem.address ?? '', neighborhood: editItem.neighborhood ?? '',
                       status: editItem.status ?? 'none',
                       check_in: editItem.checkIn ?? '', check_out: editItem.checkOut ?? '',
+                      ...(moveToDay ? { plan_day_id: moveToDay } : {}),
                     });
                   }
+                  // Remove from old day, add to new day (or update in same day)
                   let updatedDays = selectedTrip.days.map(d => ({
-                    ...d, items: d.items.map(i => i.id === editItem.id ? editItem : i),
+                    ...d, items: d.items.filter(i => i.id !== editItem.id),
                   }));
+                  updatedDays = updatedDays.map(d =>
+                    d.id === targetDayId ? { ...d, items: [...d.items, editItem] } : d
+                  );
                   let updated = { ...selectedTrip, days: updatedDays };
-                  // Auto-populate stay to all days in check-in/check-out range
-                  updated = await autoPopulateStay(editItem, editItemDayId, updated);
+                  updated = await autoPopulateStay(editItem, targetDayId, updated);
                   setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
                   setSelectedTrip(updated);
-                  // Keep detail view in sync
                   if (detailItem?.id === editItem.id) setDetailItem(editItem);
+                  setMoveToDay(null);
                   setShowEditItem(false);
                 }} className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold">
                   Save changes
