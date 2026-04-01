@@ -423,10 +423,17 @@ function extractNeighborhood(comps: any[], formattedAddress?: string): string {
     // Find the city: segment just before a state/province code (e.g. "FL", "CA")
     const stateMatch = formattedAddress.match(/,\s*([^,]+),\s*[A-Z]{2}[\s,]/);
     const city = stateMatch ? stateMatch[1].trim() : parts.length >= 2 ? parts[parts.length - 2] : '';
-    // If the first segment is a named place (no digits = not a street address),
-    // treat it as the area/district. e.g. "Miami Design District, Miami, FL, USA" → "Miami Design District, Miami"
     const firstPart = parts[0];
-    if (firstPart && city && firstPart !== city && !/\d/.test(firstPart)) {
+    const secondPart = parts[1] ?? '';
+    // Second segment is a street if it has digits (e.g. "146th Street") or
+    // contains a street-type word — in that case firstPart is a business name, not an area.
+    const streetRx = /\b(avenue|ave|street|st|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|place|pl|highway|hwy)\b/i;
+    const secondIsStreet = /\d/.test(secondPart) || streetRx.test(secondPart);
+    // Only treat firstPart as an area/district when it has no digits AND the second
+    // segment is NOT a street (otherwise firstPart is a venue/business name).
+    // e.g. "Miami Design District, Miami, FL" → area ✓
+    //      "Reserve Padel, NE 146th St, North Miami, FL" → business name, skip ✗
+    if (firstPart && city && firstPart !== city && !/\d/.test(firstPart) && !secondIsStreet) {
       return `${firstPart}, ${city}`;
     }
     if (city) return city;
