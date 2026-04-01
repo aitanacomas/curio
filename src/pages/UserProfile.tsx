@@ -287,7 +287,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-px bg-gray-100">
+          <div className="grid grid-cols-3 gap-px bg-white">
             {posts.map(post => {
               const firstImage = post.places[0]?.photoUrl;
               if (!firstImage) return null;

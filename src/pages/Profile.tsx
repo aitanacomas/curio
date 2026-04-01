@@ -1845,7 +1845,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
           )
         ) : (
-          <div className="grid grid-cols-3 gap-px bg-gray-100">
+          <div className="grid grid-cols-3 gap-px bg-white">
             {myPosts.map(post => (
               <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative">
                 <img src={post.images[0]} alt="" className="w-full h-full object-cover" />
