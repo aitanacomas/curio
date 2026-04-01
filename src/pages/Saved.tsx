@@ -1990,16 +1990,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                                   const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
                                     headers: {
                                       'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                                      'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents',
+                                      'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents,photos',
                                       'X-Goog-LanguageCode': 'en',
                                     },
                                   });
                                   const data = await res.json();
-                                  // Always use clean Google display name for title (unless user manually typed something)
                                   if (data.displayName?.text) {
                                     setAddPlaceSelectedName(prev => {
                                       const prevClean = prev.trim();
-                                      // Only override if blank or still matches old suggestion text
                                       if (!prevClean || prevClean === s.text) return data.displayName.text;
                                       return prev;
                                     });
@@ -2009,6 +2007,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                                   if (data.formattedAddress) setAddPlaceAddress(data.formattedAddress);
                                   const area = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
                                   if (area) setAddPlaceNeighborhood(area);
+                                  // Fetch photo immediately using the exact Place ID — no background guessing
+                                  const photoName = data.photos?.[0]?.name;
+                                  if (photoName && !addPlaceCustomImage) {
+                                    setAddPlaceCustomImage(
+                                      `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
+                                    );
+                                  }
                                 } catch {
                                   // Fallback: use suggestion text as title
                                   if (!addPlaceSelectedName.trim()) setAddPlaceSelectedName(s.text);
