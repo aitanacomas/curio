@@ -166,7 +166,7 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
-import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
 import { getSavedPlaces, supabase, getPublicUrl } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
@@ -1839,7 +1839,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   onClick={async () => {
                     const updated: Trip = { ...selectedTrip, collaborators: inviteCollabs };
                     if (userId) {
-                      await dbUpdatePlan(selectedTrip.id, {});
+                      // Persist the full collaborator list to plan_collaborators table
+                      await syncPlanCollaborators(
+                        selectedTrip.id,
+                        inviteCollabs.map(c => c.id),
+                        userId
+                      );
                     }
                     setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
                     setSelectedTrip(updated);

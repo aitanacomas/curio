@@ -659,6 +659,40 @@ export async function deletePlan(planId: string) {
   await supabase.from('plans').delete().eq('id', planId);
 }
 
+/** Sync the full collaborator list for a plan.
+ *  Removes anyone no longer in the list and adds anyone new. */
+export async function syncPlanCollaborators(
+  planId: string,
+  collaboratorIds: string[],
+  invitedBy: string
+): Promise<void> {
+  // Fetch existing collaborators
+  const { data: existing } = await supabase
+    .from('plan_collaborators')
+    .select('user_id')
+    .eq('plan_id', planId);
+
+  const existingIds = (existing ?? []).map((r: any) => r.user_id as string);
+
+  // Remove collaborators no longer in the list
+  const toRemove = existingIds.filter(id => !collaboratorIds.includes(id));
+  if (toRemove.length > 0) {
+    await supabase
+      .from('plan_collaborators')
+      .delete()
+      .eq('plan_id', planId)
+      .in('user_id', toRemove);
+  }
+
+  // Add new collaborators
+  const toAdd = collaboratorIds.filter(id => !existingIds.includes(id));
+  if (toAdd.length > 0) {
+    await supabase.from('plan_collaborators').insert(
+      toAdd.map(userId => ({ plan_id: planId, user_id: userId, invited_by: invitedBy }))
+    );
+  }
+}
+
 export async function createPlanDay(planId: string, label: string, position: number): Promise<PlanDay | null> {
   const { data, error } = await supabase
     .from('plan_days')
@@ -703,7 +737,7 @@ export async function createPlanItem(
 
 export async function updatePlanItem(
   itemId: string,
-  data: Partial<{ name: string; category: string; image_url: string; time_label: string; time_end: string; notes: string; address: string; neighborhood: string; status: string; check_in: string; check_out: string; location: string; booked: boolean }>
+  data: Partial<{ name: string; category: string; image_url: string; time_label: string; time_end: string; notes: string; address: string; neighborhood: string; status: string; check_in: string; check_out: string; location: string; booked: boolean; plan_day_id: string }>
 ): Promise<boolean> {
   const { error } = await supabase.from('plan_items').update(data).eq('id', itemId);
   if (!error) return true;
