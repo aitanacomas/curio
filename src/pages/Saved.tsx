@@ -166,7 +166,7 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
-import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
 import { getSavedPlaces, supabase, getPublicUrl } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
@@ -1540,7 +1540,31 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         if (!selectedTrip) return;
                         if (!window.confirm(`Delete ${day.label} and all its places?`)) return;
                         if (userId) await deletePlanDay(day.id!);
-                        const updated = { ...selectedTrip, days: selectedTrip.days.filter(d => d.id !== day.id) };
+
+                        // Renumber remaining days sequentially (Day 1, Day 2, …)
+                        const remaining = selectedTrip.days.filter(d => d.id !== day.id);
+                        const renumbered = remaining.map((d, idx) => {
+                          const newLabel = d.label.replace(/^Day \d+/, `Day ${idx + 1}`);
+                          return { ...d, label: newLabel };
+                        });
+                        // Persist renumbered labels and positions to DB
+                        if (userId) {
+                          await Promise.all(renumbered.map((d, idx) =>
+                            d.id ? updatePlanDay(d.id, { label: d.label, position: idx }) : Promise.resolve()
+                          ));
+                        }
+
+                        // Derive new trip date range from first/last remaining day labels
+                        let newDates = selectedTrip.dates;
+                        const dateRx = /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun\s+)?([A-Z][a-z]{2}\s+\d{1,2})/;
+                        const firstDate = renumbered[0]?.label.match(dateRx)?.[1];
+                        const lastDate = renumbered[renumbered.length - 1]?.label.match(dateRx)?.[1];
+                        if (firstDate && lastDate) {
+                          newDates = firstDate === lastDate ? firstDate : `${firstDate} – ${lastDate}`;
+                          if (userId) await dbUpdatePlan(selectedTrip.id, { dates: newDates });
+                        }
+
+                        const updated = { ...selectedTrip, days: renumbered, dates: newDates };
                         setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
                         setSelectedTrip(updated);
                       }} className="text-gray-300 hover:text-red-400 transition-colors p-1">

@@ -755,6 +755,10 @@ export async function deletePlanDay(dayId: string) {
   await supabase.from('plan_days').delete().eq('id', dayId);
 }
 
+export async function updatePlanDay(dayId: string, data: { label?: string; position?: number }) {
+  await supabase.from('plan_days').update(data).eq('id', dayId);
+}
+
 export async function deletePlanItem(itemId: string) {
   await supabase.from('plan_items').delete().eq('id', itemId);
 }
