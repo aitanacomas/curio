@@ -214,7 +214,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     ...user,
     name: appUser.name,
     username: appUser.username,
-    avatar: appUser.avatar || user.avatar,
+    avatar: appUser.avatar || null,
     followersCount: 0,
     followingCount: appUser.followingCount,
     bio: appUser?.bio ?? '',
@@ -1738,7 +1738,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       <div className="px-4 pb-4">
         <div className="flex items-center gap-4">
           <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
-            <img src={displayUser.avatar} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
+            {(avatarPreview ?? displayUser.avatar)
+              ? <img src={avatarPreview ?? displayUser.avatar!} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
+              : <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-gray-400">{displayUser.name[0]?.toUpperCase()}</div>
+            }
             <div className="absolute bottom-0 right-0 w-5 h-5 bg-gray-900 rounded-full flex items-center justify-center">
               <Plus size={11} strokeWidth={2.5} className="text-white" />
             </div>
