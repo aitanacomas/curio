@@ -359,7 +359,7 @@ function ItemThumb({ image, name, category, size = 'md' }: { image?: string; nam
   const cls = size === 'sm'
     ? 'w-10 h-10 rounded-lg'
     : 'w-14 h-14 rounded-xl';
-  if (!image || err) {
+  if (!image || image === 'none' || err) {
     return <div className={`${cls} bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-2xl`}>{categoryEmoji[category] ?? '📍'}</div>;
   }
   return <img src={image} alt={name} className={`${cls} object-cover flex-shrink-0`} onError={() => setErr(true)} />;
@@ -1140,6 +1140,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     };
 
     (async () => {
+      const usedPhotoNames = new Set<string>(); // detect duplicate photos across items
       for (const day of plan.days) {
         for (const item of day.items) {
           if (cancelled) return;
@@ -1153,6 +1154,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             !/\d/.test(item.neighborhood) &&                         // no digits (zip codes, street numbers)
             !streetTypeRx.test(item.neighborhood.split(',')[0]);     // first part is not a street name
           // Clear any auto-fetched Google/placeholder photos — show emoji instead
+          // 'none' = user explicitly removed the photo — never re-fetch
+          if (item.image === 'none') { if (hasCleanNeighborhood) continue; }
           const isUserPhoto = item.image?.includes('leooulgankktjapregei.supabase.co');
           const hasWrongImage = !isUserPhoto && (
             item.image?.includes('unsplash.com/photo-1476514525535') ||
@@ -1225,10 +1228,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 .filter(Boolean)
                 .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
               const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
-              if (photoName && geoMatch) {
+              if (photoName && geoMatch && !usedPhotoNames.has(photoName)) {
+                usedPhotoNames.add(photoName);
                 newImage = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`;
               } else if (hasWrongImage) {
-                newImage = '__clear__';
+                newImage = '__clear__'; // duplicate or geo-fail → clear → emoji
               }
             } else if (hasWrongImage) {
               newImage = '__clear__'; // no address or no result → clear wrong photo → emoji
@@ -2162,12 +2166,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <div className="relative bg-white rounded-t-3xl flex flex-col overflow-hidden" style={{ maxHeight: '88vh' }}>
             {/* Photo header */}
             <div className="relative flex-shrink-0">
-              {detailItem.image
+              {detailItem.image && detailItem.image !== 'none'
                 ? <img src={detailItem.image} alt={detailItem.name} className="w-full object-cover rounded-t-3xl" style={{ height: '48vw', maxHeight: 220, minHeight: 160 }}
                     onError={e => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextElementSibling as HTMLElement)?.style.removeProperty('display'); }} />
                 : null}
               <div
-                style={detailItem.image ? { display: 'none', height: '36vw', maxHeight: 160, minHeight: 120 } : { height: '36vw', maxHeight: 160, minHeight: 120 }}
+                style={(detailItem.image && detailItem.image !== 'none') ? { display: 'none', height: '36vw', maxHeight: 160, minHeight: 120 } : { height: '36vw', maxHeight: 160, minHeight: 120 }}
                 className="w-full flex items-center justify-center bg-gray-100 rounded-t-3xl text-6xl"
               >{categoryEmoji[detailItem.category] ?? '📍'}</div>
               {/* X close */}
@@ -2361,6 +2365,17 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         }
                       }} />
                     </label>
+                    {editItem.image && editItem.image !== 'none' && (
+                      <button
+                        onClick={async () => {
+                          setEditItem(prev => prev ? { ...prev, image: 'none' } : prev);
+                          await updatePlanItem(editItem.id, { image_url: 'none' });
+                        }}
+                        className="absolute top-2 right-2 flex items-center gap-1 bg-black/60 text-white text-xs font-semibold px-2.5 py-1.5 rounded-full"
+                      >
+                        <X size={10} strokeWidth={2.5} /> Remove
+                      </button>
+                    )}
                   </div>
                 </div>
                 {/* Name */}
