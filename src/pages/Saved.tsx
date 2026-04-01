@@ -686,6 +686,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [detailItemDayId, setDetailItemDayId] = useState<string | null>(null);
   const [showEditItem, setShowEditItem] = useState(false);
   const [editItemUploading, setEditItemUploading] = useState(false);
+  const [addPlaceUploading, setAddPlaceUploading] = useState(false);
   const [editItem, setEditItem] = useState<TripItem | null>(null);
   const [showDuplicatePicker, setShowDuplicatePicker] = useState(false);
   const [moveToDay, setMoveToDay] = useState<string | null>(null); // target day id when moving item
@@ -928,6 +929,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     setAddPlaceCheckIn('');
     setAddPlaceCheckOut('');
     setAddPlaceCustomImage('');
+    setAddPlaceUploading(false);
     setAddPlaceLocation('');
     setAddPlaceTimeEnd('');
     setAddPlaceAddress('');
@@ -942,7 +944,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     try {
       let name = text;
       let category = categoryOverride || 'experience';
-      let imageUrl = addPlaceCustomImage || '';
+      // Never persist a blob: URL — only use it once upload resolves to a real public URL
+      let imageUrl = (addPlaceCustomImage && !addPlaceCustomImage.startsWith('blob:')) ? addPlaceCustomImage : '';
       let address = locationStr;
       let neighborhood = neighborhoodHint;
 
@@ -1155,14 +1158,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             !/,\s*[A-Z]{2}(\s*\d{5})?$/.test(item.neighborhood) && // not ", FL" or ", FL 33141"
             !/\d/.test(item.neighborhood) &&                         // no digits (zip codes, street numbers)
             !streetTypeRx.test(item.neighborhood.split(',')[0]);     // first part is not a street name
-          // Clear any auto-fetched Google/placeholder photos — show emoji instead
           // 'none' = user explicitly removed the photo — never re-fetch
           if (item.image === 'none') { if (hasCleanNeighborhood) continue; }
           const isUserPhoto = item.image?.includes('leooulgankktjapregei.supabase.co');
-          const hasWrongImage = !isUserPhoto && (
-            item.image?.includes('unsplash.com/photo-1476514525535') ||
-            item.image?.includes('places.googleapis.com')
-          );
+          // Only flag the specific Unsplash lake placeholder as wrong — correctly-saved
+          // Google Places photos should be kept and never re-fetched.
+          const hasWrongImage = !isUserPhoto &&
+            item.image?.includes('unsplash.com/photo-1476514525535');
           const needsPhoto = !isUserPhoto && item.image !== 'none' && (!item.image || hasWrongImage);
           // Skip only when neighbourhood is clean AND no photo work is needed
           if (hasCleanNeighborhood && !hasWrongImage && !needsPhoto) continue;
@@ -2059,11 +2061,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         if (!file) return;
                         const preview = URL.createObjectURL(file);
                         setAddPlaceCustomImage(preview);
+                        setAddPlaceUploading(true);
                         if (userId) {
                           const path = `plan-items/${userId}/${Date.now()}.jpg`;
                           const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
                           if (!error) setAddPlaceCustomImage(getPublicUrl('avatars', path));
                         }
+                        setAddPlaceUploading(false);
                       }} />
                     </label>
                   )}
@@ -2168,10 +2172,10 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     const name = addPlaceSelectedName || addPlaceSearch.trim();
                     if (name) handleSelectPlace(id, name, addPlaceTime, addPlaceTimeEnd, addPlaceNotes, addPlaceCategory, addPlaceAddress || addPlaceLocation, addPlaceNeighborhood);
                   }}
-                  disabled={(!addPlaceSelectedId && !addPlaceSearch.trim()) || addPlaceSaving}
+                  disabled={(!addPlaceSelectedId && !addPlaceSearch.trim()) || addPlaceSaving || addPlaceUploading}
                   className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
                 >
-                  {addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : 'Add to plan'}
+                  {addPlaceUploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : 'Add to plan'}
                 </button>
               </div>
             </div>
