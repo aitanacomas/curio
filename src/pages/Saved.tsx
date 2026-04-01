@@ -1165,9 +1165,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           if (hasCleanNeighborhood && !hasWrongImage) continue;
 
           try {
-            // ── Neighbourhood enrichment only — no photos from Google ──
-            const searchQuery = item.address
-              ? item.address
+            // If the stored address is a raw Google Maps URL (pasted before the URL
+            // parser was added), extract the place name + coords from it instead of
+            // sending the entire URL as a search query (which returns garbage results).
+            let resolvedAddress = item.address ?? '';
+            let locationBias: Record<string, unknown> | null = null;
+            if (/google\.com\/maps|maps\.app\.goo\.gl/.test(resolvedAddress)) {
+              const rawUrl = item.address ?? '';
+              const pm = rawUrl.match(/\/maps\/place\/([^/@?#]+)/);
+              if (pm) resolvedAddress = decodeURIComponent(pm[1].replace(/\+/g, ' '));
+              const cm = rawUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+              if (cm) {
+                locationBias = { circle: { center: { latitude: parseFloat(cm[1]), longitude: parseFloat(cm[2]) }, radius: 200 } };
+              }
+            }
+            const searchQuery = resolvedAddress
+              ? resolvedAddress
               : plan.country ? `${item.name} ${plan.country}` : item.name;
 
             const stRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
@@ -1177,7 +1190,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
                 'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents,places.photos',
               },
-              body: JSON.stringify({ textQuery: searchQuery, languageCode: 'en' }),
+              body: JSON.stringify({ textQuery: searchQuery, languageCode: 'en', ...(locationBias ? { locationBias } : {}) }),
             });
             const stData = await stRes.json();
             const place = stData.places?.[0];
