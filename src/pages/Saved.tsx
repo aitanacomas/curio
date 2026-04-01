@@ -1438,7 +1438,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               </div>
             )}
             {collabs.map((c, i) => (
-              <img key={c.id} src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0" style={{ zIndex: 9 - i }} />
+              c.avatar
+                ? <img key={c.id} src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0" style={{ zIndex: 9 - i }} />
+                : <div key={c.id} className="w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center text-xs font-bold text-white flex-shrink-0" style={{ zIndex: 9 - i }}>{c.name[0]?.toUpperCase()}</div>
             ))}
           </div>
           <div className="flex-1 min-w-0">
@@ -1774,7 +1776,10 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {inviteCollabs.map(c => (
                     <span key={c.id} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5">
-                      <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" />
+                      {c.avatar
+                        ? <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" />
+                        : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center text-[9px] font-bold text-gray-600">{c.name[0]?.toUpperCase()}</div>
+                      }
                       <span className="text-xs text-gray-600 font-medium">{c.name.split(' ')[0]}</span>
                       <button onClick={() => setInviteCollabs(prev => prev.filter(x => x.id !== c.id))}>
                         <X size={10} strokeWidth={2} className="text-gray-400" />
@@ -1818,13 +1823,16 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       <button
                         key={s.id}
                         onClick={() => {
-                          setInviteCollabs(prev => [...prev, { id: s.id, name: s.name, avatar: s.avatarUrl ?? `https://i.pravatar.cc/150?u=${s.id}` }]);
+                          setInviteCollabs(prev => [...prev, { id: s.id, name: s.name, avatar: s.avatarUrl ?? '' }]);
                           setInviteInput('');
                           setInviteSuggestions(inviteFollowList.filter(f => !inviteCollabs.some(c => c.id === f.id) && f.id !== s.id));
                         }}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0"
                       >
-                        <img src={s.avatarUrl ?? `https://i.pravatar.cc/150?u=${s.id}`} alt={s.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                        {s.avatarUrl
+                          ? <img src={s.avatarUrl} alt={s.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                          : <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">{s.name[0]?.toUpperCase()}</div>
+                        }
                         <div className="text-left min-w-0">
                           <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
                           <p className="text-xs text-gray-400 truncate">@{s.username}</p>

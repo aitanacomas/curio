@@ -587,7 +587,7 @@ export async function getPlans(userId: string): Promise<Plan[]> {
       .map((c: any) => ({
         id: c.user_id,
         name: (c.profiles as any)?.name ?? '',
-        avatar: (c.profiles as any)?.avatar_url ?? `https://i.pravatar.cc/150?u=${c.user_id}`,
+        avatar: (c.profiles as any)?.avatar_url ?? '',
       }));
 
     return {
