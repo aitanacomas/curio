@@ -1213,17 +1213,28 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               } catch { /* silent */ }
             }
             const photoName = place.photos?.[0]?.name;
-            // Only use this photo if the returned place is geographically relevant
-            // to the trip (prevents Italian lake / wrong-country photos).
+
+            // 1. Geo check — place must be in the trip's country/city
             const formattedAddr = (place.formattedAddress ?? '').toLowerCase();
             const geoHints = [plan.country, plan.destination]
               .filter(Boolean)
-              .map(s => s!.toLowerCase().split(/[\s,]+/)[0]); // first word of each
+              .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
             const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
-            // If geo check fails and item still has a wrong Google photo → clear it
-            const newImage = needsImage && photoName && geoMatch
+
+            // 2. Name match — place displayName must share at least one meaningful word
+            //    with the item name (blocks photos on personal notes like "Meet X at Y")
+            const activityVerbs = /^(meet|spend|walk|visit|explore|day trip|go to|see|watch|attend|check out|grab|get|have|do|take|enjoy)\b/i;
+            const isActivityNote = activityVerbs.test(item.name.trim());
+            const itemKeyWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            const placeNameLower = (place.displayName?.text ?? '').toLowerCase();
+            const nameMatch = !isActivityNote && itemKeyWords.some(w => placeNameLower.includes(w));
+
+            // 3. Decide: use photo, clear wrong photo, or do nothing
+            const photoOk = needsImage && photoName && geoMatch && nameMatch;
+            const shouldClear = needsImage && item.image && (!geoMatch || !nameMatch);
+            const newImage = photoOk
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
-              : (needsImage && !geoMatch && item.image) ? '__clear__' : '';
+              : shouldClear ? '__clear__' : '';
 
             const dbUpdates: Record<string, string> = {};
             if (newAddress && !item.address) dbUpdates.address = newAddress;
