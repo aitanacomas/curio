@@ -418,15 +418,18 @@ function extractNeighborhood(comps: any[], formattedAddress?: string): string {
     return '';
   }
   // No components — parse address string carefully
-  // Find the city by looking for the segment just before a state/province code
-  // e.g. "41 Lagorce Cir, Miami Beach, FL 33141, USA" → "Miami Beach"
   if (formattedAddress) {
-    const stateMatch = formattedAddress.match(/,\s*([^,]+),\s*[A-Z]{2}[\s,]/);
-    if (stateMatch) return stateMatch[1].trim();
-    // Non-US: return second-to-last segment (before country)
     const parts = formattedAddress.split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length >= 3) return parts[parts.length - 2];
-    if (parts.length === 2) return parts[0];
+    // Find the city: segment just before a state/province code (e.g. "FL", "CA")
+    const stateMatch = formattedAddress.match(/,\s*([^,]+),\s*[A-Z]{2}[\s,]/);
+    const city = stateMatch ? stateMatch[1].trim() : parts.length >= 2 ? parts[parts.length - 2] : '';
+    // If the first segment is a named place (no digits = not a street address),
+    // treat it as the area/district. e.g. "Miami Design District, Miami, FL, USA" → "Miami Design District, Miami"
+    const firstPart = parts[0];
+    if (firstPart && city && firstPart !== city && !/\d/.test(firstPart)) {
+      return `${firstPart}, ${city}`;
+    }
+    if (city) return city;
   }
   return '';
 }
@@ -1195,7 +1198,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
             const newAddress = place.formattedAddress ?? '';
             let newNeighborhood = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
-            // Fallback: if Places didn't return a proper "Area, City", try Geocoding API
+            // If Places gave us only a city, try the item's own stored address first
+            // (e.g. "Miami Design District, Miami, FL, USA" → "Miami Design District, Miami")
+            if (item.address && (!newNeighborhood || !newNeighborhood.includes(','))) {
+              const fromAddr = extractNeighborhood([], item.address);
+              if (fromAddr && fromAddr.includes(',')) newNeighborhood = fromAddr;
+            }
+            // Fallback: if still no "Area, City", try Geocoding API
             if ((!newNeighborhood || !newNeighborhood.includes(',')) && (newAddress || item.address)) {
               try {
                 const addr = newAddress || item.address || '';
