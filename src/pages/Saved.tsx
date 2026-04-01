@@ -1172,7 +1172,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               headers: {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents',
+                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents,places.photos',
               },
               body: JSON.stringify({ textQuery: searchQuery, languageCode: 'en' }),
             });
@@ -1213,10 +1213,40 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               if (fromAddr) newNeighborhood = fromAddr;
             }
 
+            // ── Photo logic ──────────────────────────────────────────────────
+            const needsPhoto = !isUserPhoto && (!item.image || hasWrongImage);
+            let newImage = '';
+            if (place && needsPhoto) {
+              const photoName = place.photos?.[0]?.name;
+              // Geo check: returned place must be in the trip's country/city
+              const formattedAddr = (place.formattedAddress ?? '').toLowerCase();
+              const geoHints = [plan.country, plan.destination]
+                .filter(Boolean)
+                .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
+              const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
+              // Name check: only bypass when address was given (address = ground truth)
+              // For title-only items, require the place name to match the item name
+              const activityVerbs = /^(meet|spend|walk|visit|explore|go to|see|watch|attend|check out|grab|have|take|enjoy)\b/i;
+              const isActivityNote = !item.address && activityVerbs.test(item.name.trim());
+              const itemKeyWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+              const placeNameLower = (place.displayName?.text ?? '').toLowerCase();
+              const nameMatch = item.address
+                ? true
+                : !isActivityNote && itemKeyWords.some(w => placeNameLower.includes(w));
+
+              if (photoName && geoMatch && nameMatch) {
+                newImage = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`;
+              } else if (hasWrongImage) {
+                newImage = '__clear__'; // wrong photo but no replacement → show emoji
+              }
+            } else if (hasWrongImage && !place) {
+              newImage = '__clear__';
+            }
+
             const dbUpdates: Record<string, string> = {};
             if (newNeighborhood && newNeighborhood !== item.neighborhood) dbUpdates.neighborhood = newNeighborhood;
-            // Clear any wrong auto-fetched image → show emoji fallback
-            if (hasWrongImage) dbUpdates.image_url = '';
+            if (newImage === '__clear__') dbUpdates.image_url = '';
+            else if (newImage) dbUpdates.image_url = newImage;
 
             if (Object.keys(dbUpdates).length === 0) {
               await new Promise(r => setTimeout(r, 200));
@@ -1227,7 +1257,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             if (!ok) continue;
             applyPatch(item.id, day.id, {
               ...(newNeighborhood ? { neighborhood: newNeighborhood } : {}),
-              ...(hasWrongImage ? { image: '' } : {}),
+              ...(dbUpdates.image_url !== undefined ? { image: dbUpdates.image_url } : {}),
             });
             await new Promise(r => setTimeout(r, 200));
           } catch { /* silent */ }
