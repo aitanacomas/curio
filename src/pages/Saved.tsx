@@ -683,6 +683,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [detailItem, setDetailItem] = useState<TripItem | null>(null);
   const [detailItemDayId, setDetailItemDayId] = useState<string | null>(null);
   const [showEditItem, setShowEditItem] = useState(false);
+  const [editItemUploading, setEditItemUploading] = useState(false);
   const [editItem, setEditItem] = useState<TripItem | null>(null);
   const [showDuplicatePicker, setShowDuplicatePicker] = useState(false);
   const [moveToDay, setMoveToDay] = useState<string | null>(null); // target day id when moving item
@@ -1161,8 +1162,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             item.image?.includes('unsplash.com/photo-1476514525535') ||
             item.image?.includes('places.googleapis.com')
           );
-          // Skip API call entirely if neighbourhood is already clean and no bad image
-          if (hasCleanNeighborhood && !hasWrongImage) continue;
+          const needsPhoto = !isUserPhoto && item.image !== 'none' && (!item.image || hasWrongImage);
+          // Skip only when neighbourhood is clean AND no photo work is needed
+          if (hasCleanNeighborhood && !hasWrongImage && !needsPhoto) continue;
 
           try {
             // If the stored address is a raw Google Maps URL (pasted before the URL
@@ -1230,7 +1232,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             }
 
             // ── Photo logic ──────────────────────────────────────────────────
-            const needsPhoto = !isUserPhoto && (!item.image || hasWrongImage);
             let newImage = '';
             if (place && needsPhoto && item.address) {
               // Only fetch a photo when the item has a confirmed address — searching
@@ -2371,8 +2372,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       <input type="file" accept="image/*" className="hidden" onChange={async e => {
                         const file = e.target.files?.[0];
                         if (!file) return;
-                        let url = URL.createObjectURL(file);
-                        setEditItem(prev => prev ? { ...prev, image: url } : prev);
+                        setEditItem(prev => prev ? { ...prev, image: URL.createObjectURL(file) } : prev);
+                        setEditItemUploading(true);
                         if (userId) {
                           const path = `plan-items/${userId}/${Date.now()}.jpg`;
                           const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
@@ -2381,6 +2382,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                             setEditItem(prev => prev ? { ...prev, image: publicUrl } : prev);
                           }
                         }
+                        setEditItemUploading(false);
                       }} />
                     </label>
                     {editItem.image && editItem.image !== 'none' && (
@@ -2611,7 +2613,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   if (detailItem?.id === editItem.id) setDetailItem(editItem);
                   setMoveToDay(null);
                   setShowEditItem(false);
-                }} className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold">
+                }} disabled={editItemUploading} className={`w-full py-3.5 rounded-2xl text-sm font-bold text-white transition-colors ${editItemUploading ? 'bg-gray-300' : 'bg-gray-900'}`}>
                   Save changes
                 </button>
                 {/* Who's coming */}
