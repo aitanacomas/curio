@@ -1153,8 +1153,10 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
           try {
             // ── Use searchText API for reliable establishment + neighborhood data ──
+            // When address is provided, search by address alone — it's the ground truth.
+            // Mixing in the item name (which may be a personal note) confuses the API.
             const searchQuery = item.address
-              ? `${item.name} ${item.address}`
+              ? item.address
               : plan.country ? `${item.name} ${plan.country}` : item.name;
 
             const stRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
@@ -1221,13 +1223,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
             const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
 
-            // 2. Name match — place displayName must share at least one meaningful word
-            //    with the item name (blocks photos on personal notes like "Meet X at Y")
+            // 2. Name match — only enforced when no address was given (title-only items).
+            //    If the user provided an address, the result IS the right place — use it.
             const activityVerbs = /^(meet|spend|walk|visit|explore|day trip|go to|see|watch|attend|check out|grab|get|have|do|take|enjoy)\b/i;
-            const isActivityNote = activityVerbs.test(item.name.trim());
+            const isActivityNote = !item.address && activityVerbs.test(item.name.trim());
             const itemKeyWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 3);
             const placeNameLower = (place.displayName?.text ?? '').toLowerCase();
-            const nameMatch = !isActivityNote && itemKeyWords.some(w => placeNameLower.includes(w));
+            const nameMatch = item.address  // address provided → trust the result
+              ? true
+              : !isActivityNote && itemKeyWords.some(w => placeNameLower.includes(w));
 
             // 3. Decide: use photo, clear wrong photo, or do nothing
             const photoOk = needsImage && photoName && geoMatch && nameMatch;
