@@ -1146,14 +1146,16 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               .filter(Boolean)
               .map(s => s!.toLowerCase().split(/[\s,]+/)[0]); // first word of each
             const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
+            // If geo check fails and item still has a wrong Google photo → clear it
             const newImage = needsImage && photoName && geoMatch
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
-              : '';
+              : (needsImage && !geoMatch && item.image) ? '__clear__' : '';
 
             const dbUpdates: Record<string, string> = {};
             if (newAddress && !item.address) dbUpdates.address = newAddress;
             if (newNeighborhood) dbUpdates.neighborhood = newNeighborhood;
-            if (newImage) dbUpdates.image_url = newImage;
+            if (newImage === '__clear__') dbUpdates.image_url = '';
+            else if (newImage) dbUpdates.image_url = newImage;
             if (Object.keys(dbUpdates).length === 0) {
               await new Promise(r => setTimeout(r, 200));
               continue;
@@ -1164,7 +1166,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             applyPatch(item.id, day.id, {
               ...(dbUpdates.address ? { address: dbUpdates.address } : {}),
               ...(newNeighborhood ? { neighborhood: newNeighborhood } : {}),
-              ...(newImage ? { image: newImage } : {}),
+              ...(dbUpdates.image_url !== undefined ? { image: dbUpdates.image_url } : {}),
             });
             await new Promise(r => setTimeout(r, 200));
           } catch { /* silent */ }
