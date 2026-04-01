@@ -1372,8 +1372,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         <>
         {/* Hero */}
         <div className="relative h-52">
-          <img src={selectedTrip.coverImage} alt={selectedTrip.destination} className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/20" />
+          {selectedTrip.coverImage
+            ? <img src={selectedTrip.coverImage} alt={selectedTrip.destination} className="w-full h-full object-cover"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            : null}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/20" style={{ background: selectedTrip.coverImage ? undefined : 'linear-gradient(to top, #111827, #374151)' }} />
           <button onClick={() => setSelectedTrip(null)} className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
@@ -1397,18 +1400,18 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <h2 className="text-2xl font-black text-white">{selectedTrip.destination}</h2>
             <div className="flex items-center gap-3 mt-1">
               {selectedTrip.dates && (
-                <p className="text-white/70 text-xs flex items-center gap-1">
+                <p className="text-white text-xs flex items-center gap-1">
                   <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
                 </p>
               )}
               {selectedTrip.country && (
-                <p className="text-white/70 text-xs flex items-center gap-1">
+                <p className="text-white text-xs flex items-center gap-1">
                   <MapPin size={11} strokeWidth={1.5} />{selectedTrip.country}
                 </p>
               )}
             </div>
             {selectedTrip.description && (
-              <p className="text-white/60 text-xs mt-1.5 line-clamp-2">{selectedTrip.description}</p>
+              <p className="text-white text-xs mt-1.5 line-clamp-2">{selectedTrip.description}</p>
             )}
           </div>
         </div>
