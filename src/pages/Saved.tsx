@@ -356,6 +356,8 @@ const categoryDisplayName: Record<string, string> = {
 // Thumbnail with graceful fallback when image URL is broken/expired
 function ItemThumb({ image, name, category, size = 'md' }: { image?: string; name: string; category: string; size?: 'sm' | 'md' }) {
   const [err, setErr] = useState(false);
+  // Reset error state when image URL changes so a newly fetched photo shows correctly
+  useEffect(() => { setErr(false); }, [image]);
   const cls = size === 'sm'
     ? 'w-10 h-10 rounded-lg'
     : 'w-14 h-14 rounded-xl';
@@ -1141,7 +1143,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     };
 
     (async () => {
-      const usedPhotoNames = new Set<string>(); // detect duplicate photos across items
       for (const day of plan.days) {
         for (const item of day.items) {
           if (cancelled) return;
@@ -1242,8 +1243,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 .filter(Boolean)
                 .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
               const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
-              if (photoName && geoMatch && !usedPhotoNames.has(photoName)) {
-                usedPhotoNames.add(photoName);
+              if (photoName && geoMatch) {
                 newImage = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`;
               } else if (hasWrongImage) {
                 newImage = '__clear__'; // duplicate or geo-fail → clear → emoji
@@ -2590,7 +2590,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   if (userId) {
                     await updatePlanItem(editItem.id, {
                       name: editItem.name, category: editItem.category,
-                      image_url: editItem.image ?? '',
+                      // Never write a blob: URL — only save when it's a real persistent URL
+                      ...(editItem.image?.startsWith('blob:') ? {} : { image_url: editItem.image ?? '' }),
                       time_label: editItem.time ?? '', time_end: editItem.timeEnd ?? '',
                       notes: editItem.notes ?? '',
                       address: editItem.address ?? '', neighborhood: editItem.neighborhood ?? '',
