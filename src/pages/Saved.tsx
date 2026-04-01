@@ -1095,7 +1095,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             id: i.id,
             name: i.name,
             category: i.category,
-            image: i.imageUrl || 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=400&q=80',
+            image: i.imageUrl || undefined,
             time: i.timeLabel || undefined,
             timeEnd: i.timeEnd || undefined,
             notes: i.notes || undefined,
