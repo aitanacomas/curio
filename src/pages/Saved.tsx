@@ -353,6 +353,18 @@ const categoryDisplayName: Record<string, string> = {
   flight: 'Flight', transport: 'Transport', event: 'Event', beach: 'Beach', food: 'Food', wellness: 'Wellness',
 };
 
+// Thumbnail with graceful fallback when image URL is broken/expired
+function ItemThumb({ image, name, category, size = 'md' }: { image?: string; name: string; category: string; size?: 'sm' | 'md' }) {
+  const [err, setErr] = useState(false);
+  const cls = size === 'sm'
+    ? 'w-10 h-10 rounded-lg'
+    : 'w-14 h-14 rounded-xl';
+  if (!image || err) {
+    return <div className={`${cls} bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-2xl`}>{categoryEmoji[category] ?? '📍'}</div>;
+  }
+  return <img src={image} alt={name} className={`${cls} object-cover flex-shrink-0`} onError={() => setErr(true)} />;
+}
+
 function PlaceRow({ place, isLocked, isSaved, onToggleSave, onBook }: {
   place: Place;
   isLocked: boolean;
@@ -1119,8 +1131,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               } catch { /* silent */ }
             }
             const photoName = place.photos?.[0]?.name;
-            // Only replace image if item has no image at all (never overwrite user-set photos)
-            const hasNoImage = !item.image || item.image.includes('unsplash.com/photo-1476514525535');
+            // Protect only user-uploaded photos (Supabase storage). Allow overwriting
+            // empty, placeholder, or previously auto-assigned Google Places photos (which may be wrong).
+            const isUserPhoto = item.image?.includes('leooulgankktjapregei.supabase.co');
+            const hasNoImage = !isUserPhoto && (
+              !item.image ||
+              item.image.includes('unsplash.com/photo-1476514525535') ||
+              item.image.includes('places.googleapis.com')
+            );
             const newImage = hasNoImage && photoName
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
               : '';
@@ -1396,10 +1414,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     {day.items.map(item => (
                       <div key={item.id} className="bg-gray-50 rounded-2xl p-3" onClick={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}>
                         <div className="flex items-start gap-3">
-                          {item.image
-                            ? <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                            : <div className="w-14 h-14 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-2xl">{categoryEmoji[item.category] ?? '📍'}</div>
-                          }
+                          <ItemThumb image={item.image} name={item.name} category={item.category} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</p>
                             <p className="text-xs text-gray-400 mt-0.5">
@@ -2025,9 +2040,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             {/* Photo header */}
             <div className="relative flex-shrink-0">
               {detailItem.image
-                ? <img src={detailItem.image} alt={detailItem.name} className="w-full object-cover rounded-t-3xl" style={{ height: '48vw', maxHeight: 220, minHeight: 160 }} />
-                : <div className="w-full flex items-center justify-center bg-gray-100 rounded-t-3xl text-6xl" style={{ height: '36vw', maxHeight: 160, minHeight: 120 }}>{categoryEmoji[detailItem.category] ?? '📍'}</div>
-              }
+                ? <img src={detailItem.image} alt={detailItem.name} className="w-full object-cover rounded-t-3xl" style={{ height: '48vw', maxHeight: 220, minHeight: 160 }}
+                    onError={e => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextElementSibling as HTMLElement)?.style.removeProperty('display'); }} />
+                : null}
+              <div
+                style={detailItem.image ? { display: 'none', height: '36vw', maxHeight: 160, minHeight: 120 } : { height: '36vw', maxHeight: 160, minHeight: 120 }}
+                className="w-full flex items-center justify-center bg-gray-100 rounded-t-3xl text-6xl"
+              >{categoryEmoji[detailItem.category] ?? '📍'}</div>
               {/* X close */}
               <button onClick={() => setShowItemDetail(false)} className="absolute top-4 left-4 w-9 h-9 rounded-full bg-black/40 flex items-center justify-center">
                 <X size={15} strokeWidth={2.5} className="text-white" />
@@ -3314,10 +3333,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     {evItems.map(item => (
                       <button key={item.id} onClick={() => { setDetailItem(item); setDetailItemDayId(ev.days.find(d => d.items.some(i => i.id === item.id))?.id ?? null); setShowItemDetail(true); }} className="w-full bg-gray-50 rounded-2xl p-3 text-left">
                         <div className="flex items-center gap-3">
-                          {item.image
-                            ? <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                            : <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-2xl">{categoryEmoji[item.category] ?? '📍'}</div>
-                          }
+                          <ItemThumb image={item.image} name={item.name} category={item.category} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
                             <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}{item.neighborhood ? ` · ${item.neighborhood}` : ''}</p>
