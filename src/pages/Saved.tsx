@@ -1216,31 +1216,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             // ── Photo logic ──────────────────────────────────────────────────
             const needsPhoto = !isUserPhoto && (!item.image || hasWrongImage);
             let newImage = '';
-            if (place && needsPhoto) {
+            if (place && needsPhoto && item.address) {
+              // Only fetch a photo when the item has a confirmed address — searching
+              // by name alone returns unreliable results with wrong photos (e.g. lake).
               const photoName = place.photos?.[0]?.name;
-              // Geo check: returned place must be in the trip's country/city
               const formattedAddr = (place.formattedAddress ?? '').toLowerCase();
               const geoHints = [plan.country, plan.destination]
                 .filter(Boolean)
                 .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
               const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
-              // Name check: only bypass when address was given (address = ground truth)
-              // For title-only items, require the place name to match the item name
-              const activityVerbs = /^(meet|spend|walk|visit|explore|go to|see|watch|attend|check out|grab|have|take|enjoy)\b/i;
-              const isActivityNote = !item.address && activityVerbs.test(item.name.trim());
-              const itemKeyWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-              const placeNameLower = (place.displayName?.text ?? '').toLowerCase();
-              const nameMatch = item.address
-                ? true
-                : !isActivityNote && itemKeyWords.some(w => placeNameLower.includes(w));
-
-              if (photoName && geoMatch && nameMatch) {
+              if (photoName && geoMatch) {
                 newImage = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`;
               } else if (hasWrongImage) {
-                newImage = '__clear__'; // wrong photo but no replacement → show emoji
+                newImage = '__clear__';
               }
-            } else if (hasWrongImage && !place) {
-              newImage = '__clear__';
+            } else if (hasWrongImage) {
+              newImage = '__clear__'; // no address or no result → clear wrong photo → emoji
             }
 
             const dbUpdates: Record<string, string> = {};
