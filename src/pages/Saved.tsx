@@ -1139,7 +1139,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               } catch { /* silent */ }
             }
             const photoName = place.photos?.[0]?.name;
-            const newImage = needsImage && photoName
+            // Only use this photo if the returned place is geographically relevant
+            // to the trip (prevents Italian lake / wrong-country photos).
+            const formattedAddr = (place.formattedAddress ?? '').toLowerCase();
+            const geoHints = [plan.country, plan.destination]
+              .filter(Boolean)
+              .map(s => s!.toLowerCase().split(/[\s,]+/)[0]); // first word of each
+            const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
+            const newImage = needsImage && photoName && geoMatch
               ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
               : '';
 
