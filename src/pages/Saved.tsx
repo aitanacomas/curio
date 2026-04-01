@@ -2360,13 +2360,26 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <div className="mb-4">
                   <p className="text-xs font-semibold text-gray-400 mb-2">Photo</p>
                   <div className="relative">
-                    {editItem.image ? (
-                      <img src={editItem.image} alt={editItem.name} className="w-full h-36 object-cover rounded-2xl" />
-                    ) : (
-                      <div className="w-full h-36 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-5xl">
-                        {categoryEmoji[editItem.category] ?? '📍'}
-                      </div>
-                    )}
+                    {editItem.image && editItem.image !== 'none' ? (
+                      <img
+                        src={editItem.image}
+                        alt={editItem.name}
+                        className="w-full h-36 object-cover rounded-2xl"
+                        onError={async e => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                          (e.target as HTMLImageElement).nextElementSibling?.removeAttribute('style');
+                          // Auto-clear broken URL from DB so enrichment can re-fetch
+                          setEditItem(prev => prev ? { ...prev, image: '' } : prev);
+                          await updatePlanItem(editItem.id, { image_url: '' });
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="w-full h-36 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-5xl"
+                      style={(editItem.image && editItem.image !== 'none') ? { display: 'none' } : {}}
+                    >
+                      {categoryEmoji[editItem.category] ?? '📍'}
+                    </div>
                     <label className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 text-white text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer">
                       <Pencil size={11} strokeWidth={2} /> Change photo
                       <input type="file" accept="image/*" className="hidden" onChange={async e => {
