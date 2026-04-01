@@ -665,6 +665,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [addPlaceLocation, setAddPlaceLocation] = useState('');
   const [addPlaceTimeEnd, setAddPlaceTimeEnd] = useState('');
   const [addPlaceAddress, setAddPlaceAddress] = useState('');
+  const [addPlaceMapsNote, setAddPlaceMapsNote] = useState('');
   const [addPlaceNeighborhood, setAddPlaceNeighborhood] = useState('');
   const addPlaceImageRef = useRef<HTMLInputElement>(null);
   const editItemImageRef = useRef<HTMLInputElement>(null);
@@ -829,6 +830,78 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     setSelectedTrip(updated);
   };
 
+  // ── Google Maps URL paste handler ──────────────────────────────────────
+  const handleMapsUrl = async (url: string) => {
+    setAddPlaceSuggestions([]);
+    setAddPlaceSearching(true);
+    setAddPlaceMapsNote('');
+
+    // Short goo.gl links can't be expanded in the browser (CORS).
+    if (/maps\.app\.goo\.gl/.test(url)) {
+      setAddPlaceSearching(false);
+      setAddPlaceMapsNote("Short Google Maps links can't be read directly. In the Maps app tap Share → Copy link and paste the full URL.");
+      return;
+    }
+
+    try {
+      // Extract place name from path: /maps/place/PLACE+NAME/@...
+      const placeMatch = url.match(/\/maps\/place\/([^/@?#]+)/);
+      let searchQuery = placeMatch
+        ? decodeURIComponent(placeMatch[1].replace(/\+/g, ' '))
+        : '';
+
+      // Extract lat/lng from @ coordinates
+      const coordMatch = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      const lat = coordMatch ? parseFloat(coordMatch[1]) : null;
+      const lng = coordMatch ? parseFloat(coordMatch[2]) : null;
+
+      if (!searchQuery && lat && lng) searchQuery = `${lat},${lng}`;
+      if (!searchQuery) { setAddPlaceSearching(false); return; }
+
+      const body: Record<string, unknown> = { textQuery: searchQuery, languageCode: 'en' };
+      if (lat && lng) {
+        body.locationBias = { circle: { center: { latitude: lat, longitude: lng }, radius: 200 } };
+      }
+
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.photos',
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      const place = data.places?.[0];
+
+      if (place) {
+        if (place.id) setAddPlaceSelectedId(place.id);
+        if (place.displayName?.text) {
+          setAddPlaceSelectedName(prev => prev.trim() ? prev : place.displayName.text);
+        }
+        if (place.formattedAddress) {
+          setAddPlaceSearch(place.formattedAddress);
+          setAddPlaceAddress(place.formattedAddress);
+        }
+        const area = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress ?? '');
+        if (area) setAddPlaceNeighborhood(area);
+        const photoName = place.photos?.[0]?.name;
+        if (photoName) {
+          setAddPlaceCustomImage(
+            `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
+          );
+        }
+        setAddPlaceMapsNote('✓ Place found — check the details below');
+      } else {
+        setAddPlaceMapsNote("Couldn't find this place. Try searching by name instead.");
+      }
+    } catch {
+      setAddPlaceMapsNote('Something went wrong reading the link. Try searching by name.');
+    }
+    setAddPlaceSearching(false);
+  };
+
   const openAddPlace = (dayId: string | null) => {
     setAddPlaceDayId(dayId);
     setAddPlaceSearch('');
@@ -846,6 +919,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     setAddPlaceTimeEnd('');
     setAddPlaceAddress('');
     setAddPlaceNeighborhood('');
+    setAddPlaceMapsNote('');
     setShowAddPlace(true);
   };
 
@@ -1832,7 +1906,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                             const val = e.target.value;
                             setAddPlaceSearch(val);
                             if (addPlaceTimerRef.current) clearTimeout(addPlaceTimerRef.current);
-                            if (!val.trim()) { setAddPlaceSuggestions([]); return; }
+                            if (!val.trim()) { setAddPlaceSuggestions([]); setAddPlaceMapsNote(''); return; }
+                            // Detect Google Maps URLs and handle separately
+                            if (/maps\.app\.goo\.gl|google\.com\/maps|maps\.google\.com/.test(val)) {
+                              handleMapsUrl(val);
+                              return;
+                            }
                             addPlaceTimerRef.current = setTimeout(async () => {
                               setAddPlaceSearching(true);
                               try {
@@ -1857,6 +1936,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         />
                         {addPlaceSearching && <Loader2 size={14} className="text-gray-400 animate-spin flex-shrink-0" />}
                       </div>
+                      {addPlaceMapsNote && (
+                        <p className={`text-xs mt-1.5 px-1 ${addPlaceMapsNote.startsWith('✓') ? 'text-green-600' : 'text-amber-600'}`}>
+                          {addPlaceMapsNote}
+                        </p>
+                      )}
                       {addPlaceSuggestions.length > 0 && (
                         <div
                           ref={el => {
