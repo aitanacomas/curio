@@ -1152,19 +1152,17 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             !/,\s*[A-Z]{2}(\s*\d{5})?$/.test(item.neighborhood) && // not ", FL" or ", FL 33141"
             !/\d/.test(item.neighborhood) &&                         // no digits (zip codes, street numbers)
             !streetTypeRx.test(item.neighborhood.split(',')[0]);     // first part is not a street name
+          // Clear any auto-fetched Google/placeholder photos — show emoji instead
           const isUserPhoto = item.image?.includes('leooulgankktjapregei.supabase.co');
-          const needsImage = !isUserPhoto && (
-            !item.image ||
-            item.image.includes('unsplash.com/photo-1476514525535') ||
-            item.image.includes('places.googleapis.com')
+          const hasWrongImage = !isUserPhoto && (
+            item.image?.includes('unsplash.com/photo-1476514525535') ||
+            item.image?.includes('places.googleapis.com')
           );
-          // Skip API entirely if both neighborhood and image are already good
-          if (hasCleanNeighborhood && !needsImage) continue;
+          // Skip API call entirely if neighbourhood is already clean and no bad image
+          if (hasCleanNeighborhood && !hasWrongImage) continue;
 
           try {
-            // ── Use searchText API for reliable establishment + neighborhood data ──
-            // When address is provided, search by address alone — it's the ground truth.
-            // Mixing in the item name (which may be a personal note) confuses the API.
+            // ── Neighbourhood enrichment only — no photos from Google ──
             const searchQuery = item.address
               ? item.address
               : plan.country ? `${item.name} ${plan.country}` : item.name;
@@ -1174,93 +1172,52 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               headers: {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents,places.photos',
+                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents',
               },
               body: JSON.stringify({ textQuery: searchQuery, languageCode: 'en' }),
             });
             const stData = await stRes.json();
             const place = stData.places?.[0];
-            if (!place) {
-              // No result — fall back to string parsing if we have an address
-              if (item.address) {
-                const neighborhood = extractNeighborhood([], item.address);
-                if (neighborhood && neighborhood !== item.neighborhood) {
-                  const ok = await updatePlanItem(item.id, { neighborhood });
-                  if (ok) applyPatch(item.id, day.id, { neighborhood });
+
+            let newNeighborhood = '';
+            if (place) {
+              newNeighborhood = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
+              // If Places gave us only a city, try the item's own stored address
+              if (item.address && (!newNeighborhood || !newNeighborhood.includes(','))) {
+                const fromAddr = extractNeighborhood([], item.address);
+                if (fromAddr && fromAddr.includes(',')) newNeighborhood = fromAddr;
+              }
+              // Geocoding fallback for "Area, City"
+              if (!newNeighborhood || !newNeighborhood.includes(',')) {
+                const addr = place.formattedAddress || item.address || '';
+                if (addr) {
+                  try {
+                    const geoRes = await fetch(
+                      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GOOGLE_PLACES_KEY}`
+                    );
+                    const geoData = await geoRes.json();
+                    const geoResult = geoData.results?.[0];
+                    if (geoResult) {
+                      const geoComps = (geoResult.address_components ?? []).map((c: any) => ({
+                        types: c.types, longText: c.long_name,
+                      }));
+                      const geo = extractNeighborhood(geoComps, geoResult.formatted_address);
+                      if (geo && geo.includes(',')) newNeighborhood = geo;
+                    }
+                  } catch { /* silent */ }
                 }
               }
-              await new Promise(r => setTimeout(r, 200));
-              continue;
-            }
-
-            // Verify result is a genuine match — require significant word overlap
-            const placeName = (place.displayName?.text ?? '').toLowerCase();
-            const itemWords = item.name.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-            const placeWords = placeName.split(/\s+/).filter((w: string) => w.length > 2);
-            const overlap = itemWords.filter((w: string) => placeWords.some((pw: string) => pw.includes(w) || w.includes(pw)));
-            if (placeName && itemWords.length > 0 && overlap.length < Math.ceil(itemWords.length / 2)) {
-              await new Promise(r => setTimeout(r, 200));
-              continue;
-            }
-
-            const newAddress = place.formattedAddress ?? '';
-            let newNeighborhood = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
-            // If Places gave us only a city, try the item's own stored address first
-            // (e.g. "Miami Design District, Miami, FL, USA" → "Miami Design District, Miami")
-            if (item.address && (!newNeighborhood || !newNeighborhood.includes(','))) {
+            } else if (item.address) {
+              // No Places result — extract neighbourhood from stored address string
               const fromAddr = extractNeighborhood([], item.address);
-              if (fromAddr && fromAddr.includes(',')) newNeighborhood = fromAddr;
+              if (fromAddr) newNeighborhood = fromAddr;
             }
-            // Fallback: if still no "Area, City", try Geocoding API
-            if ((!newNeighborhood || !newNeighborhood.includes(',')) && (newAddress || item.address)) {
-              try {
-                const addr = newAddress || item.address || '';
-                const geoRes = await fetch(
-                  `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GOOGLE_PLACES_KEY}`
-                );
-                const geoData = await geoRes.json();
-                const geoResult = geoData.results?.[0];
-                if (geoResult) {
-                  const geoComps = (geoResult.address_components ?? []).map((c: any) => ({
-                    types: c.types,
-                    longText: c.long_name,
-                  }));
-                  const geoNeighborhood = extractNeighborhood(geoComps, geoResult.formatted_address);
-                  if (geoNeighborhood && geoNeighborhood.includes(',')) newNeighborhood = geoNeighborhood;
-                }
-              } catch { /* silent */ }
-            }
-            const photoName = place.photos?.[0]?.name;
-
-            // 1. Geo check — place must be in the trip's country/city
-            const formattedAddr = (place.formattedAddress ?? '').toLowerCase();
-            const geoHints = [plan.country, plan.destination]
-              .filter(Boolean)
-              .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
-            const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
-
-            // 2. Name match — only enforced when no address was given (title-only items).
-            //    If the user provided an address, the result IS the right place — use it.
-            const activityVerbs = /^(meet|spend|walk|visit|explore|day trip|go to|see|watch|attend|check out|grab|get|have|do|take|enjoy)\b/i;
-            const isActivityNote = !item.address && activityVerbs.test(item.name.trim());
-            const itemKeyWords = item.name.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-            const placeNameLower = (place.displayName?.text ?? '').toLowerCase();
-            const nameMatch = item.address  // address provided → trust the result
-              ? true
-              : !isActivityNote && itemKeyWords.some(w => placeNameLower.includes(w));
-
-            // 3. Decide: use photo, clear wrong photo, or do nothing
-            const photoOk = needsImage && photoName && geoMatch && nameMatch;
-            const shouldClear = needsImage && item.image && (!geoMatch || !nameMatch);
-            const newImage = photoOk
-              ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
-              : shouldClear ? '__clear__' : '';
 
             const dbUpdates: Record<string, string> = {};
-            if (newAddress && !item.address) dbUpdates.address = newAddress;
-            if (newNeighborhood) dbUpdates.neighborhood = newNeighborhood;
-            if (newImage === '__clear__') dbUpdates.image_url = '';
-            else if (newImage) dbUpdates.image_url = newImage;
+            if (newNeighborhood && newNeighborhood !== item.neighborhood) dbUpdates.neighborhood = newNeighborhood;
+            // Clear any wrong auto-fetched image → show emoji fallback
+            if (hasWrongImage) dbUpdates.image_url = '';
+
             if (Object.keys(dbUpdates).length === 0) {
               await new Promise(r => setTimeout(r, 200));
               continue;
@@ -1269,9 +1226,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             const ok = await updatePlanItem(item.id, dbUpdates);
             if (!ok) continue;
             applyPatch(item.id, day.id, {
-              ...(dbUpdates.address ? { address: dbUpdates.address } : {}),
               ...(newNeighborhood ? { neighborhood: newNeighborhood } : {}),
-              ...(dbUpdates.image_url !== undefined ? { image: dbUpdates.image_url } : {}),
+              ...(hasWrongImage ? { image: '' } : {}),
             });
             await new Promise(r => setTimeout(r, 200));
           } catch { /* silent */ }
