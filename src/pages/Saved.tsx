@@ -1335,7 +1335,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   };
 
   if (selectedTrip) {
-    const totalItems = selectedTrip.days.reduce((acc, d) => acc + d.items.length, 0);
+    // Count how many days each place name appears across the whole trip
+    const itemDayCount = new Map<string, number>();
+    selectedTrip.days.forEach(d => d.items.forEach(i => {
+      itemDayCount.set(i.name, (itemDayCount.get(i.name) ?? 0) + 1);
+    }));
+    // "Places" stat = unique place names only
+    const totalItems = itemDayCount.size;
     const bookedCount = selectedTrip.days.reduce((acc, d) => acc + d.items.filter(i => i.booked || i.status === 'booked').length, 0);
     const sortedDays = selectedTrip.days.map(d => ({
       ...d,
@@ -1599,6 +1605,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                           <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                             {(item.status === 'booked' || item.booked) && <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full">Booked</span>}
                             {item.status === 'pending' && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+                            {(itemDayCount.get(item.name) ?? 1) > 1 && <span className="text-xs bg-gray-100 text-gray-400 font-semibold px-2 py-0.5 rounded-full">× {itemDayCount.get(item.name)} days</span>}
                           </div>
                         </div>
                       </div>
