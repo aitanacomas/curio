@@ -964,21 +964,23 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                   </p>
                 )}
                 {/* Places toggle */}
-                {post.places.length > 0 && (
+                {post.places.length > 0 && (() => {
+                  const uniquePlaces = post.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i);
+                  return (
+                  <>
                   <button
                     onClick={() => setExpandedPlacesPostId(p => p === post.id ? null : post.id)}
                     className="mt-2 text-xs font-semibold text-gray-500 flex items-center gap-1"
                   >
                     <MapPin size={11} strokeWidth={1.5} />
-                    {post.places.length} place{post.places.length !== 1 ? 's' : ''}
+                    {uniquePlaces.length} place{uniquePlaces.length !== 1 ? 's' : ''}
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`transition-transform ${expandedPlacesPostId === post.id ? 'rotate-180' : ''}`}>
                       <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </button>
-                )}
-                {expandedPlacesPostId === post.id && (
+                  {expandedPlacesPostId === post.id && (
                   <div className="mt-2 space-y-2">
-                    {post.places.map(place => (
+                    {uniquePlaces.map(place => (
                       <div key={place.id} className="flex items-center gap-2.5 bg-gray-50 rounded-2xl px-2.5 py-2">
                         {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
                         <div className="flex-1 min-w-0">
@@ -1003,7 +1005,10 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                       </div>
                     ))}
                   </div>
-                )}
+                  )}
+                  </>
+                  );
+                })()}
               </div>
             </div>
           );

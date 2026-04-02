@@ -420,7 +420,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
             ) : null;
           })()}
           <div className="space-y-3">
-            {selectedPost.places.map(place => (
+            {selectedPost.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i).map(place => (
               <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
                 {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
