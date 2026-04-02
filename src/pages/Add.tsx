@@ -27,14 +27,41 @@ interface IdentifiedPlace {
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
+// Extract only the place name (first comma-separated component)
+const shortName = (name: string) => name.split(',')[0].trim();
+
 function googleTypesToCategory(types: string[]): Category {
-  if (types.some(t => ['lodging', 'hotel', 'motel', 'resort_hotel'].includes(t))) return 'hotel';
-  if (types.some(t => ['restaurant', 'meal_takeaway', 'meal_delivery', 'food'].includes(t))) return 'restaurant';
-  if (types.some(t => ['cafe', 'bakery', 'coffee_shop'].includes(t))) return 'cafe';
-  if (types.some(t => ['bar', 'night_club'].includes(t))) return 'bar';
-  if (types.some(t => ['store', 'shopping_mall', 'clothing_store', 'book_store'].includes(t))) return 'shop';
-  if (types.some(t => ['park', 'natural_feature', 'campground'].includes(t))) return 'nature';
-  if (types.some(t => ['museum', 'art_gallery', 'tourist_attraction', 'landmark'].includes(t))) return 'attraction';
+  const has = (...t: string[]) => types.some(x => t.includes(x));
+  // Hotel / accommodation
+  if (has('lodging','hotel','motel','resort_hotel','hostel','bed_and_breakfast','extended_stay_hotel','guest_house','inn')) return 'hotel';
+  // Restaurant (includes all cuisine-specific types from Google Places API v1)
+  if (has('restaurant','american_restaurant','barbecue_restaurant','brazilian_restaurant','breakfast_restaurant','brunch_restaurant','buffet_restaurant','chinese_restaurant','french_restaurant','greek_restaurant','indian_restaurant','indonesian_restaurant','italian_restaurant','japanese_restaurant','korean_restaurant','lebanese_restaurant','mediterranean_restaurant','mexican_restaurant','middle_eastern_restaurant','pizza_restaurant','ramen_restaurant','seafood_restaurant','spanish_restaurant','steak_house','sushi_restaurant','thai_restaurant','turkish_restaurant','vegan_restaurant','vegetarian_restaurant','vietnamese_restaurant')) return 'restaurant';
+  // Café / coffee / bakery
+  if (has('cafe','coffee_shop','bakery','bagel_shop','tea_house','patisserie','dessert_shop','ice_cream_shop')) return 'cafe';
+  // Bar / nightlife
+  if (has('bar','night_club','wine_bar','cocktail_bar','sports_bar','pub','brewery','winery','distillery','karaoke')) return 'bar';
+  // Quick food / takeaway / delivery
+  if (has('food_court','fast_food_restaurant','meal_takeaway','meal_delivery','sandwich_shop','hamburger_restaurant','supermarket','grocery_store','convenience_store','deli','food_delivery')) return 'food';
+  // Transport
+  if (has('airport','train_station','bus_station','subway_station','transit_station','light_rail_station','ferry_terminal','taxi_stand','car_rental','bus_stop','airport_terminal')) return 'transport';
+  // Beach / water
+  if (has('beach','marina','diving_center','water_park')) return 'beach';
+  // Nature / outdoors
+  if (has('park','national_park','natural_feature','campground','hiking_area','rv_park','forest','nature_reserve','botanical_garden','wildlife_sanctuary')) return 'nature';
+  // Sports / fitness
+  if (has('stadium','sports_complex','gym','fitness_center','bowling_alley','golf_course','tennis_court','swimming_pool','ski_resort','rock_climbing_gym','cycling_studio','sports_club','athletic_field','race_track')) return 'sports';
+  // Wellness / beauty
+  if (has('spa','beauty_salon','hair_salon','hair_care','nail_salon','physiotherapist','massage','yoga_studio','sauna','wellness_center','massage_therapist')) return 'wellness';
+  // Shop / retail
+  if (has('store','shopping_mall','clothing_store','book_store','department_store','bicycle_store','electronics_store','furniture_store','home_goods_store','jewelry_store','shoe_store','pet_store','florist','gift_shop','market','liquor_store','toy_store','sporting_goods_store','pharmacy')) return 'shop';
+  // Street / road / landmark area
+  if (has('route','street_address','intersection')) return 'street';
+  // Event venue
+  if (has('event_venue','banquet_hall','convention_center','conference_center','wedding_venue','concert_hall')) return 'event';
+  // Airline
+  if (has('airline')) return 'flight';
+  // Attraction / landmark / cultural
+  if (has('museum','art_gallery','tourist_attraction','landmark','historical_landmark','cultural_landmark','monument','amusement_park','zoo','aquarium','movie_theater','performing_arts_theater','library','church','mosque','synagogue','hindu_temple','place_of_worship','embassy','city_hall','university','castle','ruins')) return 'attraction';
   return 'experience';
 }
 
@@ -122,28 +149,40 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
     const data = await res.json();
     const place = data.places?.[0];
     if (!place) return null;
-    const name = place.displayName?.text ?? '';
+    const name = shortName(place.displayName?.text ?? '');
     const types: string[] = place.types ?? [];
     const category = googleTypesToCategory(types);
     let neighborhood = '', city = '', country = '';
+    let hasPostalTown = false;
     for (const comp of place.addressComponents ?? []) {
-      if (comp.types?.includes('sublocality_level_1') || comp.types?.includes('neighborhood')) neighborhood = comp.longText ?? '';
-      if (comp.types?.includes('locality')) city = comp.longText ?? '';
-      if (comp.types?.includes('country')) country = comp.longText ?? '';
+      const t: string[] = comp.types ?? [];
+      if (t.includes('sublocality_level_1') || (!neighborhood && (t.includes('sublocality_level_2') || t.includes('sublocality') || t.includes('neighborhood')))) neighborhood = comp.longText ?? '';
+      if (t.includes('postal_town')) { city = comp.longText ?? ''; hasPostalTown = true; }
+      else if (!hasPostalTown && t.includes('locality')) city = comp.longText ?? '';
+      else if (!city && t.includes('administrative_area_level_2')) city = comp.longText ?? '';
+      if (t.includes('country')) country = comp.longText ?? '';
     }
     return { name, category, neighborhood, city, country, lat, lng };
   } catch { return null; }
 }
 
 const categories: { id: Category; label: string; emoji: string }[] = [
+  { id: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
   { id: 'cafe', label: 'Café', emoji: '☕' },
-  { id: 'restaurant', label: 'Food', emoji: '🍽' },
-  { id: 'hotel', label: 'Stay', emoji: '🏨' },
-  { id: 'experience', label: 'Experience', emoji: '🎭' },
-  { id: 'attraction', label: 'Attraction', emoji: '🗺' },
   { id: 'bar', label: 'Bar', emoji: '🍸' },
+  { id: 'food', label: 'Food', emoji: '🍕' },
+  { id: 'hotel', label: 'Stay', emoji: '🏨' },
+  { id: 'attraction', label: 'Attraction', emoji: '🏛️' },
   { id: 'nature', label: 'Nature', emoji: '🌿' },
-  { id: 'shop', label: 'Shop', emoji: '🛍' },
+  { id: 'beach', label: 'Beach', emoji: '🏖️' },
+  { id: 'shop', label: 'Shop', emoji: '🛍️' },
+  { id: 'experience', label: 'Experience', emoji: '🗺️' },
+  { id: 'sports', label: 'Sports', emoji: '🎾' },
+  { id: 'wellness', label: 'Wellness', emoji: '💆' },
+  { id: 'street', label: 'Street', emoji: '🏙️' },
+  { id: 'event', label: 'Event', emoji: '🎟️' },
+  { id: 'flight', label: 'Flight', emoji: '✈️' },
+  { id: 'transport', label: 'Transport', emoji: '🚗' },
 ];
 
 interface Props {
@@ -185,7 +224,7 @@ function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>
   };
 
   const handleSelect = async (placeId: string, text: string) => {
-    setQuery(text);
+    setQuery(text.split(',')[0].trim());
     setSuggestions([]);
     try {
       const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
@@ -196,19 +235,32 @@ function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>
         },
       });
       const place = await res.json();
-      const name = place.displayName?.text ?? text;
+      const name = shortName(place.displayName?.text ?? text);
       const types: string[] = place.types ?? [];
       const category = googleTypesToCategory(types);
       let neighborhood = '', city = '', country = '';
+      let hasPostalTown = false;
       for (const comp of place.addressComponents ?? []) {
-        if (comp.types?.includes('sublocality_level_1') || comp.types?.includes('neighborhood')) neighborhood = comp.longText ?? '';
-        if (comp.types?.includes('locality')) city = comp.longText ?? '';
-        if (comp.types?.includes('country')) country = comp.longText ?? '';
+        const t: string[] = comp.types ?? [];
+        if (t.includes('sublocality_level_1') || (!neighborhood && (t.includes('sublocality_level_2') || t.includes('sublocality') || t.includes('neighborhood')))) neighborhood = comp.longText ?? '';
+        if (t.includes('postal_town')) { city = comp.longText ?? ''; hasPostalTown = true; }
+        else if (!hasPostalTown && t.includes('locality')) city = comp.longText ?? '';
+        else if (!city && t.includes('administrative_area_level_2')) city = comp.longText ?? '';
+        if (t.includes('country')) country = comp.longText ?? '';
       }
       const lat: number | undefined = place.location?.latitude;
       const lng: number | undefined = place.location?.longitude;
       onSelect({ name, category, neighborhood, city, country, lat, lng });
-    } catch { onSelect({ name: text }); }
+    } catch {
+      // API failed — parse what we can from the autocomplete text
+      // e.g. "Chinatown Gate, Wardour Street, London, UK"
+      const parts = text.split(',').map((s: string) => s.trim()).filter(Boolean);
+      onSelect({
+        name: parts[0] ?? text,
+        city: parts.length >= 3 ? parts[parts.length - 2] : (parts[1] ?? ''),
+        country: parts.length >= 2 ? parts[parts.length - 1] : '',
+      });
+    }
   };
 
   return (
@@ -590,7 +642,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
       }));
 
       const allHashtags = [
-        ...places.map(p => p.name.replace(/\s+/g, '')),
+        ...places.map(p => shortName(p.name).replace(/\s+/g, '')),
         ...[...new Set(places.map(p => p.city).filter(Boolean))],
         ...extraHashtags,
       ];
@@ -603,7 +655,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
 
       const placesRows = uploadedPlaces.map((p, i) => ({
         post_id: post.id,
-        name: p.name,
+        name: shortName(p.name),
         category: p.category || null,
         neighborhood: p.neighborhood || null,
         city: p.city,
@@ -628,10 +680,10 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
   const uniqueCities = [...new Set(places.map(p => p.city).filter(Boolean))];
   const locationLabel = primaryPlace
     ? places.length === 1
-      ? `${primaryPlace.name} · ${primaryPlace.city}`
+      ? `${shortName(primaryPlace.name)} · ${primaryPlace.city}`
       : uniqueCities.length > 1
-        ? `${primaryPlace.name}, ${primaryPlace.city} +${places.length - 1}`
-        : `${primaryPlace.name} +${places.length - 1} · ${primaryPlace.city}`
+        ? `${shortName(primaryPlace.name)}, ${primaryPlace.city} +${places.length - 1}`
+        : `${shortName(primaryPlace.name)} +${places.length - 1} · ${primaryPlace.city}`
     : '';
 
   const visibilityOptions: { value: Visibility; label: string }[] = [
@@ -666,13 +718,11 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
           <p className="text-sm text-gray-400 mt-0.5">Upload photos and tag each place</p>
         </div>
 
-        <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} className="hidden" />
-
         <div className="px-4 flex-1 flex flex-col">
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50 active:bg-gray-100 transition-colors min-h-80"
+          <label
+            className="flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50 active:bg-gray-100 transition-colors min-h-80 cursor-pointer"
           >
+            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} className="sr-only" />
             <div className="w-20 h-20 rounded-full bg-white shadow-sm flex items-center justify-center">
               <Camera size={30} strokeWidth={1.5} className="text-gray-400" />
             </div>
@@ -685,7 +735,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
             <span className="text-xs font-semibold text-gray-400 bg-gray-100 px-4 py-2 rounded-full">
               Choose photos
             </span>
-          </button>
+          </label>
 
           <div className="pb-12 pt-6">
             <div className="flex items-center gap-3 mb-4">
@@ -730,8 +780,6 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
 
     return (
       <div className="min-h-screen bg-white flex flex-col">
-        <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} className="hidden" />
-        <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="hidden" />
 
         <div className="px-4 pt-5 pb-3">
           <button onClick={() => setStep('upload')} className="mb-3">
@@ -763,13 +811,14 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
             </SortableContext>
           </DndContext>
 
-          <button
-            onClick={() => addMoreRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors"
+          <label
+            id="places-add-more-label"
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer"
           >
+            <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="sr-only" />
             <Camera size={16} strokeWidth={1.5} />
             Add more photos
-          </button>
+          </label>
         </div>
 
         <div className="px-4 pb-6 pt-3 border-t border-gray-100">
@@ -790,7 +839,6 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
   // ── PREVIEW ───────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="hidden" />
 
       <div className="flex-1 overflow-y-auto">
         <div>
@@ -817,12 +865,12 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
                 >
                   <Pencil size={14} strokeWidth={1.5} className={editingPlaces ? 'text-white' : 'text-gray-500'} />
                 </button>
-                <button
-                  onClick={() => addMoreRef.current?.click()}
-                  className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
+                <label
+                  className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer"
                 >
+                  <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="sr-only" />
                   <Plus size={16} strokeWidth={1.5} className="text-gray-500" />
-                </button>
+                </label>
               </div>
             </div>
 
@@ -910,13 +958,13 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
                 </SortableContext>
               </DndContext>
 
-              <button
-                onClick={() => addMoreRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors"
+              <label
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer"
               >
+                <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="sr-only" />
                 <Camera size={16} strokeWidth={1.5} />
                 Add more photos
-              </button>
+              </label>
             </div>
           </div>
         )}
@@ -937,7 +985,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 mt-5">Hashtags</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 bg-gray-50 rounded-2xl px-4 py-3">
             {places.map(p => (
-              <span key={p.id} className="text-[12px] font-medium text-slate-400">#{p.name.replace(/\s+/g, '')}</span>
+              <span key={p.id} className="text-[12px] font-medium text-slate-400">#{shortName(p.name).replace(/\s+/g, '')}</span>
             ))}
             {[...new Set(places.map(p => p.city).filter(Boolean))].map(city => (
               <span key={city} className="text-[12px] font-medium text-slate-400">#{city.replace(/\s+/g, '')}</span>
