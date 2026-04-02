@@ -21,6 +21,8 @@ interface MapPlace {
   lat: number;
   lng: number;
   name: string;
+  neighbourhood?: string;
+  neighborhood?: string;
   city: string;
   country: string;
 }
@@ -115,8 +117,8 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       {places.map(place => (
         <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon()}>
           <Popup>
-            <div className="text-sm font-medium">{place.name}</div>
-            <div className="text-xs text-gray-500">{place.city}, {place.country}</div>
+            <div className="text-sm font-medium">{place.name.split(',')[0].trim()}</div>
+            <div className="text-xs text-gray-500">{[(place.neighbourhood ?? place.neighborhood), place.city].filter(Boolean).join(', ') || place.country}</div>
           </Popup>
         </Marker>
       ))}

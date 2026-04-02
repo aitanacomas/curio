@@ -1,4 +1,4 @@
-export type Category = 'cafe' | 'restaurant' | 'hotel' | 'attraction' | 'bar' | 'nature' | 'shop' | 'experience';
+export type Category = 'cafe' | 'restaurant' | 'hotel' | 'attraction' | 'bar' | 'nature' | 'shop' | 'experience' | 'sports' | 'flight' | 'transport' | 'event' | 'beach' | 'food' | 'wellness' | 'street';
 
 export type Tab = 'home' | 'explore' | 'add' | 'saved' | 'profile';
 

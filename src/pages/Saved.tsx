@@ -166,7 +166,7 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
-import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
 import { getSavedPlaces, supabase, getPublicUrl } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
@@ -178,7 +178,7 @@ interface TripItem {
   id: string;
   name: string;
   category: string;
-  image: string;
+  image?: string;
   address?: string;
   neighborhood?: string;
   time?: string;
@@ -189,6 +189,9 @@ interface TripItem {
   checkIn?: string;
   checkOut?: string;
   booked?: boolean;
+  addedBy?: string | null;
+  addedByName?: string | null;
+  addedByAvatar?: string | null;
 }
 
 interface TripDay {
@@ -201,10 +204,14 @@ interface TripCollaborator {
   id: string;
   name: string;
   avatar: string;
+  pending?: boolean;
 }
 
 interface Trip {
   id: string;
+  ownerId?: string;
+  ownerName?: string | null;
+  ownerAvatar?: string | null;
   destination: string;
   country: string;
   dates: string;
@@ -331,26 +338,41 @@ const savedPlaceIds = ['place-28', 'place-29', 'place-30', 'place-31', 'place-32
 
 const placeCategories: { id: Category | 'all'; label: string; emoji: string }[] = [
   { id: 'all', label: 'All', emoji: '✨' },
-  { id: 'cafe', label: 'Cafe', emoji: '☕' },
-  { id: 'restaurant', label: 'Food', emoji: '🍽' },
-  { id: 'hotel', label: 'Stay', emoji: '🏨' },
-  { id: 'attraction', label: 'Attraction', emoji: '🗺' },
+  { id: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
+  { id: 'cafe', label: 'Café', emoji: '☕' },
   { id: 'bar', label: 'Bar', emoji: '🍸' },
+  { id: 'food', label: 'Food', emoji: '🍕' },
+  { id: 'hotel', label: 'Stay', emoji: '🏨' },
+  { id: 'attraction', label: 'Attraction', emoji: '🏛️' },
   { id: 'nature', label: 'Nature', emoji: '🌿' },
-  { id: 'shop', label: 'Shop', emoji: '🛍' },
-  { id: 'experience', label: 'Experience', emoji: '🎭' },
+  { id: 'beach', label: 'Beach', emoji: '🏖️' },
+  { id: 'shop', label: 'Shop', emoji: '🛍️' },
+  { id: 'experience', label: 'Experience', emoji: '🗺️' },
+  { id: 'sports', label: 'Sports', emoji: '🎾' },
+  { id: 'wellness', label: 'Wellness', emoji: '💆' },
+  { id: 'street', label: 'Street', emoji: '🏙️' },
+  { id: 'event', label: 'Event', emoji: '🎟️' },
+  { id: 'flight', label: 'Flight', emoji: '✈️' },
+  { id: 'transport', label: 'Transport', emoji: '🚗' },
 ];
 
 const categoryEmoji: Record<string, string> = {
-  cafe: '☕', restaurant: '🍽', hotel: '🏨', stay: '🏨', attraction: '🏛️', bar: '🍸', nature: '🌿', shop: '🛍', experience: '🗺️', sports: '🎾',
-  flight: '✈️', transport: '🚗', event: '🎟️', beach: '🏖️', food: '🍕', wellness: '💆',
-  Attraction: '🏛️', Restaurant: '🍽', Bar: '🍸', Food: '🍽', Cafe: '☕', Event: '🎟️', Hotel: '🏨', Sports: '⚽',
+  restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
+  hotel: '🏨', stay: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
+  shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
+  street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
+  // capitalised fallbacks
+  Restaurant: '🍽️', Cafe: '☕', Bar: '🍸', Food: '🍕',
+  Hotel: '🏨', Attraction: '🏛️', Nature: '🌿', Beach: '🏖️',
+  Shop: '🛍️', Experience: '🗺️', Sports: '🎾', Wellness: '💆',
+  Street: '🏙️', Event: '🎟️', Flight: '✈️', Transport: '🚗',
 };
 
 const categoryDisplayName: Record<string, string> = {
-  hotel: 'Stay', cafe: 'Café', restaurant: 'Restaurant', bar: 'Bar',
-  attraction: 'Attraction', nature: 'Nature', shop: 'Shop', experience: 'Experience', sports: 'Sports',
-  flight: 'Flight', transport: 'Transport', event: 'Event', beach: 'Beach', food: 'Food', wellness: 'Wellness',
+  restaurant: 'Restaurant', cafe: 'Café', bar: 'Bar', food: 'Food',
+  hotel: 'Stay', attraction: 'Attraction', nature: 'Nature', beach: 'Beach',
+  shop: 'Shop', experience: 'Experience', sports: 'Sports', wellness: 'Wellness',
+  street: 'Street', event: 'Event', flight: 'Flight', transport: 'Transport',
 };
 
 // Thumbnail with graceful fallback when image URL is broken/expired
@@ -378,10 +400,10 @@ function PlaceRow({ place, isLocked, isSaved, onToggleSave, onBook }: {
     <div className={`flex items-center gap-3 bg-gray-50 rounded-2xl p-3 transition-opacity ${isLocked ? 'opacity-40 pointer-events-none select-none' : ''}`}>
       <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+        <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
         <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
           <MapPin size={9} strokeWidth={1.5} />
-          {place.neighbourhood ?? place.city}
+          {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
           <span className="mx-1">·</span>
           {categoryEmoji[place.category] ?? '📍'} {place.category}
         </p>
@@ -407,8 +429,10 @@ function extractNeighborhood(comps: any[], formattedAddress?: string): string {
   if (comps.length > 0) {
     const find = (...types: string[]) =>
       comps.find((c: any) => types.some(t => c.types?.includes(t)))?.longText ?? '';
-    const area = find('neighborhood') || find('sublocality_level_1') || find('sublocality');
-    const city = find('locality');
+    // sublocality_level_1 is most specific (e.g. "Soho", "Marylebone", "Polanco")
+    const area = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
+    // postal_town wins for UK ("London"), locality for everywhere else, admin_area_2 as last resort
+    const city = find('postal_town') || find('locality') || find('administrative_area_level_2');
     if (area && city) {
       if (area.includes(',')) return area; // already "Polanco, Mexico City" style
       if (area === city) return city;
@@ -468,23 +492,38 @@ function countDaysFromDateStr(dates: string): number {
   return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 }
 
-function PlanCard({ trip, onClick }: { trip: Trip; onClick: () => void }) {
-  const statusBadge: Record<Trip['status'], string> = {
-    dreaming: 'bg-white text-orange-400',
-    planning: 'bg-white text-orange-500',
-    upcoming: 'bg-white text-orange-500',
-    past: 'bg-gray-100 text-gray-500',
-  };
-  const statusLabel: Record<Trip['status'], string> = {
-    dreaming: '✨ Want to do / see',
-    planning: '📋 Planning it',
-    upcoming: '🗓 Coming up',
-    past: '✅ Done',
-  };
+function PlanCard({ trip, onClick, userId }: { trip: Trip; onClick: () => void; userId?: string }) {
+  const isOwner = !userId || !trip.ownerId || trip.ownerId === userId;
+  const isShared = userId && trip.ownerId && trip.ownerId !== userId;
   return (
     <button onClick={onClick} className="w-full relative h-24 rounded-2xl overflow-hidden text-left">
       <img src={trip.coverImage} alt={trip.destination} className="w-full h-full object-cover" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
+
+      {/* Owner view: show collaborator avatars + "sharing" */}
+      {isOwner && (trip.collaborators ?? []).filter(c => !c.pending).length > 0 && (
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full pl-1 pr-2.5 py-1">
+          <div className="flex -space-x-1.5">
+            {(trip.collaborators ?? []).filter(c => !c.pending).slice(0, 3).map((c, i) => (
+              c.avatar
+                ? <img key={c.id} src={c.avatar} alt={c.name} className="w-4 h-4 rounded-full object-cover ring-1 ring-black/30" style={{ zIndex: i }} />
+                : <div key={c.id} className="w-4 h-4 rounded-full bg-gray-400 flex items-center justify-center text-[7px] font-bold text-white ring-1 ring-black/30" style={{ zIndex: i }}>{(c.name?.[0] ?? '?').toUpperCase()}</div>
+            ))}
+          </div>
+          <span className="text-[10px] text-white/90 font-semibold">sharing</span>
+        </div>
+      )}
+
+      {/* Collaborator view: show owner avatar + "shared by" */}
+      {isShared && (
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full pl-1 pr-2.5 py-1">
+          {trip.ownerAvatar
+            ? <img src={trip.ownerAvatar} alt={trip.ownerName ?? ''} className="w-4 h-4 rounded-full object-cover ring-1 ring-black/30" />
+            : <div className="w-4 h-4 rounded-full bg-gray-400 flex items-center justify-center text-[7px] font-bold text-white ring-1 ring-black/30">{(trip.ownerName?.[0] ?? '?').toUpperCase()}</div>
+          }
+          <span className="text-[10px] text-white/90 font-semibold">shared by {trip.ownerName ?? 'someone'}</span>
+        </div>
+      )}
 
       <div className="absolute bottom-2.5 left-3 right-3">
         <p className="text-sm font-black text-white">{trip.destination}</p>
@@ -652,15 +691,18 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [coverCropTarget, setCoverCropTarget] = useState<'edit' | null>(null);
   const [coverCropSaving, setCoverCropSaving] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [deleteDayConfirm, setDeleteDayConfirm] = useState<{ id: string; label: string } | null>(null);
   const [inviteInput, setInviteInput] = useState('');
   const [inviteSuggestions, setInviteSuggestions] = useState<FollowProfile[]>([]);
   const [inviteFollowList, setInviteFollowList] = useState<FollowProfile[]>([]);
   const [inviteCollabs, setInviteCollabs] = useState<TripCollaborator[]>([]);
+  const [inviteOriginalIds, setInviteOriginalIds] = useState<Set<string>>(new Set());
   const [showAddPlace, setShowAddPlace] = useState(false);
   const [addPlaceDayId, setAddPlaceDayId] = useState<string | null>(null);
   const [addPlaceSearch, setAddPlaceSearch] = useState('');
   const [addPlaceSuggestions, setAddPlaceSuggestions] = useState<{ placeId: string; text: string }[]>([]);
   const [addPlaceSearching, setAddPlaceSearching] = useState(false);
+  const [addPlaceFetchingDetails, setAddPlaceFetchingDetails] = useState(false);
   const [addPlaceSaving, setAddPlaceSaving] = useState(false);
   const addPlaceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addPlaceSuggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -719,14 +761,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
 
   const googleTypesToCategory = (types: string[]): string => {
-    if (types.some(t => ['lodging', 'hotel', 'motel', 'resort_hotel'].includes(t))) return 'hotel';
-    if (types.some(t => ['restaurant', 'meal_takeaway', 'meal_delivery', 'food'].includes(t))) return 'restaurant';
-    if (types.some(t => ['cafe', 'bakery', 'coffee_shop'].includes(t))) return 'cafe';
-    if (types.some(t => ['bar', 'night_club'].includes(t))) return 'bar';
-    if (types.some(t => ['store', 'shopping_mall', 'clothing_store'].includes(t))) return 'shop';
-    if (types.some(t => ['park', 'natural_feature', 'campground'].includes(t))) return 'nature';
-    if (types.some(t => ['museum', 'art_gallery', 'tourist_attraction', 'landmark'].includes(t))) return 'attraction';
-    if (types.some(t => ['stadium', 'sports_complex', 'gym', 'fitness_center'].includes(t))) return 'sports';
+    const has = (...t: string[]) => types.some(x => t.includes(x));
+    if (has('lodging','hotel','motel','resort_hotel','hostel','bed_and_breakfast','extended_stay_hotel','guest_house','inn')) return 'hotel';
+    if (has('restaurant','american_restaurant','barbecue_restaurant','brazilian_restaurant','breakfast_restaurant','brunch_restaurant','buffet_restaurant','chinese_restaurant','french_restaurant','greek_restaurant','indian_restaurant','indonesian_restaurant','italian_restaurant','japanese_restaurant','korean_restaurant','lebanese_restaurant','mediterranean_restaurant','mexican_restaurant','middle_eastern_restaurant','pizza_restaurant','ramen_restaurant','seafood_restaurant','spanish_restaurant','steak_house','sushi_restaurant','thai_restaurant','turkish_restaurant','vegan_restaurant','vegetarian_restaurant','vietnamese_restaurant')) return 'restaurant';
+    if (has('cafe','coffee_shop','bakery','bagel_shop','tea_house','patisserie','dessert_shop','ice_cream_shop')) return 'cafe';
+    if (has('bar','night_club','wine_bar','cocktail_bar','sports_bar','pub','brewery','winery','distillery','karaoke')) return 'bar';
+    if (has('food_court','fast_food_restaurant','meal_takeaway','meal_delivery','sandwich_shop','hamburger_restaurant','supermarket','grocery_store','convenience_store','deli','food_delivery')) return 'food';
+    if (has('airport','train_station','bus_station','subway_station','transit_station','light_rail_station','ferry_terminal','taxi_stand','car_rental','bus_stop','airport_terminal')) return 'transport';
+    if (has('beach','marina','diving_center','water_park')) return 'beach';
+    if (has('park','national_park','natural_feature','campground','hiking_area','rv_park','forest','nature_reserve','botanical_garden','wildlife_sanctuary')) return 'nature';
+    if (has('stadium','sports_complex','gym','fitness_center','bowling_alley','golf_course','tennis_court','swimming_pool','ski_resort','rock_climbing_gym','cycling_studio','sports_club','athletic_field','race_track')) return 'sports';
+    if (has('spa','beauty_salon','hair_salon','hair_care','nail_salon','physiotherapist','massage','yoga_studio','sauna','wellness_center','massage_therapist')) return 'wellness';
+    if (has('store','shopping_mall','clothing_store','book_store','department_store','bicycle_store','electronics_store','furniture_store','home_goods_store','jewelry_store','shoe_store','pet_store','florist','gift_shop','market','liquor_store','toy_store','sporting_goods_store','pharmacy')) return 'shop';
+    if (has('route','street_address','intersection')) return 'street';
+    if (has('event_venue','banquet_hall','convention_center','conference_center','wedding_venue','concert_hall')) return 'event';
+    if (has('airline')) return 'flight';
+    if (has('museum','art_gallery','tourist_attraction','landmark','historical_landmark','cultural_landmark','monument','amusement_park','zoo','aquarium','movie_theater','performing_arts_theater','library','church','mosque','synagogue','hindu_temple','place_of_worship','embassy','city_hall','university','castle','ruins')) return 'attraction';
     return 'experience';
   };
 
@@ -775,7 +825,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         time_label: item.time ?? '', time_end: item.timeEnd ?? '',
         notes: item.notes ?? '', address: item.address ?? '', neighborhood: item.neighborhood ?? '',
         status: item.status ?? 'none', check_in: item.checkIn, check_out: item.checkOut,
-        position: day.items.length,
+        position: day.items.length, added_by: userId || undefined,
       });
       if (dbItem) {
         const newItem: TripItem = {
@@ -783,7 +833,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           address: dbItem.address, neighborhood: dbItem.neighborhood,
           time: dbItem.timeLabel, timeEnd: dbItem.timeEnd, notes: dbItem.notes,
           status: dbItem.status as TripItem['status'], checkIn: dbItem.checkIn, checkOut: dbItem.checkOut,
-          booked: dbItem.booked,
+          booked: dbItem.booked, addedBy: userId || null, addedByName: null, addedByAvatar: null,
         };
         updatedDays = updatedDays.map(d => d.id === day.id ? { ...d, items: [...d.items, newItem] } : d);
       }
@@ -794,12 +844,19 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const getTripDayLabel = (trip: Trip, dayIndex: number): string => {
     if (trip.dates) {
       const startStr = trip.dates.split('–')[0].trim();
-      const year = new Date().getFullYear();
-      const start = new Date(`${startStr} ${year}`);
-      if (!isNaN(start.getTime())) {
+      // Parse year from dates string if present, otherwise use trip year or current year
+      const yearMatch = trip.dates.match(/\b(20\d{2})\b/);
+      const year = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
+      // Parse as UTC to avoid timezone offset shifting the date
+      const months: Record<string, number> = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+      const parts = startStr.split(' ').filter(Boolean);
+      const monthNum = months[parts[0]];
+      const dayNum = parseInt(parts[1]);
+      if (monthNum !== undefined && !isNaN(dayNum)) {
+        const start = new Date(Date.UTC(year, monthNum, dayNum));
         const date = new Date(start);
-        date.setDate(start.getDate() + dayIndex);
-        const fmt = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        date.setUTCDate(start.getUTCDate() + dayIndex);
+        const fmt = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
         return `Day ${dayIndex + 1} · ${fmt}`;
       }
     }
@@ -935,6 +992,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     setAddPlaceAddress('');
     setAddPlaceNeighborhood('');
     setAddPlaceMapsNote('');
+    setAddPlaceFetchingDetails(false);
     setShowAddPlace(true);
   };
 
@@ -948,10 +1006,38 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       let imageUrl = (addPlaceCustomImage && !addPlaceCustomImage.startsWith('blob:')) ? addPlaceCustomImage : '';
       let address = locationStr;
       let neighborhood = neighborhoodHint;
+      console.log('[handleSelectPlace] in:', { placeId, text, locationStr, neighborhoodHint });
 
-      if (placeId) {
+      // If we have a placeId, fetch details directly; otherwise do a text search by name
+      let resolvedPlaceId = placeId;
+      if (!resolvedPlaceId && name) {
         try {
-          const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+          const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+              'X-Goog-FieldMask': 'places.id,places.photos,places.types,places.displayName,places.formattedAddress,places.addressComponents',
+            },
+            body: JSON.stringify({ textQuery: address ? `${name} ${address}` : name }),
+          });
+          const searchData = await searchRes.json();
+          const found = searchData.places?.[0];
+          if (found) {
+            resolvedPlaceId = found.id ?? '';
+            if (!categoryOverride && found.types) category = googleTypesToCategory(found.types);
+            const photoName = found.photos?.[0]?.name;
+            if (!imageUrl && photoName) imageUrl = `https://places.googleapis.com/v1/${photoName}/media?key=${GOOGLE_PLACES_KEY}&maxWidthPx=400`;
+            if (found.formattedAddress && !address) address = found.formattedAddress;
+            const area = extractNeighborhood(found.addressComponents ?? [], found.formattedAddress ?? '');
+            if (area && !neighborhood) neighborhood = area;
+          }
+        } catch { /* silent */ }
+      }
+
+      if (resolvedPlaceId) {
+        try {
+          const res = await fetch(`https://places.googleapis.com/v1/places/${resolvedPlaceId}`, {
             headers: {
               'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
               'X-Goog-FieldMask': 'displayName,types,photos,formattedAddress,addressComponents',
@@ -963,9 +1049,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           if (!categoryOverride && place.types) category = googleTypesToCategory(place.types);
           const photoName = place.photos?.[0]?.name;
           if (!imageUrl && photoName) imageUrl = `https://places.googleapis.com/v1/${photoName}/media?key=${GOOGLE_PLACES_KEY}&maxWidthPx=400`;
-          if (place.formattedAddress) address = place.formattedAddress;
+          if (place.formattedAddress && !address) address = place.formattedAddress;
           const area = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
-          if (area) neighborhood = area;
+          if (area && !neighborhood) neighborhood = area;
         } catch { /* use fallback name/category already set */ }
       }
 
@@ -993,6 +1079,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       const position = day.items.length;
 
       const finalImage = imageUrl; // imageUrl already prefers addPlaceCustomImage (set at top of function)
+      console.log('[handleSelectPlace] before save — address:', address, '| imageUrl:', finalImage?.slice(0, 60));
       let newItem: TripItem;
       if (userId && day.id) {
         const dbItem = await createPlanItem(selectedTrip.id, day.id, {
@@ -1002,7 +1089,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           status: addPlaceStatus !== 'none' ? addPlaceStatus : undefined,
           check_in: addPlaceCheckIn || undefined,
           check_out: addPlaceCheckOut || undefined,
-          position,
+          position, added_by: userId || undefined,
         });
         if (!dbItem) return;
         newItem = { id: dbItem.id, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined };
@@ -1109,9 +1196,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             checkIn: i.checkIn || undefined,
             checkOut: i.checkOut || undefined,
             booked: i.booked,
+            addedBy: i.addedBy ?? null,
+            addedByName: i.addedByName ?? null,
+            addedByAvatar: i.addedByAvatar ?? null,
           })),
         })),
-        collaborators: p.collaborators.map(c => ({ id: c.id, name: c.name, avatar: c.avatar })),
+        ownerId: p.userId,
+        ownerName: p.ownerName ?? null,
+        ownerAvatar: p.ownerAvatar ?? null,
+        collaborators: p.collaborators.map(c => ({ id: c.id, name: c.name, avatar: c.avatar, pending: c.pending })),
       }));
       setPlans(converted);
       setPlansLoading(false);
@@ -1433,31 +1526,101 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         </div>
 
         {/* Collaborators strip */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+        {(() => {
+          const isOwner = !selectedTrip.ownerId || selectedTrip.ownerId === userId;
+          // Collaborators excluding the current user (they're shown as "You")
+          const othersInTrip = collabs.filter(c => c.id !== userId);
+          const confirmedOthers = othersInTrip.filter(c => !c.pending);
+          const pendingOthers = othersInTrip.filter(c => c.pending);
+
+          return (
+          <div className="flex items-center gap-3 px-4 pt-3 pb-2">
           <div className="flex -space-x-2">
-            {/* You (always first) */}
-            {userAvatar ? (
-              <img src={userAvatar} alt="You" className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0 z-10" />
+            {isOwner ? (
+              /* Owner view: You first, then collaborators */
+              <>
+                {userAvatar ? (
+                  <img src={userAvatar} alt="You" className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0 z-10" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center flex-shrink-0 z-10">
+                    <span className="text-white text-xs font-bold">You</span>
+                  </div>
+                )}
+                {othersInTrip.map((c, i) => (
+                  <div key={c.id} className="relative flex-shrink-0" style={{ zIndex: 9 - i }}>
+                    {c.avatar
+                      ? <img src={c.avatar} alt={c.name} className={`w-8 h-8 rounded-full object-cover border-2 border-white ${c.pending ? 'opacity-50' : ''}`} />
+                      : <div className={`w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center text-xs font-bold text-white ${c.pending ? 'opacity-50' : ''}`}>{c.name[0]?.toUpperCase()}</div>
+                    }
+                    {c.pending && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white flex items-center justify-center">
+                        <div className="w-2.5 h-2.5 rounded-full border border-gray-400 border-dashed" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
             ) : (
-              <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center flex-shrink-0 z-10">
-                <span className="text-white text-xs font-bold">You</span>
-              </div>
+              /* Collaborator view: owner first, then You */
+              <>
+                {selectedTrip.ownerAvatar ? (
+                  <img src={selectedTrip.ownerAvatar} alt={selectedTrip.ownerName ?? 'Owner'} className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0 z-10" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center flex-shrink-0 z-10">
+                    <span className="text-white text-xs font-bold">{selectedTrip.ownerName?.[0]?.toUpperCase() ?? '?'}</span>
+                  </div>
+                )}
+                {userAvatar ? (
+                  <img src={userAvatar} alt="You" className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0" style={{ zIndex: 8 }} />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center flex-shrink-0" style={{ zIndex: 8 }}>
+                    <span className="text-white text-xs font-bold">You</span>
+                  </div>
+                )}
+                {othersInTrip.map((c, i) => (
+                  <div key={c.id} className="relative flex-shrink-0" style={{ zIndex: 7 - i }}>
+                    {c.avatar
+                      ? <img src={c.avatar} alt={c.name} className={`w-8 h-8 rounded-full object-cover border-2 border-white ${c.pending ? 'opacity-50' : ''}`} />
+                      : <div className={`w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center text-xs font-bold text-white ${c.pending ? 'opacity-50' : ''}`}>{c.name[0]?.toUpperCase()}</div>
+                    }
+                    {c.pending && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white flex items-center justify-center">
+                        <div className="w-2.5 h-2.5 rounded-full border border-gray-400 border-dashed" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
             )}
-            {collabs.map((c, i) => (
-              c.avatar
-                ? <img key={c.id} src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0" style={{ zIndex: 9 - i }} />
-                : <div key={c.id} className="w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center text-xs font-bold text-white flex-shrink-0" style={{ zIndex: 9 - i }}>{c.name[0]?.toUpperCase()}</div>
-            ))}
           </div>
           <div className="flex-1 min-w-0">
-            {collabs.length === 0
-              ? <p className="text-xs text-gray-400">Just you on this plan</p>
-              : <p className="text-xs text-gray-600 font-medium">You + {collabs.map(c => c.name.split(' ')[0]).join(', ')}</p>
-            }
+            {isOwner ? (
+              othersInTrip.length === 0 ? (
+                <p className="text-xs text-gray-400">Just you on this plan</p>
+              ) : (
+                <div>
+                  {confirmedOthers.length > 0 && (
+                    <p className="text-xs text-gray-600 font-medium">You + {confirmedOthers.map(c => c.name.split(' ')[0]).join(', ')}</p>
+                  )}
+                  {pendingOthers.length > 0 && (
+                    <p className="text-xs text-gray-400">{pendingOthers.map(c => c.name.split(' ')[0]).join(', ')} invited</p>
+                  )}
+                </div>
+              )
+            ) : (
+              <div>
+                <p className="text-xs text-gray-600 font-medium">{selectedTrip.ownerName?.split(' ')[0] ?? 'Owner'} + You{confirmedOthers.length > 0 ? `, ${confirmedOthers.map(c => c.name.split(' ')[0]).join(', ')}` : ''}</p>
+                {pendingOthers.length > 0 && (
+                  <p className="text-xs text-gray-400">{pendingOthers.map(c => c.name.split(' ')[0]).join(', ')} invited</p>
+                )}
+              </div>
+            )}
           </div>
           <button
             onClick={async () => {
-              setInviteCollabs(selectedTrip.collaborators ?? []);
+              const existing = selectedTrip.collaborators ?? [];
+              setInviteCollabs(existing);
+              setInviteOriginalIds(new Set(existing.map(c => c.id)));
               setInviteInput('');
               setShowInvite(true);
               if (userId) {
@@ -1471,7 +1634,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           >
             <UserPlus size={12} strokeWidth={2} /> Invite
           </button>
-        </div>
+          {userId && selectedTrip.ownerId && selectedTrip.ownerId !== userId && (
+            <button
+              onClick={async () => {
+                if (!confirm('Leave this trip?')) return;
+                await leavePlan(selectedTrip.id, userId);
+                setPlans(prev => prev.filter(p => p.id !== selectedTrip.id));
+                setSelectedTrip(null);
+              }}
+              className="text-xs font-semibold text-red-500 bg-red-50 px-3 py-1.5 rounded-full flex-shrink-0"
+            >
+              Leave
+            </button>
+          )}
+          </div>
+          );
+        })()}
 
 
 
@@ -1542,38 +1720,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
                     {day.id && (
-                      <button onClick={async () => {
-                        if (!selectedTrip) return;
-                        if (!window.confirm(`Delete ${day.label} and all its places?`)) return;
-                        if (userId) await deletePlanDay(day.id!);
-
-                        // Renumber remaining days sequentially (Day 1, Day 2, …)
-                        const remaining = selectedTrip.days.filter(d => d.id !== day.id);
-                        const renumbered = remaining.map((d, idx) => {
-                          const newLabel = d.label.replace(/^Day \d+/, `Day ${idx + 1}`);
-                          return { ...d, label: newLabel };
-                        });
-                        // Persist renumbered labels and positions to DB
-                        if (userId) {
-                          await Promise.all(renumbered.map((d, idx) =>
-                            d.id ? updatePlanDay(d.id, { label: d.label, position: idx }) : Promise.resolve()
-                          ));
-                        }
-
-                        // Derive new trip date range from first/last remaining day labels
-                        let newDates = selectedTrip.dates;
-                        const dateRx = /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun\s+)?([A-Z][a-z]{2}\s+\d{1,2})/;
-                        const firstDate = renumbered[0]?.label.match(dateRx)?.[1];
-                        const lastDate = renumbered[renumbered.length - 1]?.label.match(dateRx)?.[1];
-                        if (firstDate && lastDate) {
-                          newDates = firstDate === lastDate ? firstDate : `${firstDate} – ${lastDate}`;
-                          if (userId) await dbUpdatePlan(selectedTrip.id, { dates: newDates });
-                        }
-
-                        const updated = { ...selectedTrip, days: renumbered, dates: newDates };
-                        setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
-                        setSelectedTrip(updated);
-                      }} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                      <button onClick={() => setDeleteDayConfirm({ id: day.id!, label: day.label })}
+                        className="text-gray-300 hover:text-red-400 transition-colors p-1">
                         <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
                       </button>
                     )}
@@ -1584,7 +1732,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         <div className="flex items-start gap-3">
                           <ItemThumb image={item.image} name={item.name} category={item.category} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</p>
+                            <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name.split(',')[0].trim()}</p>
                             <p className="text-xs text-gray-400 mt-0.5 truncate">
                               {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
                               {item.neighborhood ? ` · ${item.neighborhood}` : ''}
@@ -1607,6 +1755,17 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                             {item.status === 'pending' && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
                           </div>
                         </div>
+                        {(selectedTrip.collaborators?.length ?? 0) > 0 && item.addedBy && (
+                          <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-100">
+                            {item.addedByAvatar
+                              ? <img src={item.addedByAvatar} alt="" className="w-4 h-4 rounded-full object-cover" />
+                              : <div className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center text-[8px] font-bold text-white">{(item.addedByName ?? '?')[0].toUpperCase()}</div>
+                            }
+                            <span className="text-[10px] text-gray-400">
+                              {item.addedBy === userId ? 'You' : (item.addedByName ?? 'Someone')} added this
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ))}
                     {day.items.length === 0 && (
@@ -1627,6 +1786,60 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           )}
         </div>
         </> /* end TRIP view */
+        )}
+
+        {/* ── Delete Day Confirmation Sheet ── */}
+        {deleteDayConfirm && selectedTrip && (
+          <div className="fixed inset-0 z-[250] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setDeleteDayConfirm(null)} />
+            <div className="relative bg-white rounded-t-3xl pb-8 px-5">
+              <div className="flex justify-center pt-3 pb-5">
+                <div className="w-10 h-1 rounded-full bg-gray-200" />
+              </div>
+              <div className="flex flex-col items-center text-center mb-6">
+                <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mb-3">
+                  <svg width="20" height="20" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="#ef4444" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </div>
+                <p className="text-base font-bold text-gray-900 mb-1">Delete {deleteDayConfirm.label}?</p>
+                <p className="text-sm text-gray-400">All places added to this day will be permanently removed.</p>
+              </div>
+              <button
+                onClick={async () => {
+                  const dayId = deleteDayConfirm.id;
+                  const dayLabel = deleteDayConfirm.label;
+                  setDeleteDayConfirm(null);
+                  if (userId) await deletePlanDay(dayId);
+                  const remaining = selectedTrip.days.filter(d => d.id !== dayId);
+                  const renumbered = remaining.map((d, idx) => {
+                    const newLabel = getTripDayLabel(selectedTrip, idx);
+                    return { ...d, label: newLabel };
+                  });
+                  if (userId) {
+                    await Promise.all(renumbered.map((d, idx) =>
+                      d.id ? updatePlanDay(d.id, { label: d.label, position: idx }) : Promise.resolve()
+                    ));
+                  }
+                  let newDates = selectedTrip.dates;
+                  const dateRx = /([A-Z][a-z]{2}\s+\d{1,2})/;
+                  const firstDate = renumbered[0]?.label.match(dateRx)?.[1];
+                  const lastDate = renumbered[renumbered.length - 1]?.label.match(dateRx)?.[1];
+                  if (firstDate && lastDate) {
+                    newDates = firstDate === lastDate ? firstDate : `${firstDate} – ${lastDate}`;
+                    if (userId) await dbUpdatePlan(selectedTrip.id, { dates: newDates });
+                  }
+                  const updated = { ...selectedTrip, days: renumbered, dates: newDates };
+                  setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                  setSelectedTrip(updated);
+                }}
+                className="w-full py-3.5 bg-red-500 text-white rounded-2xl text-sm font-bold mb-3"
+              >
+                Delete day
+              </button>
+              <button onClick={() => setDeleteDayConfirm(null)} className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold">
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
 
         {/* ── Shared sheets (shown for both events and trips) ── */}
@@ -1801,21 +2014,28 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               <button onClick={() => setShowInvite(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                 <X size={15} strokeWidth={2} className="text-gray-500" />
               </button>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Invite to plan</p>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">People on this plan</p>
               {inviteCollabs.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
-                  {inviteCollabs.map(c => (
-                    <span key={c.id} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5">
-                      {c.avatar
-                        ? <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" />
-                        : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center text-[9px] font-bold text-gray-600">{c.name[0]?.toUpperCase()}</div>
-                      }
-                      <span className="text-xs text-gray-600 font-medium">{c.name.split(' ')[0]}</span>
-                      <button onClick={() => setInviteCollabs(prev => prev.filter(x => x.id !== c.id))}>
-                        <X size={10} strokeWidth={2} className="text-gray-400" />
-                      </button>
-                    </span>
-                  ))}
+                  {inviteCollabs.map(c => {
+                    const isExisting = inviteOriginalIds.has(c.id);
+                    return (
+                      <span key={c.id} className={`flex items-center gap-1.5 rounded-full pl-1 pr-2 py-0.5 ${isExisting ? 'bg-gray-900' : 'bg-gray-100'}`}>
+                        {c.avatar
+                          ? <img src={c.avatar} alt={c.name} className="w-5 h-5 rounded-full object-cover" />
+                          : <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${isExisting ? 'bg-gray-700 text-white' : 'bg-gray-300 text-gray-600'}`}>{c.name[0]?.toUpperCase()}</div>
+                        }
+                        <span className={`text-xs font-medium ${isExisting ? 'text-white' : 'text-gray-600'}`}>{c.name.split(' ')[0]}</span>
+                        <button onClick={() => {
+                          setInviteCollabs(prev => prev.filter(x => x.id !== c.id));
+                          const restored = inviteFollowList.find(f => f.id === c.id);
+                          if (restored) setInviteSuggestions(prev => [...prev, restored].slice(0, 4));
+                        }}>
+                          <X size={10} strokeWidth={2} className={isExisting ? 'text-gray-400' : 'text-gray-400'} />
+                        </button>
+                      </span>
+                    );
+                  })}
                 </div>
               )}
               <div className="relative">
@@ -1849,7 +2069,10 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 </div>
                 {inviteSuggestions.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                    {inviteSuggestions.slice(0, 6).map(s => (
+                    {!inviteInput.trim() && (
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-4 pt-3 pb-1">Suggestions</p>
+                    )}
+                    {inviteSuggestions.slice(0, inviteInput.trim() ? 6 : 4).map(s => (
                       <button
                         key={s.id}
                         onClick={() => {
@@ -1872,27 +2095,34 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   </div>
                 )}
               </div>
-              {inviteCollabs.length > 0 && (
-                <button
-                  onClick={async () => {
-                    const updated: Trip = { ...selectedTrip, collaborators: inviteCollabs };
-                    if (userId) {
-                      // Persist the full collaborator list to plan_collaborators table
-                      await syncPlanCollaborators(
-                        selectedTrip.id,
-                        inviteCollabs.map(c => c.id),
-                        userId
-                      );
-                    }
-                    setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
-                    setSelectedTrip(updated);
-                    setShowInvite(false);
-                  }}
-                  className="w-full mt-4 py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold"
-                >
-                  Save collaborators
-                </button>
-              )}
+              {(() => {
+                const currentIds = new Set(inviteCollabs.map(c => c.id));
+                const hasNewPeople = inviteCollabs.some(c => !inviteOriginalIds.has(c.id));
+                const hasRemovals = [...inviteOriginalIds].some(id => !currentIds.has(id));
+                const hasChanges = hasNewPeople || hasRemovals;
+                if (!hasChanges) return null;
+                const label = hasNewPeople && !hasRemovals ? 'Send invitation' : hasRemovals && !hasNewPeople ? 'Save changes' : 'Save & send invitation';
+                return (
+                  <button
+                    onClick={async () => {
+                      const withPending = inviteCollabs.map(c => ({
+                        ...c,
+                        pending: !inviteOriginalIds.has(c.id),
+                      }));
+                      const updated: Trip = { ...selectedTrip, collaborators: withPending };
+                      if (userId) {
+                        await syncPlanCollaborators(selectedTrip.id, inviteCollabs.map(c => c.id), userId);
+                      }
+                      setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                      setSelectedTrip(updated);
+                      setShowInvite(false);
+                    }}
+                    className="w-full mt-4 py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold"
+                  >
+                    {label}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -1970,7 +2200,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
                 {/* Address search */}
                 <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-400 mb-2">Address <span className="font-normal">(optional)</span></p>
+                  <p className="text-xs font-semibold text-gray-400 mb-2">Address</p>
                     <div>
                       <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
                         <Search size={14} className="text-gray-400 flex-shrink-0" />
@@ -2032,9 +2262,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                               onClick={async () => {
                                 setAddPlaceSelectedId(s.placeId);
                                 setAddPlaceSuggestions([]);
-                                // Show the full suggestion text in the address search field
                                 setAddPlaceSearch(s.text);
-                                // Fetch full details: clean display name, address, neighborhood
+                                setAddPlaceAddress(s.text); // immediate fallback — overridden by formattedAddress below
+                                setAddPlaceFetchingDetails(true);
                                 try {
                                   const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
                                     headers: {
@@ -2056,7 +2286,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                                   if (data.formattedAddress) setAddPlaceAddress(data.formattedAddress);
                                   const area = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
                                   if (area) setAddPlaceNeighborhood(area);
-                                  // Fetch photo immediately using the exact Place ID — no background guessing
                                   const photoName = data.photos?.[0]?.name;
                                   if (photoName && !addPlaceCustomImage) {
                                     setAddPlaceCustomImage(
@@ -2064,8 +2293,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                                     );
                                   }
                                 } catch {
-                                  // Fallback: use suggestion text as title
                                   if (!addPlaceSelectedName.trim()) setAddPlaceSelectedName(s.text);
+                                } finally {
+                                  setAddPlaceFetchingDetails(false);
                                 }
                               }}
                               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 text-left"
@@ -2077,6 +2307,17 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         </div>
                       )}
                     </div>
+                    {/* Confirmed address field — auto-filled by autocomplete, editable */}
+                    {addPlaceAddress && (
+                      <div className="mt-2 flex items-start gap-2 bg-green-50 rounded-xl px-3 py-2.5">
+                        <MapPin size={13} strokeWidth={1.5} className="text-green-500 flex-shrink-0 mt-0.5" />
+                        <input
+                          value={addPlaceAddress}
+                          onChange={e => setAddPlaceAddress(e.target.value)}
+                          className="flex-1 bg-transparent text-xs text-green-800 outline-none"
+                        />
+                      </div>
+                    )}
                 </div>
 
                 {/* Neighborhood */}
@@ -2124,21 +2365,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   <p className="text-xs font-semibold text-gray-400 mb-2">Type <span className="font-normal">(optional)</span></p>
                   <div className="flex gap-2 flex-wrap">
                     {[
-                      { key: 'restaurant', label: '🍽 Restaurant' },
-                      { key: 'hotel', label: '🏨 Stay' },
+                      { key: 'restaurant', label: '🍽️ Restaurant' },
                       { key: 'cafe', label: '☕ Café' },
                       { key: 'bar', label: '🍸 Bar' },
+                      { key: 'food', label: '🍕 Food' },
+                      { key: 'hotel', label: '🏨 Stay' },
                       { key: 'attraction', label: '🏛️ Attraction' },
                       { key: 'nature', label: '🌿 Nature' },
-                      { key: 'shop', label: '🛍 Shop' },
+                      { key: 'beach', label: '🏖️ Beach' },
+                      { key: 'shop', label: '🛍️ Shop' },
                       { key: 'experience', label: '🗺️ Experience' },
                       { key: 'sports', label: '🎾 Sports' },
+                      { key: 'wellness', label: '💆 Wellness' },
+                      { key: 'street', label: '🏙️ Street' },
+                      { key: 'event', label: '🎟️ Event' },
                       { key: 'flight', label: '✈️ Flight' },
                       { key: 'transport', label: '🚗 Transport' },
-                      { key: 'event', label: '🎟️ Event' },
-                      { key: 'beach', label: '🏖️ Beach' },
-                      { key: 'food', label: '🍕 Food' },
-                      { key: 'wellness', label: '💆 Wellness' },
                     ].map(cat => (
                       <button
                         key={cat.key}
@@ -2216,12 +2458,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   onClick={() => {
                     const id = addPlaceSelectedId;
                     const name = addPlaceSelectedName || addPlaceSearch.trim();
-                    if (name) handleSelectPlace(id, name, addPlaceTime, addPlaceTimeEnd, addPlaceNotes, addPlaceCategory, addPlaceAddress || addPlaceLocation, addPlaceNeighborhood);
+                    // Use addPlaceAddress first, fall back to addPlaceSearch (which is always set when autocomplete is used)
+                    const addressToSave = addPlaceAddress || addPlaceSearch.trim() || addPlaceLocation;
+                    console.log('[Save btn] name:', name, '| addPlaceAddress:', addPlaceAddress, '| addressToSave:', addressToSave);
+                    if (name) handleSelectPlace(id, name, addPlaceTime, addPlaceTimeEnd, addPlaceNotes, addPlaceCategory, addressToSave, addPlaceNeighborhood);
                   }}
-                  disabled={(!addPlaceSelectedId && !addPlaceSearch.trim()) || addPlaceSaving || addPlaceUploading}
+                  disabled={(!addPlaceSelectedId && !addPlaceSearch.trim()) || !( addPlaceAddress || addPlaceSearch.trim()) || addPlaceSaving || addPlaceUploading || addPlaceFetchingDetails}
                   className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
                 >
-                  {addPlaceUploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : 'Add to plan'}
+                  {addPlaceUploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : addPlaceFetchingDetails ? <><Loader2 size={14} className="animate-spin" /> Loading details…</> : 'Add to plan'}
                 </button>
               </div>
             </div>
@@ -2333,7 +2578,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                                 time_label: detailItem.time ?? '', time_end: detailItem.timeEnd ?? '',
                                 notes: detailItem.notes ?? '', address: detailItem.address ?? '', neighborhood: detailItem.neighborhood ?? '',
                                 status: detailItem.status ?? 'none', check_in: detailItem.checkIn, check_out: detailItem.checkOut,
-                                position: day.items.length,
+                                position: day.items.length, added_by: userId || undefined,
                               });
                               if (dbItem) {
                                 const newItem: TripItem = {
@@ -3166,7 +3411,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <div key={place.id} className="relative rounded-2xl overflow-hidden cursor-pointer">
                   <img src={place.photoUrl} alt={place.name} className="w-full aspect-square object-cover" />
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-2.5 pb-2.5 pt-6">
-                    <p className="text-white text-xs font-semibold leading-tight truncate">{place.name}</p>
+                    <p className="text-white text-xs font-semibold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
                     <p className="text-white/70 text-xs flex items-center gap-0.5 mt-0.5">
                       <MapPin size={9} strokeWidth={1.5} />{place.city}
                     </p>
@@ -3224,7 +3469,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   <div key={place.id} className="relative rounded-2xl overflow-hidden cursor-pointer">
                     <img src={place.image} alt={place.name} className="w-full aspect-square object-cover" />
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-2.5 pb-2.5 pt-6">
-                      <p className="text-white text-xs font-semibold leading-tight truncate">{place.name}</p>
+                      <p className="text-white text-xs font-semibold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
                       <p className="text-white/70 text-xs flex items-center gap-0.5 mt-0.5">
                         <MapPin size={9} strokeWidth={1.5} />{place.city}
                       </p>
@@ -3409,7 +3654,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 {plans.filter(t => t.status === 'dreaming').map(trip => (
                   trip.description?.startsWith('[event]')
                     ? <EventCard key={trip.id} trip={trip} onClick={() => { setSelectedEvent(trip); setShowEventSheet(true); }} />
-                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip);  }} />
+                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip);  }} userId={userId} />
                 ))}
               </div>
             </div>
@@ -3425,7 +3670,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   .map(trip => (
                   trip.description?.startsWith('[event]')
                     ? <EventCard key={trip.id} trip={trip} onClick={() => { setSelectedEvent(trip); setShowEventSheet(true); }} />
-                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip);  }} />
+                    : <PlanCard key={trip.id} trip={trip} onClick={() => { setSelectedTrip(trip);  }} userId={userId} />
                 ))}
               </div>
             </div>
@@ -3446,6 +3691,29 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       <p className="text-sm font-bold text-gray-700">{trip.destination}</p>
                       <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5"><CalendarDays size={10} strokeWidth={1.5} />{trip.dates}</p>
                       <p className="text-xs text-gray-400 mt-0.5">{countDaysFromDates(trip.dates)} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places</p>
+                      {/* Owner: show collaborator avatars */}
+                      {userId && trip.ownerId === userId && (trip.collaborators ?? []).filter(c => !c.pending).length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <div className="flex -space-x-1 opacity-50">
+                            {(trip.collaborators ?? []).filter(c => !c.pending).slice(0, 3).map((c, i) => (
+                              c.avatar
+                                ? <img key={c.id} src={c.avatar} alt={c.name} className="w-3.5 h-3.5 rounded-full object-cover ring-1 ring-white" style={{ zIndex: i }} />
+                                : <div key={c.id} className="w-3.5 h-3.5 rounded-full bg-gray-400 flex items-center justify-center text-[6px] font-bold text-white ring-1 ring-white" style={{ zIndex: i }}>{(c.name?.[0] ?? '?').toUpperCase()}</div>
+                            ))}
+                          </div>
+                          <span className="text-[10px] text-gray-400 font-normal">sharing with {(trip.collaborators ?? []).filter(c => !c.pending).length} {(trip.collaborators ?? []).filter(c => !c.pending).length === 1 ? 'person' : 'people'}</span>
+                        </div>
+                      )}
+                      {/* Collaborator: show owner avatar + "shared by" */}
+                      {userId && trip.ownerId && trip.ownerId !== userId && (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {trip.ownerAvatar
+                            ? <img src={trip.ownerAvatar} alt={trip.ownerName ?? ''} className="w-3.5 h-3.5 rounded-full object-cover opacity-50" />
+                            : <div className="w-3.5 h-3.5 rounded-full bg-gray-300 flex items-center justify-center text-[6px] font-bold text-white opacity-50">{(trip.ownerName?.[0] ?? '?').toUpperCase()}</div>
+                          }
+                          <span className="text-[10px] text-gray-400 font-normal">shared by {trip.ownerName ?? 'someone'}</span>
+                        </div>
+                      )}
                     </div>
                     <ChevronRight size={16} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
                   </button>
@@ -3582,7 +3850,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         <div className="flex items-center gap-3">
                           <ItemThumb image={item.image} name={item.name} category={item.category} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900 truncate">{item.name}</p>
+                            <p className="text-sm font-semibold text-gray-900 truncate">{item.name.split(',')[0].trim()}</p>
                             <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}{item.neighborhood ? ` · ${item.neighborhood}` : ''}</p>
                             {item.time && <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><Clock size={9} strokeWidth={1.5} />{item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}</p>}
                           </div>
@@ -3792,7 +4060,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
                 {/* Address search */}
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Address <span className="font-normal text-gray-400">(optional)</span></p>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Address</p>
                   <div className="relative">
                     <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
                       <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
@@ -4010,7 +4278,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   
                 }
               }}
-              disabled={!newPlanName.trim()}
+              disabled={!newPlanName.trim() || (newPlanType === 'event' && !newEventAddress.trim())}
               className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold disabled:opacity-30 transition-opacity"
             >
               Let's go

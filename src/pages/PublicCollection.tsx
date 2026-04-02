@@ -127,7 +127,7 @@ export default function PublicCollection({ collectionId, appUser, onBack, onSign
               <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
               <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
                 <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-                {[place.neighborhood, place.city].filter(Boolean).join(', ')}
+                {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
               </p>
               {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
             </div>

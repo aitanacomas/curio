@@ -12,6 +12,7 @@ interface FlatPlace {
   placeId: string;
   name: string;
   category: string;
+  neighborhood?: string;
   city: string;
   country: string;
   photoUrl: string;
@@ -21,15 +22,20 @@ interface FlatPlace {
 
 const categoryChips = [
   { id: 'all',        label: 'All',          emoji: '✨' },
-  { id: 'cafe',       label: 'Cafés',        emoji: '☕' },
-  { id: 'restaurant', label: 'Food & Drink', emoji: '🍽️' },
+  { id: 'restaurant', label: 'Restaurant',   emoji: '🍽️' },
+  { id: 'cafe',       label: 'Café',         emoji: '☕' },
+  { id: 'bar',        label: 'Bar',          emoji: '🍸' },
+  { id: 'food',       label: 'Food',         emoji: '🍕' },
   { id: 'hotel',      label: 'Stay',         emoji: '🏨' },
+  { id: 'attraction', label: 'Attraction',   emoji: '🏛️' },
   { id: 'nature',     label: 'Nature',       emoji: '🌿' },
-  { id: 'bar',        label: 'Nightlife',    emoji: '🌙' },
-  { id: 'shop',       label: 'Shopping',     emoji: '🛍️' },
-  { id: 'attraction', label: 'Art & Culture',emoji: '🎨' },
-  { id: 'experience', label: 'Experiences',  emoji: '🎭' },
-  { id: 'beach',      label: 'Beaches',      emoji: '🌊' },
+  { id: 'beach',      label: 'Beach',        emoji: '🏖️' },
+  { id: 'shop',       label: 'Shop',         emoji: '🛍️' },
+  { id: 'experience', label: 'Experience',   emoji: '🗺️' },
+  { id: 'sports',     label: 'Sports',       emoji: '🎾' },
+  { id: 'wellness',   label: 'Wellness',     emoji: '💆' },
+  { id: 'street',     label: 'Street',       emoji: '🏙️' },
+  { id: 'event',      label: 'Event',        emoji: '🎟️' },
 ];
 
 type FeedTab = 'For You' | 'Following';
@@ -60,6 +66,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
       placeId: pl.id,
       name: pl.name,
       category: pl.category.toLowerCase(),
+      neighborhood: pl.neighborhood,
       city: pl.city,
       country: pl.country,
       photoUrl: pl.photoUrl,
@@ -217,8 +224,8 @@ function PlaceCard({ place, onClick }: { place: FlatPlace; onClick: () => void }
 
       {/* Place info */}
       <div className="absolute bottom-0 left-0 right-0 p-2.5">
-        <p className="text-white text-xs font-bold leading-tight truncate">{place.name}</p>
-        <p className="text-white/70 text-[10px] truncate">{place.city}</p>
+        <p className="text-white text-xs font-bold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
+        <p className="text-white/70 text-[10px] truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
       </div>
 
       {/* Poster avatar */}
@@ -304,7 +311,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose }: {
                 )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
                 <div className="absolute bottom-0 left-0 right-0 p-4">
-                  <p className="text-white font-bold text-base leading-tight">{pl.name}</p>
+                  <p className="text-white font-bold text-base leading-tight">{pl.name.split(',')[0].trim()}</p>
                   <p className="text-white/70 text-sm">{pl.city}{pl.country ? `, ${pl.country}` : ''}</p>
                 </div>
               </div>
@@ -383,7 +390,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose }: {
                 >
                   <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors ${i === currentIndex ? 'bg-slate-900' : 'bg-slate-300'}`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">{pl.name}</p>
+                    <p className="text-sm font-semibold text-slate-900 truncate">{pl.name.split(',')[0].trim()}</p>
                     <p className="text-xs text-slate-400 truncate">{pl.city}{pl.country ? `, ${pl.country}` : ''}</p>
                   </div>
                   <span className="text-[10px] text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 capitalize flex-shrink-0">{pl.category}</span>

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Heart, MessageCircle, Send, MapPin, ArrowLeft, Bookmark, Map, X, Link, Copy, Mail, Check, Users, Plus } from 'lucide-react';
 import type { Tab } from '../types/index';
 import FindPeople from './FindPeople';
@@ -6,7 +6,7 @@ import { feedItems, users, places, collections } from '../data/mockData';
 import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
-import { getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, type RealPost, type RealCollection } from '../lib/supabase';
+import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getOrCreateConversation, getConversations, sendMessage, getMessages, type RealPost, type RealCollection, type Conversation, type Message } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -90,13 +90,14 @@ interface ShareTarget {
 
 interface Props {
   showMessages?: boolean;
+  messagesTargetUserId?: string;
   onMessagesClose?: () => void;
   isNewUser?: boolean;
   appUser?: AppUser;
   onNavigate?: (tab: Tab) => void;
 }
 
-export default function Home({ showMessages = false, onMessagesClose, isNewUser, appUser, onNavigate }: Props) {
+export default function Home({ showMessages = false, messagesTargetUserId, onMessagesClose, isNewUser, appUser, onNavigate }: Props) {
   const [feed, setFeed] = useState(feedItems);
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Set<string>>(new Set(['place-28', 'place-29', 'place-30', 'place-31', 'place-32']));
@@ -112,9 +113,14 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
   const [collectionSaves, setCollectionSaves] = useState<Record<string, Set<string>>>({});
   const [newListName, setNewListName] = useState('');
   const [showNewList, setShowNewList] = useState(false);
-  const [activeChat, setActiveChat] = useState<string | null>(null);
-  const [dmText, setDmText] = useState('');
-  const [dmThreads, setDmThreads] = useState(mockDMs);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loadingConversations, setLoadingConversations] = useState(false);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationUser, setActiveConversationUser] = useState<{ id: string; name: string; username: string; avatarUrl: string | null } | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showAllComments, setShowAllComments] = useState(false);
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
   const [realPosts, setRealPosts] = useState<RealPost[]>([]);
@@ -128,7 +134,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
   const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
 
-  // Fetch real posts from Supabase on mount
+  // Fetch real posts from Supabase on mount + re-fetch when any post is updated
   useEffect(() => {
     getFeedPosts().then(posts => {
       setRealPosts(posts);
@@ -136,6 +142,16 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
         getPostLikeCounts(posts.map(p => p.id)).then(setRealPostLikeCounts);
       }
     });
+    const channel = supabase
+      .channel('feed-post-updates')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, () => {
+        getFeedPosts().then(posts => {
+          setRealPosts(posts);
+          if (posts.length > 0) getPostLikeCounts(posts.map(p => p.id)).then(setRealPostLikeCounts);
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   useEffect(() => {
@@ -159,6 +175,51 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
       document.removeEventListener('touchmove', prevent);
     };
   }, [saveTarget]);
+
+  // Load conversations when inbox opens
+  useEffect(() => {
+    if (!showInbox || !appUser?.id || appUser.isDemo) return;
+    setLoadingConversations(true);
+    getConversations(appUser.id).then(convs => {
+      setConversations(convs);
+      setLoadingConversations(false);
+    });
+  }, [showInbox, appUser?.id]);
+
+  // Auto-open conversation with a specific user when messagesTargetUserId is set
+  useEffect(() => {
+    if (!messagesTargetUserId || !appUser?.id || appUser.isDemo) return;
+    setShowInbox(true);
+    getOrCreateConversation(appUser.id, messagesTargetUserId).then(async convId => {
+      if (!convId) return;
+      // Get other user profile
+      const { data: prof } = await supabase.from('profiles').select('id, name, username, avatar_url').eq('id', messagesTargetUserId).single();
+      setActiveConversationUser(prof ? { id: prof.id, name: prof.name ?? '', username: prof.username ?? '', avatarUrl: prof.avatar_url ?? null } : null);
+      setActiveConversationId(convId);
+    });
+  }, [messagesTargetUserId, appUser?.id]);
+
+  // Load messages + real-time subscription when a conversation is opened
+  useEffect(() => {
+    if (!activeConversationId) return;
+    setLoadingMessages(true);
+    getMessages(activeConversationId).then(msgs => {
+      setMessages(msgs);
+      setLoadingMessages(false);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    });
+    const channel = supabase
+      .channel(`messages:${activeConversationId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversationId}` }, (payload) => {
+        const m = payload.new as any;
+        if (m.sender_id !== appUser?.id) {
+          setMessages(prev => [...prev, { id: m.id, conversationId: m.conversation_id, senderId: m.sender_id, text: m.text, createdAt: m.created_at }]);
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeConversationId]);
 
   const toggleLike = (id: string) => {
     setFeed(prev => prev.map(item =>
@@ -238,59 +299,73 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
     setNewListName('');
   };
 
-  const sendDM = () => {
-    if (!activeChat || !dmText.trim()) return;
-    setDmThreads(prev => ({
-      ...prev,
-      [activeChat]: [...(prev[activeChat] ?? []), { from: 'user-1', text: dmText.trim(), time: 'now', mine: true }],
-    }));
-    setDmText('');
+  const handleSendMessage = async () => {
+    if (!activeConversationId || !messageText.trim() || !appUser?.id) return;
+    const text = messageText.trim();
+    setMessageText('');
+    const sent = await sendMessage(activeConversationId, appUser.id, text);
+    if (sent) {
+      setMessages(prev => [...prev, sent]);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+      setConversations(prev => prev.map(c => c.id === activeConversationId ? { ...c, lastMessage: { text, senderId: appUser.id, createdAt: sent.createdAt }, unread: false } : c));
+    }
   };
 
   // ── Chat View ────────────────────────────────────────────────────
-  if (showInbox && activeChat) {
-    const chatUser = users.find(u => u.id === activeChat)!;
-    const messages = dmThreads[activeChat] ?? [];
+  if (showInbox && activeConversationId) {
+    const chatUser = activeConversationUser;
+    const initials = (chatUser?.name ?? '').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
     return (
       <div className="bg-white min-h-screen flex flex-col">
         <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
-          <button onClick={() => setActiveChat(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+          <button onClick={() => { setActiveConversationId(null); setActiveConversationUser(null); setMessages([]); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
             <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
           </button>
-          <img src={chatUser.avatar} alt={chatUser.name} className="w-8 h-8 rounded-full object-cover object-top" />
+          {chatUser?.avatarUrl
+            ? <img src={chatUser.avatarUrl} alt={chatUser.name} className="w-8 h-8 rounded-full object-cover object-top" />
+            : <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500">{initials || '?'}</div>}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">{chatUser.name}</p>
-            <p className="text-xs text-gray-400">@{chatUser.username}</p>
+            <p className="text-sm font-semibold text-gray-900">{chatUser?.name}</p>
+            <p className="text-xs text-gray-400">@{chatUser?.username}</p>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-          {messages.map((msg, i) => {
-            const sender = users.find(u => u.id === msg.from);
+          {loadingMessages && <p className="text-center text-xs text-gray-400 py-8">Loading…</p>}
+          {!loadingMessages && messages.length === 0 && (
+            <p className="text-center text-xs text-gray-400 py-12">No messages yet — say hello!</p>
+          )}
+          {messages.map((msg) => {
+            const isMine = msg.senderId === appUser?.id;
             return (
-              <div key={i} className={`flex items-end gap-2 ${msg.mine ? 'flex-row-reverse' : ''}`}>
-                {!msg.mine && <img src={sender?.avatar} alt="" className="w-7 h-7 rounded-full object-cover object-top flex-shrink-0 mb-0.5" />}
-                <div className={`max-w-[72%] px-4 py-2.5 rounded-2xl text-sm leading-snug ${msg.mine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
+              <div key={msg.id} className={`flex items-end gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
+                {!isMine && (
+                  chatUser?.avatarUrl
+                    ? <img src={chatUser.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0 mb-0.5" />
+                    : <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 flex-shrink-0 mb-0.5">{initials || '?'}</div>
+                )}
+                <div className={`max-w-[72%] px-4 py-2.5 rounded-2xl text-sm leading-snug ${isMine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
                   {msg.text}
                 </div>
-                <span className="text-[10px] text-gray-300 flex-shrink-0">{msg.time}</span>
               </div>
             );
           })}
+          <div ref={messagesEndRef} />
         </div>
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-3 flex items-center gap-2">
           <input
-            value={dmText}
-            onChange={e => setDmText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendDM()}
-            placeholder="Message..."
+            value={messageText}
+            onChange={e => setMessageText(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+            placeholder="Message…"
             className="flex-1 bg-gray-100 rounded-full px-4 py-2.5 text-sm outline-none text-gray-900 placeholder-gray-400"
+            autoFocus
           />
           <button
-            onClick={sendDM}
-            disabled={!dmText.trim()}
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${dmText.trim() ? 'bg-gray-900' : 'bg-gray-200'}`}
+            onClick={handleSendMessage}
+            disabled={!messageText.trim()}
+            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${messageText.trim() ? 'bg-gray-900' : 'bg-gray-200'}`}
           >
-            <Send size={15} strokeWidth={1.5} className={dmText.trim() ? 'text-white' : 'text-gray-400'} />
+            <Send size={15} strokeWidth={1.5} className={messageText.trim() ? 'text-white' : 'text-gray-400'} />
           </button>
         </div>
       </div>
@@ -303,6 +378,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
       <FindPeople
         currentUserId={appUser?.id ?? ''}
         onBack={() => setShowFindPeople(false)}
+        onOpenMessages={() => setShowInbox(true)}
       />
     );
   }
@@ -317,35 +393,56 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
           </button>
           <h2 className="text-base font-bold text-gray-900 flex-1">Messages</h2>
         </div>
-        <div className="divide-y divide-gray-50">
-          {isNewUser ? (
-            <div className="flex flex-col items-center justify-center py-24 px-8 text-center">
-              <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-                <Send size={22} strokeWidth={1.5} className="text-gray-400" />
+        {loadingConversations && (
+          <div className="space-y-0 divide-y divide-gray-50">
+            {[0,1,2].map(i => (
+              <div key={i} className="flex items-center gap-3 px-4 py-3.5 animate-pulse">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex-shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3 bg-gray-100 rounded w-28" />
+                  <div className="h-2.5 bg-gray-100 rounded w-40" />
+                </div>
               </div>
-              <p className="text-sm font-semibold text-gray-900 mb-1">No messages yet</p>
-              <p className="text-xs text-gray-400 leading-relaxed">Follow people to start conversations and share places you love.</p>
+            ))}
+          </div>
+        )}
+        {!loadingConversations && conversations.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 px-8 text-center">
+            <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+              <Send size={22} strokeWidth={1.5} className="text-gray-400" />
             </div>
-          ) : (
-            friends.map(friend => {
-              const thread = dmThreads[friend.id] ?? [];
-              const last = thread[thread.length - 1];
-              return (
-                <button
-                  key={friend.id}
-                  onClick={() => setActiveChat(friend.id)}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 text-left"
-                >
-                  <img src={friend.avatar} alt={friend.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" style={{ objectPosition: friend.avatarPosition ?? 'top' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">{friend.name}</p>
-                    <p className="text-xs text-gray-400 truncate mt-0.5">{last ? last.text : 'No messages yet'}</p>
+            <p className="text-sm font-semibold text-gray-900 mb-1">No messages yet</p>
+            <p className="text-xs text-gray-400 leading-relaxed">Tap the chat icon on someone's profile to start a conversation.</p>
+          </div>
+        )}
+        <div className="divide-y divide-gray-50">
+          {conversations.map(conv => {
+            const u = conv.otherUser;
+            const ini = u.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+            return (
+              <button
+                key={conv.id}
+                onClick={async () => {
+                  setActiveConversationUser(u);
+                  setActiveConversationId(conv.id);
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 text-left"
+              >
+                {u.avatarUrl
+                  ? <img src={u.avatarUrl} alt={u.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
+                  : <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{ini || '?'}</div>}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className={`text-sm ${conv.unread ? 'font-bold text-gray-900' : 'font-semibold text-gray-900'}`}>{u.name}</p>
+                    {conv.unread && <div className="w-2 h-2 rounded-full bg-gray-900 flex-shrink-0" />}
                   </div>
-                  {last && <span className="text-[11px] text-gray-300 flex-shrink-0">{last.time}</span>}
-                </button>
-              );
-            })
-          )}
+                  <p className={`text-xs truncate mt-0.5 ${conv.unread ? 'text-gray-700 font-medium' : 'text-gray-400'}`}>
+                    {conv.lastMessage ? conv.lastMessage.text : 'No messages yet'}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
@@ -578,7 +675,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
 
         <div className="flex-1 overflow-y-auto pb-4">
           {/* Carousel */}
-          <ImageCarousel images={selectedPost.images} labels={postPlaces.map(p => p.name)} scales={selectedPost.id === 'feed-8' ? [1.02, 1, 1, 1, 1.05] : selectedPost.id === 'feed-9' ? [1, 1, 1, 1, 1.07, 1] : undefined} />
+          <ImageCarousel images={selectedPost.images} labels={postPlaces.map(p => p.name.split(',')[0].trim())} scales={selectedPost.id === 'feed-8' ? [1.02, 1, 1, 1, 1.05] : selectedPost.id === 'feed-9' ? [1, 1, 1, 1, 1.07, 1] : undefined} />
 
           {/* Like / Comment / Save */}
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
@@ -661,10 +758,10 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                       className="w-14 h-14 rounded-xl object-cover flex-shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
                       <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
                         <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-                        {place.city}, {place.country}
+                        {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {place.savedCount.toLocaleString()} saves{place.rating ? ` · ★ ${place.rating}` : ''}
@@ -688,7 +785,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                         <Bookmark size={13} strokeWidth={1.5} className={isSaved ? 'fill-white text-white' : 'text-gray-600'} />
                       </button>
                       <button
-                        onClick={() => setShareTarget({ type: 'place', label: `${place.name} · ${place.city}`, image: place.image })}
+                        onClick={() => setShareTarget({ type: 'place', label: `${place.name.split(',')[0].trim()} · ${place.city}`, image: place.image })}
                         className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-white"
                       >
                         <Send size={13} strokeWidth={1.5} className="text-gray-600" />
@@ -799,9 +896,10 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
           const images = post.places.map(p => p.photoUrl).filter(Boolean);
           const firstPlace = post.places[0];
           if (!images.length || !firstPlace) return null;
+          const sn = (name: string) => name.split(',')[0].trim();
           const locationLabel = post.places.length === 1
-            ? `${firstPlace.name} · ${firstPlace.city}`
-            : `${firstPlace.name} +${post.places.length - 1} · ${firstPlace.city}`;
+            ? `${sn(firstPlace.name)} · ${firstPlace.city}`
+            : `${sn(firstPlace.name)} +${post.places.length - 1} · ${firstPlace.city}`;
           const timeAgo = (() => {
             const diff = Date.now() - new Date(post.createdAt).getTime();
             const mins = Math.floor(diff / 60000);
@@ -824,7 +922,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                 </div>
                 <p className="text-xs text-gray-400 flex-shrink-0">{timeAgo}</p>
               </div>
-              <ImageCarousel images={images} labels={post.places.map(p => p.name)} />
+              <ImageCarousel images={images} labels={post.places.map(p => p.name.split(',')[0].trim())} />
               <div className="px-4 pt-2 pb-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-4">
@@ -862,7 +960,7 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                 ) : null}
                 {post.hashtags.length > 0 && (
                   <p className="text-xs text-slate-400 mt-1 line-clamp-1">
-                    {post.hashtags.map(t => `#${t}`).join(' ')}
+                    {post.hashtags.map(t => `#${t.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}
                   </p>
                 )}
                 {/* Places toggle */}
@@ -884,8 +982,8 @@ export default function Home({ showMessages = false, onMessagesClose, isNewUser,
                       <div key={place.id} className="flex items-center gap-2.5 bg-gray-50 rounded-2xl px-2.5 py-2">
                         {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-gray-900 truncate">{place.name}</p>
-                          <p className="text-[11px] text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
+                          <p className="text-xs font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
+                          <p className="text-[11px] text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
                         </div>
                         {userCollections.length > 0 && (
                           <button

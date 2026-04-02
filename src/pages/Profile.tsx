@@ -1,12 +1,28 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send } from 'lucide-react';
+import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, savePlace, unsavePlace, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, savePlace, unsavePlace, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
+
+function timeAgo(iso: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return `${w}w`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -15,8 +31,10 @@ type ProfileTab = 'Posts' | 'Map' | 'Collections';
 const myPosts = feedItems.filter(f => f.userId === 'user-1');
 
 const categoryEmoji: Record<string, string> = {
-  cafe: '☕', restaurant: '🍽', hotel: '🏨', bar: '🍸',
-  attraction: '🏛', shop: '🛍', nature: '🌿', experience: '🎯',
+  restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
+  hotel: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
+  shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
+  street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
 };
 
 const mockComments: Record<string, { userId: string; text: string; time: string }[]> = {
@@ -42,13 +60,15 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
-export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: () => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: (targetUserId?: string) => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showFollowers, setShowFollowers] = useState<'followers' | 'following' | null>(null);
   const [showFindPeople, setShowFindPeople] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
@@ -76,17 +96,22 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [unfollowTarget, setUnfollowTarget] = useState<FollowProfile | null>(null);
   const [unfollowing, setUnfollowing] = useState(false);
+  const [listFollowingIds, setListFollowingIds] = useState<Set<string>>(new Set());
+  const [listFollowPending, setListFollowPending] = useState<string | null>(null);
   const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
   const [postPlaceSavedIds, setPostPlaceSavedIds] = useState<Set<string>>(new Set());
   const [showPostMap, setShowPostMap] = useState(false);
   const [postCommentText, setPostCommentText] = useState('');
-  const [postComments, setPostComments] = useState<{ text: string; time: string }[]>([]);
+  const [postComments, setPostComments] = useState<import('../lib/supabase').PostComment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
   const postCommentInputRef = useRef<HTMLInputElement>(null);
   const [showPostShareSheet, setShowPostShareSheet] = useState(false);
   const [postSentTo, setPostSentTo] = useState<Set<string>>(new Set());
   const [showEditPost, setShowEditPost] = useState(false);
   const [editPostCaption, setEditPostCaption] = useState('');
   const [editPostPlaces, setEditPostPlaces] = useState<RealPostPlace[]>([]);
+  const [editPostHashtags, setEditPostHashtags] = useState<string[]>([]);
+  const [editTagInput, setEditTagInput] = useState('');
   const [savingEditPost, setSavingEditPost] = useState(false);
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
@@ -121,11 +146,24 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [savingCollection, setSavingCollection] = useState(false);
   const colCoverInputRef = useRef<HTMLInputElement>(null);
   const [sharedCollections, setSharedCollections] = useState<RealCollection[]>([]);
+  const [subscribedCollections, setSubscribedCollections] = useState<RealCollection[]>([]);
   const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
   const [showInviteSheet, setShowInviteSheet] = useState(false);
   const [inviteSearch, setInviteSearch] = useState('');
   const [inviteResults, setInviteResults] = useState<FollowProfile[]>([]);
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
+  const [postCollaborators, setPostCollaborators] = useState<PostCollaborator[]>([]);
+  const [postCollabSearch, setPostCollabSearch] = useState('');
+  const [postCollabResults, setPostCollabResults] = useState<FollowProfile[]>([]);
+  const [invitingPostCollab, setInvitingPostCollab] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (appUser && !appUser.isDemo) {
+      getNotifications(appUser.id).then(notifs => {
+        setUnreadCount(getUnreadCount(appUser.id, notifs));
+      });
+    }
+  }, [appUser?.id]);
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -134,10 +172,48 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         if (posts.length > 0) {
           getPostLikeCounts(posts.map(p => p.id)).then(setRealPostLikeCounts);
         }
+        const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+
+        // Auto-enrich any places missing neighbourhood or city (in memory + DB)
+        const missingLocation = posts.flatMap(p => p.places.filter(pl => !pl.neighborhood || !pl.city));
+        if (missingLocation.length > 0) {
+          const locationFixes: Record<string, { neighborhood?: string; city?: string; country?: string }> = {};
+          for (const pl of missingLocation) {
+            try {
+              const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents' },
+                body: JSON.stringify({ textQuery: [pl.name, pl.city, pl.country].filter(Boolean).join(', '), languageCode: 'en' }),
+              });
+              const data = await res.json();
+              const comps: { types: string[]; longText: string }[] = data.places?.[0]?.addressComponents ?? [];
+              if (!comps.length) continue;
+              const find = (...types: string[]) => comps.find(c => types.some(t => c.types?.includes(t)))?.longText ?? '';
+              let hasPostalTown = comps.some(c => c.types?.includes('postal_town'));
+              const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
+              const city = find('postal_town') || (!hasPostalTown ? find('locality') : '') || find('administrative_area_level_2');
+              const country = find('country');
+              const fix: Record<string, string> = {};
+              if (neighborhood && !pl.neighborhood) fix.neighborhood = neighborhood;
+              if (city && !pl.city) fix.city = city;
+              if (country && !pl.country) fix.country = country;
+              if (Object.keys(fix).length) locationFixes[pl.id] = fix;
+            } catch { /* skip */ }
+          }
+          if (Object.keys(locationFixes).length > 0) {
+            Object.entries(locationFixes).forEach(([id, fix]) =>
+              supabase.from('post_places').update(fix).eq('id', id)
+            );
+            setRealPosts(prev => prev.map(post => ({
+              ...post,
+              places: post.places.map(pl => locationFixes[pl.id] ? { ...pl, ...locationFixes[pl.id] } : pl),
+            })));
+          }
+        }
+
         // Auto-geocode any places missing lat/lng (in memory + DB)
         const missing = posts.flatMap(p => p.places.filter(pl => pl.lat == null || pl.lng == null));
         if (missing.length === 0) return;
-        const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
         const coords: Record<string, { lat: number; lng: number }> = {};
         for (const pl of missing) {
           try {
@@ -169,6 +245,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       });
       getUserCollections(appUser.id).then(setRealCollections);
       getSharedCollections(appUser.id).then(setSharedCollections);
+      getSubscribedCollections(appUser.id).then(setSubscribedCollections);
       getLikedPosts(appUser.id).then(setLikedRealPosts);
       getSavedPosts(appUser.id).then(setSavedRealPosts);
       getFollowingProfiles(appUser.id).then(setFollowingProfiles);
@@ -186,6 +263,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       return () => { supabase.removeChannel(channel); };
     }
   }, [appUser]);
+
+  // Load real comments when a post is opened
+  useEffect(() => {
+    if (!selectedRealPost) { setPostComments([]); setPostCommentText(''); return; }
+    setLoadingComments(true);
+    getPostComments(selectedRealPost.id).then(comments => {
+      setPostComments(comments);
+      setLoadingComments(false);
+    });
+  }, [selectedRealPost?.id]);
 
   // Pre-load which places in the selected post are saved to any collection
   useEffect(() => {
@@ -229,19 +316,24 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     return ids.map(id => getPlaceById(id)).filter(Boolean);
   };
 
+  // ── Notifications ────────────────────────────────────────────────
+  if (showNotifications && appUser?.id) {
+    return <Notifications userId={appUser.id} onBack={() => setShowNotifications(false)} onViewProfile={(actorId) => { setShowNotifications(false); setViewingUserId(actorId); }} />;
+  }
+
   // ── Find People ─────────────────────────────────────────────────
   if (showFindPeople) {
-    return <FindPeople currentUserId={appUser?.id ?? ''} onBack={() => setShowFindPeople(false)} onFollowChange={onFollowingCountChange} />;
+    return <FindPeople currentUserId={appUser?.id ?? ''} onBack={() => setShowFindPeople(false)} onFollowChange={onFollowingCountChange} onOpenMessages={onOpenMessages} />;
   }
 
   if (viewingUserId && appUser) {
-    return <UserProfile userId={viewingUserId} currentUserId={appUser.id} onBack={() => setViewingUserId(null)} onFollowChange={onFollowingCountChange} />;
+    return <UserProfile userId={viewingUserId} currentUserId={appUser.id} onBack={() => setViewingUserId(null)} onFollowChange={onFollowingCountChange} onMessage={onOpenMessages} />;
   }
 
   // ── Real Post Detail ────────────────────────────────────────────
   if (selectedRealPost) {
     const images = selectedRealPost.places.map(pl => pl.photoUrl).filter(Boolean);
-    const labels = selectedRealPost.places.map(pl => pl.name);
+    const labels = selectedRealPost.places.map(pl => pl.name.split(',')[0].trim());
     return (
       <>
       <div className="bg-white min-h-screen">
@@ -262,13 +354,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
                 <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
                 {selectedRealPost.places.length === 1
-                  ? `${selectedRealPost.places[0].name} · ${selectedRealPost.places[0].city}`
-                  : `${selectedRealPost.places[0].name} +${selectedRealPost.places.length - 1} · ${selectedRealPost.places[0].city}`}
+                  ? `${selectedRealPost.places[0].name.split(',')[0].trim()} · ${selectedRealPost.places[0].city}`
+                  : `${selectedRealPost.places[0].name.split(',')[0].trim()} +${selectedRealPost.places.length - 1} · ${selectedRealPost.places[0].city}`}
               </p>
             )}
           </div>
           <button
-            onClick={() => { setEditPostCaption(selectedRealPost.caption); setEditPostPlaces([...selectedRealPost.places]); setShowEditPost(true); }}
+            onClick={() => { setEditPostCaption(selectedRealPost.caption); setEditPostPlaces([...selectedRealPost.places]); setEditPostHashtags([...selectedRealPost.hashtags]); setEditTagInput(''); getPostCollaborators(selectedRealPost.id).then(setPostCollaborators); setPostCollabSearch(''); setPostCollabResults([]); setShowEditPost(true); }}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
           >
             <Edit3 size={16} strokeWidth={1.5} className="text-gray-700" />
@@ -337,7 +429,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
           <p className="text-sm text-gray-800 leading-relaxed">{selectedRealPost.caption}</p>
           {selectedRealPost.hashtags.length > 0 && (
-            <p className="text-xs text-orange-400 mt-1">{selectedRealPost.hashtags.map(h => `#${h.replace(/\s+/g, '')}`).join(' ')}</p>
+            <p className="text-xs text-orange-400 mt-1">{selectedRealPost.hashtags.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>
           )}
           <p className="text-xs text-gray-400 mt-2">{new Date(selectedRealPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </div>
@@ -372,9 +464,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
                 {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
                   <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ')}
+                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
                   </p>
                   {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
                 </div>
@@ -403,20 +495,24 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         {/* Comments */}
         <div className="px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-          {postComments.length === 0 && (
+          {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
+          {!loadingComments && postComments.length === 0 && (
             <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
           )}
           <div className="space-y-3 mb-4">
-            {postComments.map((c, i) => (
-              <div key={i} className="flex items-start gap-2">
-                {appUser?.avatar
-                  ? <img src={appUser.avatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+            {postComments.map(c => (
+              <div key={c.id} className="flex items-start gap-2">
+                {c.profile.avatarUrl
+                  ? <img src={c.profile.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
                   : <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />}
-                <div>
-                  <span className="text-xs font-semibold text-gray-900">{appUser?.username} </span>
+                <div className="flex-1">
+                  <span className="text-xs font-semibold text-gray-900">{c.profile.username} </span>
                   <span className="text-xs text-gray-700">{c.text}</span>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{c.time}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(c.createdAt)}</p>
                 </div>
+                {c.userId === appUser?.id && (
+                  <button onClick={async () => { await deleteComment(c.id); setPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-0.5">✕</button>
+                )}
               </div>
             ))}
           </div>
@@ -429,10 +525,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 ref={postCommentInputRef}
                 value={postCommentText}
                 onChange={e => setPostCommentText(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && postCommentText.trim()) {
-                    setPostComments(prev => [...prev, { text: postCommentText.trim(), time: 'just now' }]);
+                onKeyDown={async e => {
+                  if (e.key === 'Enter' && postCommentText.trim() && appUser?.id && selectedRealPost) {
+                    const text = postCommentText.trim();
                     setPostCommentText('');
+                    const saved = await addComment(appUser.id, selectedRealPost.id, text);
+                    if (saved) setPostComments(prev => [...prev, saved]);
                   }
                 }}
                 placeholder="Add a comment…"
@@ -440,7 +538,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               />
               {postCommentText.trim() && (
                 <button
-                  onClick={() => { setPostComments(prev => [...prev, { text: postCommentText.trim(), time: 'just now' }]); setPostCommentText(''); }}
+                  onClick={async () => {
+                    if (!appUser?.id || !selectedRealPost) return;
+                    const text = postCommentText.trim();
+                    setPostCommentText('');
+                    const saved = await addComment(appUser.id, selectedRealPost.id, text);
+                    if (saved) setPostComments(prev => [...prev, saved]);
+                  }}
                   className="text-xs font-bold text-gray-900 flex-shrink-0"
                 >Post</button>
               )}
@@ -508,7 +612,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {showEditPost && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditPost(false)} />
-          <div className="relative bg-white rounded-t-3xl pb-10 max-h-[85vh] flex flex-col">
+          <div className="relative bg-white rounded-t-3xl pb-10 max-h-[90vh] flex flex-col">
             <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
             <div className="flex items-center justify-between px-4 pb-4 flex-shrink-0">
               <h3 className="text-base font-bold text-gray-900">Edit post</h3>
@@ -516,22 +620,29 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 disabled={savingEditPost}
                 onClick={async () => {
                   setSavingEditPost(true);
-                  // Save caption
-                  await updatePostCaption(selectedRealPost.id, editPostCaption);
-                  // Save reorder if changed
+                  // Compute updated location_label from reordered places
+                  const first = editPostPlaces[0];
+                  const locationLabel = !first ? '' : editPostPlaces.length === 1
+                    ? `${first.name.split(',')[0].trim()} · ${first.city}`
+                    : `${first.name.split(',')[0].trim()} +${editPostPlaces.length - 1} · ${first.city}`;
+                  // Save caption + hashtags + location_label
+                  await updatePostCaption(selectedRealPost.id, editPostCaption, editPostHashtags, locationLabel);
+                  // Remove deleted places
                   const removedIds = selectedRealPost.places.filter(p => !editPostPlaces.find(ep => ep.id === p.id)).map(p => p.id);
                   for (const id of removedIds) await deletePostPlace(id);
-                  if (editPostPlaces.length > 1) await reorderPostPlaces(editPostPlaces.map(p => p.id));
-                  // Update local state
-                  setSelectedRealPost(prev => prev ? { ...prev, caption: editPostCaption, places: editPostPlaces } : prev);
-                  setRealPosts(prev => prev.map(p => p.id === selectedRealPost.id ? { ...p, caption: editPostCaption, places: editPostPlaces } : p));
+                  // Always persist new order
+                  if (editPostPlaces.length > 0) await reorderPostPlaces(editPostPlaces.map(p => p.id));
+                  // Update local state everywhere
+                  const updated = { ...selectedRealPost, caption: editPostCaption, hashtags: editPostHashtags, locationLabel, places: editPostPlaces };
+                  setSelectedRealPost(updated);
+                  setRealPosts(prev => prev.map(p => p.id === selectedRealPost.id ? updated : p));
                   setSavingEditPost(false);
                   setShowEditPost(false);
                 }}
                 className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-50"
               >{savingEditPost ? 'Saving…' : 'Save'}</button>
             </div>
-            <div className="px-4 overflow-y-auto flex-1 space-y-4">
+            <div className="px-4 overflow-y-auto flex-1 space-y-5">
               {/* Caption */}
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Caption</p>
@@ -543,32 +654,167 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 />
               </div>
               {/* Places — reorder + remove */}
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Places</p>
-                <div className="space-y-2">
-                  {editPostPlaces.map((place, i) => (
-                    <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
-                      {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-                        <p className="text-xs text-gray-400">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
-                      </div>
-                      {/* Move up/down */}
-                      <div className="flex flex-col gap-0.5">
-                        <button disabled={i === 0} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })} className="w-6 h-6 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-30">
-                          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2l3.5 4H1.5z" fill="currentColor"/></svg>
+              {editPostPlaces.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Images & Places</p>
+                  <p className="text-xs text-gray-400 mb-2.5">Use the arrows to reorder — the first image becomes the cover</p>
+                  <div className="space-y-2">
+                    {editPostPlaces.map((place, i) => (
+                      <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-2.5">
+                        {/* Number badge + image */}
+                        <div className="relative flex-shrink-0">
+                          {place.photoUrl
+                            ? <img src={place.photoUrl} alt={place.name} className="w-16 h-16 rounded-xl object-cover" />
+                            : <div className="w-16 h-16 rounded-xl bg-gray-200 flex items-center justify-center text-2xl">{categoryEmoji[place.category as keyof typeof categoryEmoji] ?? '📍'}</div>
+                          }
+                          <div className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-gray-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{i + 1}</div>
+                        </div>
+                        {/* Name + location */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
+                          <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
+                          <p className="text-xs text-gray-300">{categoryEmoji[place.category as keyof typeof categoryEmoji]} {place.category}</p>
+                        </div>
+                        {/* Move up/down */}
+                        <div className="flex flex-col gap-1">
+                          <button
+                            disabled={i === 0}
+                            onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2l3.5 4H1.5z" fill="currentColor"/></svg>
+                          </button>
+                          <button
+                            disabled={i === editPostPlaces.length - 1}
+                            onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 8L1.5 4h7z" fill="currentColor"/></svg>
+                          </button>
+                        </div>
+                        {/* Remove */}
+                        <button onClick={() => setEditPostPlaces(prev => prev.filter(p => p.id !== place.id))} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0">
+                          <X size={12} strokeWidth={2} className="text-gray-500" />
                         </button>
-                        <button disabled={i === editPostPlaces.length - 1} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })} className="w-6 h-6 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-30">
-                          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 8L1.5 4h7z" fill="currentColor"/></svg>
-                        </button>
                       </div>
-                      {/* Remove */}
-                      <button onClick={() => setEditPostPlaces(prev => prev.filter(p => p.id !== place.id))} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0">
-                        <X size={12} strokeWidth={2} className="text-gray-500" />
-                      </button>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
+              )}
+              {/* Hashtags */}
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Hashtags</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 bg-gray-50 rounded-xl px-4 py-3 min-h-[44px]">
+                  {editPostHashtags.map(tag => (
+                    <button
+                      key={tag}
+                      onClick={() => setEditPostHashtags(prev => prev.filter(t => t !== tag))}
+                      className="flex items-center gap-1 text-xs font-medium text-orange-400"
+                    >
+                      #{tag}<X size={9} strokeWidth={2.5} className="text-orange-300" />
+                    </button>
+                  ))}
+                  <input
+                    value={editTagInput}
+                    onChange={e => setEditTagInput(e.target.value)}
+                    onKeyDown={e => {
+                      if ((e.key === ' ' || e.key === 'Enter') && editTagInput.trim()) {
+                        e.preventDefault();
+                        const newTag = editTagInput.trim().replace(/^#+/, '').replace(/\s+/g, '');
+                        if (newTag && !editPostHashtags.includes(newTag)) setEditPostHashtags(prev => [...prev, newTag]);
+                        setEditTagInput('');
+                      }
+                    }}
+                    placeholder="+ add"
+                    className="text-xs font-medium text-gray-500 bg-transparent outline-none placeholder-gray-300"
+                    style={{ width: `${Math.max(40, (editTagInput.length + 5) * 7)}px` }}
+                  />
+                </div>
+                <p className="text-[10px] text-gray-300 mt-1 px-1">Tap a tag to remove · press space or enter to add</p>
+              </div>
+              {/* Collaborators */}
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">With</p>
+                {/* Current collaborators */}
+                {postCollaborators.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {postCollaborators.map(c => (
+                      <div key={c.userId} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-1">
+                        {c.profile.avatarUrl
+                          ? <img src={c.profile.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                          : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center text-[9px] font-bold text-gray-600">{c.profile.name[0]?.toUpperCase() || '?'}</div>}
+                        <span className="text-xs font-medium text-gray-700">@{c.profile.username}</span>
+                        {c.status === 'pending' && <span className="text-[9px] text-gray-400">pending</span>}
+                        <button
+                          onClick={async () => {
+                            await removePostCollaborator(selectedRealPost.id, c.userId);
+                            setPostCollaborators(prev => prev.filter(x => x.userId !== c.userId));
+                          }}
+                          className="ml-0.5 text-gray-400"
+                        ><X size={10} strokeWidth={2.5} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Search + invite */}
+                <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5">
+                  <input
+                    value={postCollabSearch}
+                    onChange={async e => {
+                      setPostCollabSearch(e.target.value);
+                      if (e.target.value.trim().length > 0) {
+                        const results = await searchProfiles(e.target.value, appUser?.id ?? '');
+                        setPostCollabResults(results.filter(r => !postCollaborators.find(c => c.userId === r.id)));
+                      } else {
+                        setPostCollabResults([]);
+                      }
+                    }}
+                    placeholder="Search to add a collaborator…"
+                    className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
+                  />
+                </div>
+                {postCollabResults.length > 0 && (
+                  <div className="mt-1.5 bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                    {postCollabResults.slice(0, 5).map(u => (
+                      <button
+                        key={u.id}
+                        disabled={invitingPostCollab === u.id}
+                        onClick={async () => {
+                          if (!appUser?.id) return;
+                          setInvitingPostCollab(u.id);
+                          const err = await addPostCollaborator(selectedRealPost.id, u.id, appUser.id);
+                          if (!err) {
+                            const newCollab: PostCollaborator = {
+                              id: `${selectedRealPost.id}-${u.id}`,
+                              postId: selectedRealPost.id,
+                              userId: u.id,
+                              invitedBy: appUser.id,
+                              status: 'pending',
+                              createdAt: new Date().toISOString(),
+                              profile: { name: u.name, username: u.username, avatarUrl: u.avatarUrl },
+                            };
+                            setPostCollaborators(prev => [...prev, newCollab]);
+                            setPostCollabResults(prev => prev.filter(r => r.id !== u.id));
+                            setPostCollabSearch('');
+                          }
+                          setInvitingPostCollab(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                      >
+                        {u.avatarUrl
+                          ? <img src={u.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                          : <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">{u.name[0]?.toUpperCase() || '?'}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                          <p className="text-xs text-gray-400">@{u.username}</p>
+                        </div>
+                        <span className="text-xs font-semibold text-orange-500 flex-shrink-0">
+                          {invitingPostCollab === u.id ? 'Inviting…' : 'Invite'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               {/* Delete post */}
               <button
@@ -732,7 +978,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           setSaveError(`Photo upload failed: ${uploadError.message}`);
           return;
         }
-        finalAvatarUrl = getPublicUrl('avatars', path);
+        finalAvatarUrl = `${getPublicUrl('avatars', path)}?t=${Date.now()}`;
       }
 
       const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string } = {
@@ -746,7 +992,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       const error = await updateProfile(appUser.id, updates);
       setSaving(false);
       if (error) {
-        setSaveError('Username may already be taken. Try another.');
+        setSaveError((error as any).message?.includes('RLS') ? 'Could not save — permission error. Contact support.' : 'Username may already be taken. Try another.');
       } else {
         onProfileUpdate?.({
           name: updates.name!,
@@ -886,27 +1132,42 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
                     <p className="text-xs text-gray-400">@{u.username}</p>
                   </div>
-                  {!isMe && (
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        if (showFollowers === 'following') {
-                          setUnfollowTarget(u);
-                        } else {
-                          setViewingUserId(u.id);
-                        }
-                      }}
-                      className={`text-xs font-semibold rounded-full px-3 py-1.5 flex-shrink-0 ${
-                        showFollowers === 'following'
-                          ? 'bg-gray-100 text-gray-600'
-                          : 'bg-gray-100 text-gray-600'
-                      }`}
-                    >
-                      {showFollowers === 'following'
-                        ? <span className="flex items-center gap-1"><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>Following</span>
-                        : 'View'}
-                    </button>
-                  )}
+                  {!isMe && (() => {
+                    const isFollowing = showFollowers === 'following' || listFollowingIds.has(u.id);
+                    const isPending = listFollowPending === u.id;
+                    return (
+                      <button
+                        disabled={isPending}
+                        onClick={async e => {
+                          e.stopPropagation();
+                          if (showFollowers === 'following') {
+                            setUnfollowTarget(u);
+                          } else if (isFollowing) {
+                            // route through confirmation sheet
+                            setUnfollowTarget(u);
+                          } else {
+                            // follow back
+                            setListFollowPending(u.id);
+                            await supabase.from('follows').insert({ follower_id: appUser!.id, following_id: u.id });
+                            setListFollowingIds(prev => new Set([...prev, u.id]));
+                            setFollowingProfiles(prev => [...prev, u]);
+                            setRealFollowingCount(c => c + 1);
+                            onFollowingCountChange?.(1);
+                            setListFollowPending(null);
+                          }
+                        }}
+                        className={`text-[11px] font-semibold rounded-full px-3 py-1.5 flex-shrink-0 flex items-center gap-1 disabled:opacity-50 transition-colors ${
+                          isFollowing
+                            ? 'border border-gray-300 text-gray-500 bg-white'
+                            : 'bg-gray-900 text-white'
+                        }`}
+                      >
+                        {isPending ? '…' : isFollowing
+                          ? <><Check size={10} strokeWidth={2.5} />Following</>
+                          : 'Follow'}
+                      </button>
+                    );
+                  })()}
                 </div>
               );
             })
@@ -957,6 +1218,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       .eq('following_id', unfollowTarget.id);
                     if (!error) {
                       setFollowingProfiles(prev => prev.filter(p => p.id !== unfollowTarget.id));
+                      setListFollowingIds(prev => { const s = new Set(prev); s.delete(unfollowTarget.id); return s; });
                       setRealFollowingCount(c => c - 1);
                       onFollowingCountChange?.(-1);
                     }
@@ -1044,7 +1306,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         <div className="flex-1 overflow-y-auto pb-4">
           <ImageCarousel
             images={selectedPost.images}
-            labels={postPlaces.map(p => p.name)}
+            labels={postPlaces.map(p => p.name.split(',')[0].trim())}
             scales={selectedPost.id === 'feed-8' ? [1.02, 1, 1, 1, 1.05] : selectedPost.id === 'feed-9' ? [1, 1, 1, 1, 1.07, 1] : undefined}
           />
 
@@ -1109,10 +1371,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
                     <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
                       <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
                         <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-                        {place.city}, {place.country}
+                        {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {place.savedCount.toLocaleString()} saves{place.rating ? ` · ★ ${place.rating}` : ''}
@@ -1275,10 +1537,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
                   <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
                     <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
                       <MapPin size={9} strokeWidth={1.5} />
-                      {place.neighbourhood ?? place.city}
+                      {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
                       <span className="mx-1">·</span>
                       {categoryEmoji[place.category] ?? '📍'} {place.category}
                     </p>
@@ -1607,7 +1869,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-                        <p className="text-xs text-gray-400">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
+                        <p className="text-xs text-gray-400">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
                       </div>
                       <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
                         {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -1711,22 +1973,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   return (
     <div className="bg-white min-h-screen">
       {/* Top Nav */}
-      <div className="grid grid-cols-3 items-center px-4 pt-5 pb-3">
-        <div className="flex items-center">
-          <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center">
-            <UserPlus size={22} strokeWidth={1.5} className="text-gray-700" />
-          </button>
-        </div>
-        <div className="text-center">
-          <h2 className="text-base font-bold text-gray-900 leading-tight flex items-center justify-center gap-1.5">
-            {displayUser.name}
-            {displayUser.verified && <BadgeCheck size={16} className="text-blue-500 fill-blue-500" strokeWidth={1.5} />}
-          </h2>
-          <p className="text-xs text-gray-400">@{displayUser.username}</p>
-        </div>
-        <div className="flex items-center justify-end gap-1">
-          <button onClick={onOpenMessages} className="w-9 h-9 flex items-center justify-center">
-            <Mail size={20} strokeWidth={1.5} className="text-gray-700" />
+      <div className="flex items-center justify-between px-4 pt-5 pb-3">
+        <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center">
+          <UserPlus size={22} strokeWidth={1.5} className="text-gray-700" />
+        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => { setShowNotifications(true); markAsSeen(appUser?.id ?? ''); setUnreadCount(0); }} className="w-9 h-9 flex items-center justify-center relative">
+            <Bell size={20} strokeWidth={1.5} className="text-gray-700" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-orange-500" />
+            )}
           </button>
           <button onClick={() => setShowMenu(true)} className="w-9 h-9 flex items-center justify-center">
             <Menu size={22} strokeWidth={1.5} className="text-gray-700" />
@@ -1736,7 +1992,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
       {/* Profile Header */}
       <div className="px-4 pb-4">
-        <div className="flex items-center gap-4">
+        <div className="flex items-start gap-4">
           <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
             {(avatarPreview ?? displayUser.avatar)
               ? <img src={avatarPreview ?? displayUser.avatar!} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
@@ -1746,22 +2002,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <Plus size={11} strokeWidth={2.5} className="text-white" />
             </div>
           </button>
-          <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex-1 min-w-0 space-y-0.5">
+            <p className="text-base font-bold text-gray-900 leading-tight truncate flex items-center gap-1.5">
+              {displayUser.name}
+              {displayUser.verified && <BadgeCheck size={15} className="text-blue-500 fill-blue-500 flex-shrink-0" strokeWidth={1.5} />}
+            </p>
+            <p className="text-xs text-gray-400 truncate">@{displayUser.username}</p>
             {displayUser.bio ? (
-              <div className="space-y-0.5">
-                {displayUser.bio.split('\n').map((line, i) => (
-                  <p key={i} className="text-sm text-gray-700 leading-relaxed">{line}</p>
-                ))}
+              <div className="pt-0.5">
+                <p className="text-xs text-gray-500 leading-snug">{displayUser.bio}</p>
               </div>
             ) : (
-              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic">Add a bio…</button>
+              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic pt-0.5">Add a bio…</button>
             )}
-            {displayUser.location ? (
-              <p className="text-xs text-gray-400 flex items-center gap-1">
-                <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-                {displayUser.location}
-              </p>
-            ) : null}
           </div>
         </div>
 
@@ -1775,6 +2028,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 setLoadingFollowList(true);
                 getFollowerProfiles(appUser.id).then(p => { setFollowerProfiles(p); setLoadingFollowList(false); });
               }
+              setListFollowingIds(new Set(followingProfiles.map(p => p.id)));
               setShowFollowers('followers');
             }},
             { value: isNewUser ? realFollowingCount : displayUser.followingCount, label: 'Following', action: () => {
@@ -1826,6 +2080,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                           <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
                           <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
                         </div>
+                      </div>
+                    )}
+                    {(post.collaborators ?? []).length > 0 && (
+                      <div className="absolute bottom-1.5 left-1.5 flex -space-x-1">
+                        {(post.collaborators ?? []).slice(0, 3).map(c => (
+                          c.avatarUrl
+                            ? <img key={c.id} src={c.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-white" />
+                            : <div key={c.id} className="w-5 h-5 rounded-full bg-gray-400 border border-white flex items-center justify-center text-[8px] font-bold text-white">{c.name[0]?.toUpperCase() || '?'}</div>
+                        ))}
                       </div>
                     )}
                   </button>
@@ -1963,6 +2226,36 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                         {col.coverImageUrl
                           ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
                           : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Subscribed */}
+            {subscribedCollections.length > 0 && (
+              <div className="mt-6">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Subscribed</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+                  {subscribedCollections.map(col => (
+                    <button key={col.id} className="text-left" onClick={() => {
+                      setSelectedRealCollection(col);
+                      setShowColMap(true);
+                      setColFilter('all');
+                      setCollectionCollaborators([]);
+                      setLoadingCollectionPlaces(true);
+                      getCollectionPlaces(col.id).then(places => { setRealCollectionPlaces(places); setLoadingCollectionPlaces(false); });
+                    }}>
+                      <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
+                        {col.coverImageUrl
+                          ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                          : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
+                        <div className="absolute bottom-1.5 right-1.5 w-5 h-5 bg-white/90 rounded-full flex items-center justify-center">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-700"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                        </div>
                       </div>
                       <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
                       <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>

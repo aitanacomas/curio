@@ -1,19 +1,44 @@
-import { useState, useEffect } from 'react';
-import { ArrowLeft, Check, MapPin } from 'lucide-react';
-import { supabase, getUserPosts, getFollowCounts, getProfile, type RealPost } from '../lib/supabase';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Check, MapPin, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send } from 'lucide-react';
+import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getPostComments, addComment, deleteComment, type RealPost, type RealCollection, type RealPostPlace, type PostComment } from '../lib/supabase';
+
+function timeAgo(iso: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return `${w}w`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const categoryEmoji: Record<string, string> = {
+  restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
+  hotel: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
+  shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
+  street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
+};
 import ImageCarousel from '../components/ImageCarousel';
+
+const MapView = lazy(() => import('../components/MapView'));
 
 interface Props {
   userId: string;
   currentUserId: string;
   onBack: () => void;
   onFollowChange?: (delta: number) => void;
+  onMessage?: (userId: string) => void;
 }
 
 type ProfileTab = 'Posts' | 'Map' | 'Collections';
 
-export default function UserProfile({ userId, currentUserId, onBack, onFollowChange }: Props) {
-  const [profile, setProfile] = useState<{ name: string; username: string; avatarUrl: string | null } | null>(null);
+export default function UserProfile({ userId, currentUserId, onBack, onFollowChange, onMessage }: Props) {
+  const [profile, setProfile] = useState<{ name: string; username: string; avatarUrl: string | null; bio?: string | null; location?: string | null } | null>(null);
   const [posts, setPosts] = useState<RealPost[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [following, setFollowing] = useState(false);
@@ -26,23 +51,151 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [loadingList, setLoadingList] = useState(false);
   const [showUnfollowConfirm, setShowUnfollowConfirm] = useState(false);
   const [unfollowing, setUnfollowing] = useState(false);
+  const [collections, setCollections] = useState<RealCollection[]>([]);
+  const [viewingCollection, setViewingCollection] = useState<RealCollection | null>(null);
+  const [collectionPlaces, setCollectionPlaces] = useState<RealPostPlace[]>([]);
+  const [collectionPlacesLoading, setCollectionPlacesLoading] = useState(false);
+  const [colFilter, setColFilter] = useState('all');
+  const [showColMap, setShowColMap] = useState(true);
+  const [enrichingMap, setEnrichingMap] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+  const [myCollections, setMyCollections] = useState<RealCollection[]>([]);
+  const [savingPlace, setSavingPlace] = useState<{ id: string; name: string } | null>(null);
+  const [placeInMyCollections, setPlaceInMyCollections] = useState<Set<string>>(new Set());
+  const [loadingPlaceInCols, setLoadingPlaceInCols] = useState(false);
+  const [showInlineNewCol, setShowInlineNewCol] = useState(false);
+  const [inlineNewColName, setInlineNewColName] = useState('');
+  const [savingInlineCol, setSavingInlineCol] = useState(false);
+  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [postLikeCounts, setPostLikeCounts] = useState<Record<string, number>>({});
+  const [showPostMap, setShowPostMap] = useState(false);
+  const [postPlaceSavedIds, setPostPlaceSavedIds] = useState<Set<string>>(new Set());
+  const [postComments, setPostComments] = useState<PostComment[]>([]);
+  const [postCommentText, setPostCommentText] = useState('');
+  const [loadingComments, setLoadingComments] = useState(false);
+  const postCommentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([
       getProfile(userId),
       getUserPosts(userId),
       getFollowCounts(userId),
-      // Check if currentUser follows this user
       supabase.from('follows').select('id').eq('follower_id', currentUserId).eq('following_id', userId).maybeSingle(),
-    ]).then(([prof, p, counts, { data: followRow }]) => {
-      setProfile(prof ? { name: prof.name ?? '', username: prof.username ?? '', avatarUrl: prof.avatar_url ?? null } : null);
+      getUserCollections(userId),
+    ]).then(([prof, p, counts, { data: followRow }, cols]) => {
+      setProfile(prof ? { name: prof.name ?? '', username: prof.username ?? '', avatarUrl: prof.avatar_url ?? null, bio: prof.bio ?? null, location: prof.location ?? null } : null);
       setPosts(p);
+      setCollections(cols);
       setFollowerCount(counts.followers);
       setFollowingCount(counts.following);
       setFollowing(!!followRow);
       setLoadingPosts(false);
     });
+    // Fetch current user's own collections for the "save place" picker
+    getUserCollections(currentUserId).then(setMyCollections);
+    // Fetch likes
+    getLikedPosts(currentUserId).then(setLikedPosts);
   }, [userId, currentUserId]);
+
+  // Load like counts + saved place ids whenever a post is opened
+  useEffect(() => {
+    if (!selectedPost) return;
+    getPostLikeCounts([selectedPost.id]).then(counts => setPostLikeCounts(prev => ({ ...prev, ...counts })));
+    // Load saved place ids for this post
+    Promise.all(selectedPost.places.map(p => p.id)).then(async ids => {
+      const saved = new Set<string>();
+      await Promise.all(ids.map(async id => {
+        const cols = await getPlaceCollectionIds(id);
+        if (cols.size > 0) saved.add(id);
+      }));
+      setPostPlaceSavedIds(saved);
+    });
+    // Auto-enrich any places missing neighbourhood, city, or coordinates (in-memory only for other users' posts)
+    const missingData = selectedPost.places.filter(pl => !pl.neighborhood || !pl.city || pl.lat == null);
+    if (missingData.length === 0) return;
+    const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+    (async () => {
+      const fixes: Record<string, { neighborhood?: string; city?: string; country?: string; lat?: number; lng?: number }> = {};
+      for (const pl of missingData) {
+        try {
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.location' },
+            body: JSON.stringify({ textQuery: [pl.name, pl.city, pl.country].filter(Boolean).join(', '), languageCode: 'en' }),
+          });
+          const data = await res.json();
+          const place = data.places?.[0];
+          if (!place) continue;
+          const comps: { types: string[]; longText: string }[] = place.addressComponents ?? [];
+          const find = (...types: string[]) => comps.find(c => types.some(t => c.types?.includes(t)))?.longText ?? '';
+          const hasPostalTown = comps.some(c => c.types?.includes('postal_town'));
+          const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
+          const city = find('postal_town') || (!hasPostalTown ? find('locality') : '') || find('administrative_area_level_2');
+          const country = find('country');
+          const fix: Record<string, any> = {};
+          if (neighborhood && !pl.neighborhood) fix.neighborhood = neighborhood;
+          if (city && !pl.city) fix.city = city;
+          if (country && !pl.country) fix.country = country;
+          if (pl.lat == null && place.location?.latitude != null) fix.lat = place.location.latitude;
+          if (pl.lng == null && place.location?.longitude != null) fix.lng = place.location.longitude;
+          if (Object.keys(fix).length) fixes[pl.id] = fix;
+        } catch { /* skip */ }
+      }
+      if (Object.keys(fixes).length > 0) {
+        setPosts(prev => prev.map(post => ({
+          ...post,
+          places: post.places.map(pl => fixes[pl.id] ? { ...pl, ...fixes[pl.id] } : pl),
+        })));
+        setSelectedPost(prev => prev ? {
+          ...prev,
+          places: prev.places.map(pl => fixes[pl.id] ? { ...pl, ...fixes[pl.id] } : pl),
+        } : prev);
+      }
+    })();
+  }, [selectedPost?.id]);
+
+  // Load real comments when a post is opened
+  useEffect(() => {
+    if (!selectedPost) { setPostComments([]); setPostCommentText(''); return; }
+    setLoadingComments(true);
+    getPostComments(selectedPost.id).then(comments => {
+      setPostComments(comments);
+      setLoadingComments(false);
+    });
+  }, [selectedPost?.id]);
+
+  // When map tab opens, enrich any places missing coordinates (in-memory)
+  useEffect(() => {
+    if (activeTab !== 'Map') return;
+    const allPlaces = posts.flatMap(p => p.places);
+    const missingCoords = allPlaces.filter(pl => pl.lat == null || pl.lng == null);
+    if (missingCoords.length === 0) return;
+    const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+    setEnrichingMap(true);
+    (async () => {
+      const fixes: Record<string, { lat?: number; lng?: number }> = {};
+      for (const pl of missingCoords) {
+        try {
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.location' },
+            body: JSON.stringify({ textQuery: [pl.name, pl.city, pl.country].filter(Boolean).join(', '), languageCode: 'en' }),
+          });
+          const data = await res.json();
+          const loc = data.places?.[0]?.location;
+          if (loc?.latitude != null && loc?.longitude != null) fixes[pl.id] = { lat: loc.latitude, lng: loc.longitude };
+        } catch { /* skip */ }
+      }
+      if (Object.keys(fixes).length > 0) {
+        setPosts(prev => prev.map(post => ({
+          ...post,
+          places: post.places.map(pl => fixes[pl.id] ? { ...pl, ...fixes[pl.id] } : pl),
+        })));
+      }
+      setEnrichingMap(false);
+    })();
+  }, [activeTab, posts.length]);
 
   const handleFollow = () => {
     if (following) {
@@ -151,11 +304,15 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   // ── Post detail ───────────────────────────────────────────────────
   if (selectedPost) {
     const images = selectedPost.places.map(pl => pl.photoUrl).filter(Boolean);
-    const labels = selectedPost.places.map(pl => pl.name);
+    const labels = selectedPost.places.map(pl => pl.name.split(',')[0].trim());
+    const isLiked = likedPosts.has(selectedPost.id);
+    const likeCount = postLikeCounts[selectedPost.id] ?? 0;
+    const allSaved = selectedPost.places.length > 0 && selectedPost.places.every(p => postPlaceSavedIds.has(p.id));
     return (
       <div className="bg-white min-h-screen">
+        {/* Header */}
         <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
-          <button onClick={() => setSelectedPost(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
+          <button onClick={() => { setSelectedPost(null); setShowPostMap(false); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
             <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
           </button>
           {profile?.avatarUrl ? (
@@ -167,35 +324,183 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900 leading-tight">{profile?.name}</p>
-            <p className="text-xs text-gray-400">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+            {selectedPost.places.length > 0 && (
+              <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
+                <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                {selectedPost.places.length === 1
+                  ? `${selectedPost.places[0].name.split(',')[0].trim()} · ${selectedPost.places[0].city}`
+                  : `${selectedPost.places[0].name.split(',')[0].trim()} +${selectedPost.places.length - 1} · ${selectedPost.places[0].city}`}
+              </p>
+            )}
           </div>
         </div>
+
+        {/* Carousel */}
         {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
+
+        {/* Actions + caption */}
         <div className="px-4 pt-3 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-4">
+              <button
+                className="flex items-center gap-1.5"
+                onClick={() => {
+                  const nowLiked = likedPosts.has(selectedPost.id);
+                  setLikedPosts(prev => { const n = new Set(prev); nowLiked ? n.delete(selectedPost.id) : n.add(selectedPost.id); return n; });
+                  setPostLikeCounts(prev => ({ ...prev, [selectedPost.id]: (prev[selectedPost.id] ?? 0) + (nowLiked ? -1 : 1) }));
+                  nowLiked ? unlikePost(currentUserId, selectedPost.id) : likePost(currentUserId, selectedPost.id);
+                }}
+              >
+                <Heart size={22} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
+                <span className="text-xs text-gray-500">{likeCount}</span>
+              </button>
+              <button className="flex items-center gap-1.5" onClick={() => { setTimeout(() => postCommentInputRef.current?.focus(), 50); }}>
+                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
+                <span className="text-xs text-gray-500">{postComments.length}</span>
+              </button>
+              <Send size={22} strokeWidth={1.5} className="text-gray-700" />
+            </div>
+            <button
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${allSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
+              onClick={async () => {
+                if (allSaved) {
+                  for (const place of selectedPost.places) {
+                    await unsavePlace(currentUserId, place.id);
+                    setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
+                  }
+                } else {
+                  for (const place of selectedPost.places) {
+                    if (!postPlaceSavedIds.has(place.id)) {
+                      await savePlace(currentUserId, place.id);
+                      setPostPlaceSavedIds(prev => new Set(prev).add(place.id));
+                    }
+                  }
+                }
+              }}
+            >
+              {allSaved && <Check size={13} strokeWidth={2} />}
+              {allSaved ? 'Saved' : 'Save all'}
+            </button>
+          </div>
           <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
-          {selectedPost.locationLabel && (
-            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-              <MapPin size={10} strokeWidth={1.5} />{selectedPost.locationLabel}
-            </p>
+          {selectedPost.hashtags.length > 0 && (
+            <p className="text-xs text-orange-400 mt-1">{selectedPost.hashtags.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>
           )}
+          <p className="text-xs text-gray-400 mt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </div>
-        <div className="px-4 pt-4 pb-10">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-            {selectedPost.places.length} Place{selectedPost.places.length !== 1 ? 's' : ''}
-          </p>
+
+        {/* Places + map */}
+        <div className="px-4 pt-4 pb-6">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              {selectedPost.places.length} Place{selectedPost.places.length !== 1 ? 's' : ''}
+            </p>
+            {selectedPost.places.some(p => p.lat != null) && (
+              <button
+                onClick={() => setShowPostMap(v => !v)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                {showPostMap ? 'Hide map' : 'Show map'}
+              </button>
+            )}
+          </div>
+          {showPostMap && (() => {
+            const mapPlaces = selectedPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name.split(',')[0].trim(), city: p.city, country: p.country }));
+            return mapPlaces.length > 0 ? (
+              <div className="rounded-2xl overflow-hidden mb-3">
+                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
+                  <MapView places={mapPlaces} height="200px" />
+                </Suspense>
+              </div>
+            ) : null;
+          })()}
           <div className="space-y-3">
             {selectedPost.places.map(place => (
               <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
                 {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
                   <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{place.city}, {place.country}
+                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
                   </p>
-                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{place.category}</p>}
+                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
                 </div>
+                {myCollections.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      setSavingPlace({ id: place.id, name: place.name.split(',')[0].trim() });
+                      setLoadingPlaceInCols(true);
+                      const ids = await getPlaceCollectionIds(place.id);
+                      setPlaceInMyCollections(ids);
+                      setLoadingPlaceInCols(false);
+                    }}
+                    className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${postPlaceSavedIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
+                  >
+                    {postPlaceSavedIds.has(place.id)
+                      ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                      : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
+                  </button>
+                )}
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Comments section */}
+        <div className="px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+          {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
+          {!loadingComments && postComments.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
+          )}
+          <div className="space-y-3 mb-4">
+            {postComments.map(c => (
+              <div key={c.id} className="flex items-start gap-2">
+                {c.profile.avatarUrl
+                  ? <img src={c.profile.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                  : <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 flex-shrink-0">{c.profile.name[0]?.toUpperCase() || '?'}</div>}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-900"><span className="font-semibold">{c.profile.username}</span> {c.text}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(c.createdAt)}</p>
+                </div>
+                {c.userId === currentUserId && (
+                  <button onClick={async () => { await deleteComment(c.id); setPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-0.5">✕</button>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* Comment input */}
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />
+            <div className="flex-1 flex items-center bg-gray-100 rounded-full px-3 py-2 gap-2">
+              <input
+                ref={postCommentInputRef}
+                value={postCommentText}
+                onChange={e => setPostCommentText(e.target.value)}
+                onKeyDown={async e => {
+                  if (e.key === 'Enter' && postCommentText.trim() && selectedPost) {
+                    const text = postCommentText.trim();
+                    setPostCommentText('');
+                    const saved = await addComment(currentUserId, selectedPost.id, text);
+                    if (saved) setPostComments(prev => [...prev, saved]);
+                  }
+                }}
+                placeholder="Add a comment…"
+                className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
+              />
+              {postCommentText.trim() && (
+                <button
+                  onClick={async () => {
+                    if (!selectedPost) return;
+                    const text = postCommentText.trim();
+                    setPostCommentText('');
+                    const saved = await addComment(currentUserId, selectedPost.id, text);
+                    if (saved) setPostComments(prev => [...prev, saved]);
+                  }}
+                  className="text-xs font-bold text-gray-900 flex-shrink-0"
+                >Post</button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -207,19 +512,35 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
     <div className="bg-white min-h-screen relative">
       {/* Top nav */}
       <div className="flex items-center justify-between px-4 pt-5 pb-3">
-        <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+        <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
           <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
         </button>
-        <div className="text-center">
-          <h2 className="text-base font-bold text-gray-900 leading-tight">{profile?.name ?? '…'}</h2>
-          <p className="text-xs text-gray-400">@{profile?.username ?? '…'}</p>
+        {/* Right side: follow + message */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleFollow}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold transition-colors ${
+              following
+                ? 'border border-gray-300 text-gray-500 bg-white'
+                : 'bg-gray-900 text-white'
+            }`}
+          >
+            {following ? <><Check size={10} strokeWidth={2.5} />Following</> : <>Follow</>}
+          </button>
+          {onMessage && (
+            <button
+              onClick={() => onMessage?.(userId)}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100"
+            >
+              <MessageCircle size={17} strokeWidth={1.6} className="text-gray-700" />
+            </button>
+          )}
         </div>
-        <div className="w-9" />
       </div>
 
       {/* Header */}
       <div className="px-4 pb-4">
-        <div className="flex items-center gap-4">
+        <div className="flex items-start gap-4">
           {profile?.avatarUrl ? (
             <img src={profile.avatarUrl} alt={profile.name} className="w-16 h-16 rounded-full object-cover object-top flex-shrink-0" />
           ) : (
@@ -227,15 +548,15 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               <span className="text-xl font-bold text-slate-400">{initials || '?'}</span>
             </div>
           )}
-          <div className="flex-1 min-w-0">
-            <button
-              onClick={handleFollow}
-              className={`flex items-center gap-1.5 px-5 py-2 rounded-full text-sm font-semibold transition-colors ${
-                following ? 'bg-gray-100 text-gray-600' : 'bg-slate-900 text-white'
-              }`}
-            >
-              {following ? <><Check size={13} strokeWidth={2} />Following</> : <>Follow</>}
-            </button>
+          {/* Name, username, bio, location stacked beside avatar */}
+          <div className="flex-1 min-w-0 space-y-0.5">
+            <p className="text-base font-bold text-gray-900 leading-tight truncate">{profile?.name ?? '…'}</p>
+            <p className="text-xs text-gray-400 truncate">@{profile?.username ?? '…'}</p>
+            {profile?.bio ? (
+              <div className="pt-0.5">
+                <p className="text-xs text-gray-500 leading-snug">{profile.bio}</p>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -309,28 +630,82 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
         )
       )}
 
-      {activeTab === 'Map' && (
-        <div className="flex flex-col items-center justify-center py-16 px-6">
-          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-            <span className="text-3xl">🗺️</span>
+      {activeTab === 'Map' && (() => {
+        const mapPlaces = posts.flatMap(p => p.places.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({
+          id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country,
+        })));
+        if (enrichingMap && mapPlaces.length === 0) {
+          return (
+            <div className="px-4 pt-4">
+              <div className="h-72 bg-gray-100 rounded-2xl animate-pulse flex items-center justify-center">
+                <p className="text-xs text-gray-400">Loading map…</p>
+              </div>
+            </div>
+          );
+        }
+        return mapPlaces.length > 0 ? (
+          <div className="px-4 pt-4">
+            <Suspense fallback={<div className="h-72 bg-gray-100 rounded-2xl animate-pulse" />}>
+              <div className="rounded-2xl overflow-hidden">
+                <MapView places={mapPlaces} height="360px" />
+              </div>
+            </Suspense>
+            {enrichingMap && <p className="text-xs text-gray-400 text-center mt-2">Finding more places…</p>}
           </div>
-          <p className="text-slate-800 font-semibold text-base mb-1.5">Travel map</p>
-          <p className="text-slate-400 text-sm text-center max-w-[200px]">
-            {profile?.name.split(' ')[0]}'s travel map will appear here
-          </p>
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <span className="text-3xl">🗺️</span>
+            </div>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
+            <p className="text-slate-400 text-sm text-center max-w-[200px]">
+              Places {profile?.name.split(' ')[0]} tags will appear on the map
+            </p>
+          </div>
+        );
+      })()}
 
       {activeTab === 'Collections' && (
-        <div className="flex flex-col items-center justify-center py-16 px-6">
-          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-            <span className="text-3xl">🗂️</span>
+        collections.length > 0 ? (
+          <div className="px-4 pt-4 pb-10">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+              {collections.map(col => (
+                <button key={col.id} className="text-left" onClick={async () => {
+                  setViewingCollection(col);
+                  setCollectionPlaces([]);
+                  setColFilter('all');
+                  setIsSubscribed(false);
+                  setCollectionPlacesLoading(true);
+                  const [places, subscribed] = await Promise.all([
+                    getCollectionPlaces(col.id),
+                    isSubscribedToCollection(currentUserId, col.id),
+                  ]);
+                  setCollectionPlaces(places);
+                  setIsSubscribed(subscribed);
+                  setCollectionPlacesLoading(false);
+                }}>
+                  <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center">
+                    {col.coverImageUrl
+                      ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                      : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
+                  <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
-          <p className="text-slate-400 text-sm text-center max-w-[200px]">
-            Collections {profile?.name.split(' ')[0]} creates will appear here
-          </p>
-        </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <span className="text-3xl">🗂️</span>
+            </div>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
+            <p className="text-slate-400 text-sm text-center max-w-[200px]">
+              Collections {profile?.name.split(' ')[0]} creates will appear here
+            </p>
+          </div>
+        )
       )}
 
       {/* Unfollow confirmation sheet */}
@@ -361,6 +736,284 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               <button onClick={() => setShowUnfollowConfirm(false)} className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold">
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Collection Detail — full-screen */}
+      {viewingCollection && (
+        <div className="fixed inset-0 z-[300] bg-white overflow-y-auto" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          {/* Hero */}
+          <div className="relative h-64 flex-shrink-0">
+            {viewingCollection.coverImageUrl ? (
+              <img src={viewingCollection.coverImageUrl} alt={viewingCollection.name} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+                <span className="text-7xl">{viewingCollection.emoji || '🗂️'}</span>
+              </div>
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
+            {/* Back */}
+            <button
+              onClick={() => { setViewingCollection(null); setCollectionPlaces([]); setColFilter('all'); setIsSubscribed(false); }}
+              className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+            >
+              <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            {/* Top-right: share */}
+            <button
+              onClick={() => navigator.share?.({ title: viewingCollection.name, url: `${window.location.origin}/collection/${viewingCollection.id}` })}
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+            >
+              <Share2 size={14} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            {/* Title overlay */}
+            <div className="absolute bottom-4 left-4 right-16">
+              <h2 className="text-2xl font-black text-white">{viewingCollection.name}</h2>
+              {viewingCollection.description && (
+                <p className="text-white/70 text-xs mt-1">{viewingCollection.description}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Subscribe strip */}
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-gray-100">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">{viewingCollection.placesCount} place{viewingCollection.placesCount !== 1 ? 's' : ''}</p>
+              {isSubscribed && <p className="text-xs text-green-600 font-medium mt-0.5">Subscribed · updates appear in your profile</p>}
+            </div>
+            <button
+              disabled={subscribing}
+              onClick={async () => {
+                setSubscribing(true);
+                if (isSubscribed) {
+                  await unsubscribeFromCollection(currentUserId, viewingCollection.id);
+                  setIsSubscribed(false);
+                } else {
+                  await subscribeToCollection(currentUserId, viewingCollection.id);
+                  setIsSubscribed(true);
+                }
+                setSubscribing(false);
+              }}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold transition-colors ${isSubscribed ? 'bg-gray-100 text-gray-700' : 'bg-gray-900 text-white'}`}
+            >
+              {isSubscribed ? <BookmarkCheck size={13} strokeWidth={2} /> : <Bookmark size={13} strokeWidth={2} />}
+              {subscribing ? '…' : isSubscribed ? 'Subscribed' : 'Subscribe'}
+            </button>
+          </div>
+
+          {/* Body */}
+          {collectionPlacesLoading ? (
+            <div className="px-4 pt-4 space-y-3">
+              <div className="h-52 bg-gray-100 rounded-2xl animate-pulse" />
+              {[0,1,2].map(i => <div key={i} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />)}
+            </div>
+          ) : collectionPlaces.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+              <span className="text-4xl mb-3">📍</span>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
+              <p className="text-slate-400 text-sm max-w-[220px]">This collection doesn't have any places added yet.</p>
+            </div>
+          ) : (() => {
+            const catEmoji = (cat: string) => {
+              const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', dining: '🍽️', bar: '🍸', cocktail: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
+              return m[cat.toLowerCase()] ?? '📍';
+            };
+            const mapPlaces = collectionPlaces
+              .filter(pl => pl.lat != null && pl.lng != null)
+              .map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
+            const cats = Array.from(new Set(collectionPlaces.map(p => p.category).filter(Boolean)));
+            const filtered = colFilter === 'all' ? collectionPlaces : collectionPlaces.filter(p => p.category === colFilter);
+            const byArea: Record<string, typeof filtered> = {};
+            filtered.forEach(p => { const k = p.neighborhood || p.city || 'Other'; if (!byArea[k]) byArea[k] = []; byArea[k].push(p); });
+            return (
+              <>
+                {/* Count + map toggle */}
+                <div className="flex items-center justify-between px-4 pt-4 pb-1">
+                  <p className="text-sm font-semibold text-gray-900">{collectionPlaces.length} in this collection</p>
+                  {mapPlaces.length > 0 && (
+                    <button
+                      onClick={() => setShowColMap(v => !v)}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showColMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+                    >
+                      {showColMap ? 'Hide map' : 'Show map'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Map */}
+                {showColMap && mapPlaces.length > 0 && (
+                  <div className="px-4 pt-2">
+                    <div className="rounded-2xl overflow-hidden">
+                      <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
+                        <MapView places={mapPlaces} height="220px" />
+                      </Suspense>
+                    </div>
+                  </div>
+                )}
+
+                {/* Category filter chips */}
+                {cats.length >= 2 && (
+                  <div className="flex gap-2 px-4 pt-3 overflow-x-auto no-scrollbar">
+                    {(['all', ...cats] as string[]).map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setColFilter(cat)}
+                        className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${colFilter === cat ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}
+                      >
+                        {cat === 'all' ? 'All' : `${catEmoji(cat)} ${cat.charAt(0).toUpperCase() + cat.slice(1)}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Places grouped by area */}
+                <div className="px-4 pt-3 pb-10 space-y-3">
+                  {Object.keys(byArea).length === 0 ? (
+                    <p className="text-center text-sm text-gray-400 py-8">No places match this filter</p>
+                  ) : Object.entries(byArea).map(([area, areaPlaces]) => (
+                    <div key={area}>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{area}</p>
+                      <div className="space-y-3">
+                        {areaPlaces.map(place => (
+                          <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                            {place.photoUrl
+                              ? <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                              : <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0"><MapPin size={20} strokeWidth={1.5} className="text-gray-300" /></div>
+                            }
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
+                              <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                                <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+                                {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+                              </p>
+                              {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+                            </div>
+                            {/* Save to my collection button */}
+                            <button
+                              onClick={async () => {
+                                setSavingPlace({ id: place.id, name: place.name });
+                                setLoadingPlaceInCols(true);
+                                const ids = await getPlaceCollectionIds(place.id);
+                                setPlaceInMyCollections(ids);
+                                setLoadingPlaceInCols(false);
+                              }}
+                              className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 flex-shrink-0"
+                            >
+                              <Bookmark size={14} strokeWidth={1.5} className="text-gray-500" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Save-place-to-collection picker */}
+      {savingPlace && (
+        <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setSavingPlace(null); setShowInlineNewCol(false); setInlineNewColName(''); }} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900 mb-0.5">Save to collection</h3>
+              <p className="text-xs text-gray-400 truncate">{savingPlace.name}</p>
+            </div>
+            {loadingPlaceInCols ? (
+              <div className="px-4 space-y-3 pb-4">
+                {[0,1].map(i => <div key={i} className="h-14 bg-gray-100 rounded-2xl animate-pulse" />)}
+              </div>
+            ) : myCollections.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-6 px-4">You don't have any collections yet. Create one below!</p>
+            ) : (
+              <div className="px-4 space-y-2 max-h-64 overflow-y-auto">
+                {myCollections.map(col => {
+                  const inCol = placeInMyCollections.has(col.id);
+                  return (
+                    <button
+                      key={col.id}
+                      onClick={async () => {
+                        if (inCol) {
+                          await removePlaceFromCollection(col.id, savingPlace.id);
+                          setPlaceInMyCollections(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                          setMyCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                        } else {
+                          await addPlaceToCollection(col.id, savingPlace.id);
+                          setPlaceInMyCollections(prev => new Set(prev).add(col.id));
+                          setMyCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: c.placesCount + 1 } : c));
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
+                    >
+                      <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                        {col.coverImageUrl
+                          ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
+                          : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                        <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                      </div>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                        {inCol && <Check size={10} strokeWidth={3} className="text-white" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {/* Quick-create new collection */}
+            <div className="px-4 pt-3">
+              {showInlineNewCol ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={inlineNewColName}
+                    onChange={e => setInlineNewColName(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && inlineNewColName.trim()) {
+                        setSavingInlineCol(true);
+                        const { data, error } = await createCollection(currentUserId, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                        setSavingInlineCol(false);
+                        if (!error && data) {
+                          setMyCollections(prev => [data, ...prev]);
+                          setInlineNewColName('');
+                          setShowInlineNewCol(false);
+                        }
+                      }
+                      if (e.key === 'Escape') { setShowInlineNewCol(false); setInlineNewColName(''); }
+                    }}
+                    placeholder="Collection name…"
+                    className="flex-1 bg-gray-50 rounded-xl px-3 py-2.5 text-sm text-gray-700 outline-none"
+                  />
+                  <button
+                    disabled={!inlineNewColName.trim() || savingInlineCol}
+                    onClick={async () => {
+                      if (!inlineNewColName.trim()) return;
+                      setSavingInlineCol(true);
+                      const { data, error } = await createCollection(currentUserId, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                      setSavingInlineCol(false);
+                      if (!error && data) { setMyCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                    }}
+                    className="px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                  >
+                    {savingInlineCol ? '…' : 'Create'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowInlineNewCol(true)}
+                  className="w-full flex items-center gap-2 text-sm font-semibold text-gray-500 py-2"
+                >
+                  <Plus size={16} strokeWidth={2} className="text-gray-400" /> New collection
+                </button>
+              )}
             </div>
           </div>
         </div>

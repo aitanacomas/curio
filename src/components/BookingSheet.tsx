@@ -3,18 +3,29 @@ import { useEffect } from 'react';
 import type { Place } from '../types';
 
 const categoryEmoji: Record<string, string> = {
-  cafe: '☕', restaurant: '🍽', hotel: '🏨', attraction: '🗺', bar: '🍸', nature: '🌿', shop: '🛍', experience: '🎭',
+  restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
+  hotel: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
+  shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
+  street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
 };
 
 const bookingCTA: Record<string, string> = {
   restaurant: 'Reserve a table →',
   cafe: 'See on Google →',
+  bar: 'Reserve a spot →',
+  food: 'Order now →',
   hotel: 'Check availability →',
   attraction: 'Buy tickets →',
-  bar: 'Reserve a spot →',
   nature: 'Book your visit →',
+  beach: 'Plan your visit →',
   shop: 'Book appointment →',
   experience: 'Book experience →',
+  sports: 'Book activity →',
+  wellness: 'Book session →',
+  street: 'Explore area →',
+  event: 'Get tickets →',
+  flight: 'Search flights →',
+  transport: 'Book transport →',
 };
 
 interface Props {
@@ -69,10 +80,10 @@ export default function BookingSheet({ place, onClose }: Props) {
 
           {/* Name + location */}
           <div className="px-4 pt-4 pb-1">
-            <h2 className="text-xl font-black text-gray-900 leading-tight">{place.name}</h2>
+            <h2 className="text-xl font-black text-gray-900 leading-tight">{place.name.split(',')[0].trim()}</h2>
             <p className="text-sm text-gray-400 flex items-center gap-1 mt-1">
               <MapPin size={12} strokeWidth={1.5} />
-              {place.neighbourhood ? `${place.neighbourhood} · ` : ''}{place.city}, {place.country}
+              {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
             </p>
           </div>
 

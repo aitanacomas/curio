@@ -24,6 +24,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [pageResetKey, setPageResetKey] = useState(0);
   const [showMessages, setShowMessages] = useState(false);
+  const [messagesTargetUserId, setMessagesTargetUserId] = useState<string | undefined>(undefined);
   const [postToast, setPostToast] = useState<PostToast | null>(null);
   const [publicCollectionId, setPublicCollectionId] = useState<string | null>(() => {
     const match = window.location.pathname.match(/^\/collection\/([^/]+)$/);
@@ -95,7 +96,7 @@ export default function App() {
     }
   };
 
-  const openMessages = () => { setActiveTab('home'); setShowMessages(true); };
+  const openMessages = (targetUserId?: string) => { setActiveTab('home'); setMessagesTargetUserId(targetUserId); setShowMessages(true); };
 
   // ── Loading ──────────────────────────────────────────────────────
   if (authStage === 'loading') {
@@ -161,7 +162,7 @@ export default function App() {
   const renderPage = () => {
     switch (activeTab) {
       case 'home':
-        return <Home key={pageResetKey} showMessages={showMessages} onMessagesClose={() => setShowMessages(false)} isNewUser={appUser?.isDemo === false} appUser={appUser ?? undefined} onNavigate={setActiveTab} />;
+        return <Home key={pageResetKey} showMessages={showMessages} messagesTargetUserId={messagesTargetUserId} onMessagesClose={() => { setShowMessages(false); setMessagesTargetUserId(undefined); }} isNewUser={appUser?.isDemo === false} appUser={appUser ?? undefined} onNavigate={setActiveTab} />;
       case 'explore':
         return <Explore key={pageResetKey} onOpenMessages={openMessages} appUser={appUser ?? undefined} />;
       case 'add':

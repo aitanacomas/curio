@@ -7,6 +7,7 @@ interface Props {
   currentUserId: string;
   onBack: () => void;
   onFollowChange?: (delta: number) => void;
+  onOpenMessages?: () => void;
 }
 
 interface PendingInvite {
@@ -16,7 +17,7 @@ interface PendingInvite {
   sentAt: string;
 }
 
-export default function FindPeople({ currentUserId, onBack, onFollowChange }: Props) {
+export default function FindPeople({ currentUserId, onBack, onFollowChange, onOpenMessages }: Props) {
   const [profiles, setProfiles] = useState<DiscoverProfile[]>([]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -220,6 +221,7 @@ export default function FindPeople({ currentUserId, onBack, onFollowChange }: Pr
         currentUserId={currentUserId}
         onBack={() => setViewingProfile(null)}
         onFollowChange={onFollowChange}
+        onMessage={onOpenMessages}
       />
     );
   }
