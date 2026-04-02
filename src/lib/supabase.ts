@@ -220,7 +220,7 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
 
   // Own posts + posts where user is an accepted collaborator
   const [{ data: ownedPosts }, { data: collabRows }] = await Promise.all([
-    supabase.from('posts').select(selectFields).eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('posts').select(selectFields).eq('user_id', userId).order('position', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false }),
     supabase.from('post_collaborators').select('post_id').eq('user_id', userId).eq('status', 'accepted'),
   ]);
 
@@ -625,6 +625,12 @@ export async function removePostCollaborator(postId: string, userId: string): Pr
 
 export async function updatePostCollaboratorStatus(postId: string, userId: string, status: 'accepted' | 'declined'): Promise<void> {
   await supabase.from('post_collaborators').update({ status }).eq('post_id', postId).eq('user_id', userId);
+}
+
+export async function updatePostOrder(orderedIds: string[]): Promise<void> {
+  await Promise.all(orderedIds.map((id, i) =>
+    supabase.from('posts').update({ position: i }).eq('id', id)
+  ));
 }
 
 export async function updatePostCaption(postId: string, caption: string, hashtags?: string[], locationLabel?: string) {

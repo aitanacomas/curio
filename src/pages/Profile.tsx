@@ -1,4 +1,7 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
+import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
@@ -7,7 +10,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, savePlace, unsavePlace, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
 
 function timeAgo(iso: string): string {
   if (!iso) return '';
@@ -60,6 +63,47 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
+function SortablePostCell({ post, reorderMode, onClick }: { post: RealPost; reorderMode: boolean; onClick: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
+  const firstImage = post.places[0]?.photoUrl;
+  if (!firstImage) return null;
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      {...(reorderMode ? { ...attributes, ...listeners } : {})}
+      onClick={onClick}
+      className={`aspect-square bg-white relative ${reorderMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
+    >
+      <img src={firstImage} alt="" className="w-full h-full object-cover" />
+      {reorderMode && (
+        <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+          <div className="w-6 h-6 rounded-full bg-white/80 flex items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M1 6h10M1 9h10" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </div>
+        </div>
+      )}
+      {!reorderMode && post.places.length > 1 && (
+        <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+          <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
+            <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+            <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+          </div>
+        </div>
+      )}
+      {!reorderMode && (post.collaborators ?? []).length > 0 && (
+        <div className="absolute bottom-1.5 left-1.5 flex -space-x-1">
+          {(post.collaborators ?? []).slice(0, 3).map(c => (
+            c.avatarUrl
+              ? <img key={c.id} src={c.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-white" />
+              : <div key={c.id} className="w-5 h-5 rounded-full bg-gray-400 border border-white flex items-center justify-center text-[8px] font-bold text-white">{c.name[0]?.toUpperCase() || '?'}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: (targetUserId?: string) => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
@@ -108,6 +152,21 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [showPostShareSheet, setShowPostShareSheet] = useState(false);
   const [postSentTo, setPostSentTo] = useState<Set<string>>(new Set());
   const [showEditPost, setShowEditPost] = useState(false);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+  );
+  const handlePostDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setRealPosts(prev => {
+      const oldIndex = prev.findIndex(p => p.id === active.id);
+      const newIndex = prev.findIndex(p => p.id === over.id);
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+  }, []);
   const [editPostCaption, setEditPostCaption] = useState('');
   const [editPostPlaces, setEditPostPlaces] = useState<RealPostPlace[]>([]);
   const [editPostHashtags, setEditPostHashtags] = useState<string[]>([]);
@@ -2067,34 +2126,55 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {activeTab === 'Posts' && (
         isNewUser ? (
           realPosts.length > 0 ? (
-            <div className="grid grid-cols-3 gap-px bg-white border-t border-gray-100">
-              {realPosts.map(post => {
-                const firstImage = post.places[0]?.photoUrl;
-                if (!firstImage) return null;
-                return (
-                  <button key={post.id} onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }} className="aspect-square bg-white relative">
-                    <img src={firstImage} alt="" className="w-full h-full object-cover" />
-                    {post.places.length > 1 && (
-                      <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
-                        <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
-                          <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
-                          <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
-                        </div>
-                      </div>
-                    )}
-                    {(post.collaborators ?? []).length > 0 && (
-                      <div className="absolute bottom-1.5 left-1.5 flex -space-x-1">
-                        {(post.collaborators ?? []).slice(0, 3).map(c => (
-                          c.avatarUrl
-                            ? <img key={c.id} src={c.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-white" />
-                            : <div key={c.id} className="w-5 h-5 rounded-full bg-gray-400 border border-white flex items-center justify-center text-[8px] font-bold text-white">{c.name[0]?.toUpperCase() || '?'}</div>
-                        ))}
-                      </div>
-                    )}
+            <>
+              {/* Reorder toolbar */}
+              <div className="flex items-center justify-end px-4 py-2 border-t border-gray-100">
+                {reorderMode ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setReorderMode(false); }}
+                      className="text-xs text-gray-400 px-3 py-1.5 rounded-full border border-gray-200"
+                    >Cancel</button>
+                    <button
+                      disabled={savingOrder}
+                      onClick={async () => {
+                        setSavingOrder(true);
+                        await updatePostOrder(realPosts.map(p => p.id));
+                        setSavingOrder(false);
+                        setReorderMode(false);
+                      }}
+                      className="text-xs font-semibold text-white bg-gray-900 px-3 py-1.5 rounded-full disabled:opacity-50"
+                    >{savingOrder ? 'Saving…' : 'Save order'}</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setReorderMode(true)}
+                    className="text-xs text-gray-400 font-medium flex items-center gap-1"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M1 6h10M1 9h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                    Edit order
                   </button>
-                );
-              }).filter(Boolean)}
-            </div>
+                )}
+              </div>
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handlePostDragEnd}>
+                <SortableContext items={realPosts.map(p => p.id)} strategy={rectSortingStrategy}>
+                  <div className="grid grid-cols-3 gap-px bg-gray-100">
+                    {realPosts.map(post => {
+                      const firstImage = post.places[0]?.photoUrl;
+                      if (!firstImage) return null;
+                      return (
+                        <SortablePostCell
+                          key={post.id}
+                          post={post}
+                          reorderMode={reorderMode}
+                          onClick={() => { if (!reorderMode) { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); } }}
+                        />
+                      );
+                    }).filter(Boolean)}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 px-6">
               <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
