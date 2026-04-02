@@ -51,15 +51,23 @@ export default function ImageCarousel({ images, labels, scales, onClick }: Props
       {/* Bottom bar: dots left, label right, same row, never overlapping */}
       <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {images.length > 1 && images.map((_, i) => (
-            <button
-              key={i}
-              onClick={e => { e.stopPropagation(); scrollTo(i); }}
-              className={`rounded-full transition-all duration-200 ${
-                i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'
-              }`}
-            />
-          ))}
+          {images.length > 1 && (
+            images.length <= 5 ? (
+              images.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={e => { e.stopPropagation(); scrollTo(i); }}
+                  className={`rounded-full transition-all duration-200 ${
+                    i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'
+                  }`}
+                />
+              ))
+            ) : (
+              <span className="text-white text-[11px] font-semibold bg-black/40 backdrop-blur-sm rounded-full px-2 py-0.5 leading-none">
+                {index + 1} / {images.length}
+              </span>
+            )
+          )}
         </div>
         {labels && labels[index] && (
           <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1 min-w-0">
