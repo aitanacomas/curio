@@ -327,14 +327,18 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               <span className="text-xs font-bold text-slate-400">{initials}</span>
             </div>
           )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 leading-tight">{profile?.name}</p>
+          <div className="flex-1 min-w-0 mr-3">
+            <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{profile?.name}</p>
             {selectedPost.places.length > 0 && (
               <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
                 <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                {selectedPost.places.length === 1
-                  ? `${selectedPost.places[0].name.split(',')[0].trim()} · ${selectedPost.places[0].city}`
-                  : `${selectedPost.places[0].name.split(',')[0].trim()} +${selectedPost.places.length - 1} · ${selectedPost.places[0].city}`}
+                <span className="truncate">
+                  {selectedPost.locationLabel
+                    ? selectedPost.locationLabel
+                    : selectedPost.places.length === 1
+                      ? selectedPost.places[0].city || selectedPost.places[0].name.split(',')[0].trim()
+                      : `${selectedPost.places[0].city || selectedPost.places[0].name.split(',')[0].trim()} +${selectedPost.places.length - 1}`}
+                </span>
               </p>
             )}
           </div>

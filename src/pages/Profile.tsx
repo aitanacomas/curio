@@ -404,14 +404,18 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <span className="text-xs font-bold text-slate-400">{displayUser.name[0]?.toUpperCase()}</span>
             </div>
           )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 leading-tight">{displayUser.name}</p>
+          <div className="flex-1 min-w-0 mr-3">
+            <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{displayUser.name}</p>
             {selectedRealPost.places.length > 0 && (
               <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
                 <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                {selectedRealPost.places.length === 1
-                  ? `${selectedRealPost.places[0].name.split(',')[0].trim()} · ${selectedRealPost.places[0].city}`
-                  : `${selectedRealPost.places[0].name.split(',')[0].trim()} +${selectedRealPost.places.length - 1} · ${selectedRealPost.places[0].city}`}
+                <span className="truncate">
+                  {selectedRealPost.locationLabel
+                    ? selectedRealPost.locationLabel
+                    : selectedRealPost.places.length === 1
+                      ? selectedRealPost.places[0].city || selectedRealPost.places[0].name.split(',')[0].trim()
+                      : `${selectedRealPost.places[0].city || selectedRealPost.places[0].name.split(',')[0].trim()} +${selectedRealPost.places.length - 1}`}
+                </span>
               </p>
             )}
           </div>
