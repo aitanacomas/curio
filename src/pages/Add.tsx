@@ -720,9 +720,9 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
 
         <div className="px-4 flex-1 flex flex-col">
           <label
-            className="flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50 active:bg-gray-100 transition-colors min-h-80 cursor-pointer"
+            className="relative flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50 active:bg-gray-100 transition-colors min-h-80 cursor-pointer overflow-hidden"
           >
-            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} className="sr-only" />
+            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
             <div className="w-20 h-20 rounded-full bg-white shadow-sm flex items-center justify-center">
               <Camera size={30} strokeWidth={1.5} className="text-gray-400" />
             </div>
@@ -813,9 +813,9 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
 
           <label
             id="places-add-more-label"
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer"
+            className="relative w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer overflow-hidden"
           >
-            <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="sr-only" />
+            <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
             <Camera size={16} strokeWidth={1.5} />
             Add more photos
           </label>
@@ -866,9 +866,9 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
                   <Pencil size={14} strokeWidth={1.5} className={editingPlaces ? 'text-white' : 'text-gray-500'} />
                 </button>
                 <label
-                  className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer"
+                  className="relative w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer overflow-hidden"
                 >
-                  <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="sr-only" />
+                  <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                   <Plus size={16} strokeWidth={1.5} className="text-gray-500" />
                 </label>
               </div>
@@ -959,9 +959,9 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
               </DndContext>
 
               <label
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer"
+                className="relative w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer overflow-hidden"
               >
-                <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="sr-only" />
+                <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 <Camera size={16} strokeWidth={1.5} />
                 Add more photos
               </label>
