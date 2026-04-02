@@ -48,30 +48,34 @@ export default function ImageCarousel({ images, labels, scales, onClick }: Props
         ))}
       </div>
 
-      {/* Place name label */}
-      {labels && labels[index] && (
-        <div className="absolute bottom-3 right-4 flex items-center gap-1 bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1">
-          <svg width="8" height="10" viewBox="0 0 8 10" fill="white" className="opacity-80 flex-shrink-0">
-            <path d="M4 0C2.07 0 0.5 1.57 0.5 3.5c0 2.63 3.5 6.5 3.5 6.5s3.5-3.87 3.5-6.5C7.5 1.57 5.93 0 4 0zm0 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/>
-          </svg>
-          <span className="text-white text-[11px] font-semibold leading-none">{labels[index]}</span>
-        </div>
-      )}
-
-      {/* Dots */}
-      {images.length > 1 && (
-        <div className="absolute bottom-3 left-4 flex items-center gap-1.5">
-          {images.map((_, i) => (
-            <button
-              key={i}
-              onClick={e => { e.stopPropagation(); scrollTo(i); }}
-              className={`rounded-full transition-all duration-200 ${
-                i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'
-              }`}
-            />
-          ))}
-        </div>
-      )}
+      {/* Bottom bar: dots left, label right — on separate rows when both present */}
+      <div className="absolute bottom-0 left-0 right-0 flex flex-col items-stretch pointer-events-none">
+        {/* Place label row */}
+        {labels && labels[index] && (
+          <div className="flex justify-end px-3 pb-1 pointer-events-none">
+            <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1 max-w-[70%]">
+              <svg width="8" height="10" viewBox="0 0 8 10" fill="white" className="opacity-80 flex-shrink-0">
+                <path d="M4 0C2.07 0 0.5 1.57 0.5 3.5c0 2.63 3.5 6.5 3.5 6.5s3.5-3.87 3.5-6.5C7.5 1.57 5.93 0 4 0zm0 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/>
+              </svg>
+              <span className="text-white text-[11px] font-semibold leading-none truncate">{labels[index]}</span>
+            </div>
+          </div>
+        )}
+        {/* Dots row */}
+        {images.length > 1 && (
+          <div className="flex items-center gap-1.5 px-4 pb-3 pointer-events-auto">
+            {images.map((_, i) => (
+              <button
+                key={i}
+                onClick={e => { e.stopPropagation(); scrollTo(i); }}
+                className={`rounded-full transition-all duration-200 ${
+                  i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'
+                }`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
