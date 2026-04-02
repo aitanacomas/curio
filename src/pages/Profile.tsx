@@ -63,27 +63,22 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
   ],
 };
 
-function SortablePostCell({ post, reorderMode, onClick }: { post: RealPost; reorderMode: boolean; onClick: () => void }) {
+function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; isDraggingAny: boolean; onClick: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const firstImage = post.places[0]?.photoUrl;
   if (!firstImage) return null;
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
-      {...(reorderMode ? { ...attributes, ...listeners } : {})}
-      onClick={onClick}
-      className={`aspect-square bg-white relative ${reorderMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      {...attributes}
+      {...listeners}
+      onClick={() => { if (!isDraggingAny) onClick(); }}
+      className="aspect-square bg-white relative cursor-pointer touch-manipulation"
     >
-      <img src={firstImage} alt="" className="w-full h-full object-cover" />
-      {reorderMode && (
-        <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-          <div className="w-6 h-6 rounded-full bg-white/80 flex items-center justify-center">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M1 6h10M1 9h10" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/></svg>
-          </div>
-        </div>
-      )}
-      {!reorderMode && post.places.length > 1 && (
+      <img src={firstImage} alt="" className="w-full h-full object-cover" draggable={false} />
+      {isDragging && <div className="absolute inset-0 ring-2 ring-gray-900 ring-inset rounded-sm" />}
+      {post.places.length > 1 && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
           <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
             <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
@@ -91,7 +86,7 @@ function SortablePostCell({ post, reorderMode, onClick }: { post: RealPost; reor
           </div>
         </div>
       )}
-      {!reorderMode && (post.collaborators ?? []).length > 0 && (
+      {(post.collaborators ?? []).length > 0 && (
         <div className="absolute bottom-1.5 left-1.5 flex -space-x-1">
           {(post.collaborators ?? []).slice(0, 3).map(c => (
             c.avatarUrl
@@ -152,19 +147,21 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [showPostShareSheet, setShowPostShareSheet] = useState(false);
   const [postSentTo, setPostSentTo] = useState<Set<string>>(new Set());
   const [showEditPost, setShowEditPost] = useState(false);
-  const [reorderMode, setReorderMode] = useState(false);
-  const [savingOrder, setSavingOrder] = useState(false);
+  const [isDraggingPost, setIsDraggingPost] = useState(false);
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } }),
   );
   const handlePostDragEnd = useCallback(async (event: DragEndEvent) => {
+    setIsDraggingPost(false);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     setRealPosts(prev => {
       const oldIndex = prev.findIndex(p => p.id === active.id);
       const newIndex = prev.findIndex(p => p.id === over.id);
-      return arrayMove(prev, oldIndex, newIndex);
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+      updatePostOrder(reordered.map(p => p.id));
+      return reordered;
     });
   }, []);
   const [editPostCaption, setEditPostCaption] = useState('');
@@ -2126,55 +2123,26 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {activeTab === 'Posts' && (
         isNewUser ? (
           realPosts.length > 0 ? (
-            <>
-              {/* Reorder toolbar */}
-              <div className="flex items-center justify-end px-4 py-2 border-t border-gray-100">
-                {reorderMode ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => { setReorderMode(false); }}
-                      className="text-xs text-gray-400 px-3 py-1.5 rounded-full border border-gray-200"
-                    >Cancel</button>
-                    <button
-                      disabled={savingOrder}
-                      onClick={async () => {
-                        setSavingOrder(true);
-                        await updatePostOrder(realPosts.map(p => p.id));
-                        setSavingOrder(false);
-                        setReorderMode(false);
-                      }}
-                      className="text-xs font-semibold text-white bg-gray-900 px-3 py-1.5 rounded-full disabled:opacity-50"
-                    >{savingOrder ? 'Saving…' : 'Save order'}</button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setReorderMode(true)}
-                    className="text-xs text-gray-400 font-medium flex items-center gap-1"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M1 6h10M1 9h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                    Edit order
-                  </button>
-                )}
-              </div>
-              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handlePostDragEnd}>
-                <SortableContext items={realPosts.map(p => p.id)} strategy={rectSortingStrategy}>
-                  <div className="grid grid-cols-3 gap-px bg-gray-100">
-                    {realPosts.map(post => {
-                      const firstImage = post.places[0]?.photoUrl;
-                      if (!firstImage) return null;
-                      return (
-                        <SortablePostCell
-                          key={post.id}
-                          post={post}
-                          reorderMode={reorderMode}
-                          onClick={() => { if (!reorderMode) { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); } }}
-                        />
-                      );
-                    }).filter(Boolean)}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            </>
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={closestCenter}
+              onDragStart={() => setIsDraggingPost(true)}
+              onDragEnd={handlePostDragEnd}
+              onDragCancel={() => setIsDraggingPost(false)}
+            >
+              <SortableContext items={realPosts.map(p => p.id)} strategy={rectSortingStrategy}>
+                <div className="grid grid-cols-3 gap-px bg-gray-100 border-t border-gray-100">
+                  {realPosts.map(post => (
+                    <SortablePostCell
+                      key={post.id}
+                      post={post}
+                      isDraggingAny={isDraggingPost}
+                      onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }}
+                    />
+                  )).filter(Boolean)}
+                </div>
+              </SortableContext>
+            </DndContext>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 px-6">
               <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
