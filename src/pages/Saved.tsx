@@ -783,12 +783,26 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   // Parse a loose date string like "Mar 11" or "March 11" or "2025-03-11" into a Date
   const parseFlexDate = (str: string): Date | null => {
     if (!str) return null;
+    // Handle ISO format YYYY-MM-DD (from type="date" input) — must not append year
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const d = new Date(str + 'T00:00:00');
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // Handle text formats like "Mar 11" by appending current year
     const year = new Date().getFullYear();
     const d1 = new Date(`${str} ${year}`);
     if (!isNaN(d1.getTime())) return d1;
     const d2 = new Date(str);
     if (!isNaN(d2.getTime())) return d2;
     return null;
+  };
+
+  const fmtDate = (str: string | undefined): string => {
+    if (!str) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return new Date(str + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    return str;
   };
 
   // Extract date from a day label like "Day 1 · Mar 11" or "Day 1 · Tue Mar 11"
@@ -1746,7 +1760,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                             {(item.checkIn || item.checkOut) && (
                               <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
                                 <CalendarDays size={9} strokeWidth={1.5} />
-                                {item.checkIn}{item.checkIn && item.checkOut ? ' → ' : ''}{item.checkOut}
+                                {fmtDate(item.checkIn)}{item.checkIn && item.checkOut ? ' → ' : ''}{fmtDate(item.checkOut)}
                               </p>
                             )}
                           </div>
@@ -2404,11 +2418,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     <div className="flex gap-2 mb-2">
                       <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
                         <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                        <input value={addPlaceCheckIn} onChange={e => setAddPlaceCheckIn(e.target.value)} placeholder="Check-in date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                        <input type="date" value={addPlaceCheckIn} onChange={e => setAddPlaceCheckIn(e.target.value)} className="flex-1 bg-transparent text-sm text-gray-700 outline-none" />
                       </div>
                       <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
                         <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                        <input value={addPlaceCheckOut} onChange={e => setAddPlaceCheckOut(e.target.value)} placeholder="Check-out date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                        <input type="date" value={addPlaceCheckOut} onChange={e => setAddPlaceCheckOut(e.target.value)} className="flex-1 bg-transparent text-sm text-gray-700 outline-none" />
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -2535,7 +2549,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               {(detailItem.checkIn || detailItem.checkOut) && (
                 <div className="flex items-center gap-3 mb-3">
                   <CalendarDays size={16} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                  <p className="text-base text-gray-800">{detailItem.checkIn}{detailItem.checkIn && detailItem.checkOut ? ' → ' : ''}{detailItem.checkOut}</p>
+                  <p className="text-base text-gray-800">{fmtDate(detailItem.checkIn)}{detailItem.checkIn && detailItem.checkOut ? ' → ' : ''}{fmtDate(detailItem.checkOut)}</p>
                 </div>
               )}
               {/* Address */}
@@ -2830,13 +2844,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     <div className="flex gap-2 mb-2">
                       <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
                         <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                        <input value={editItem.checkIn ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, checkIn: e.target.value } : prev)}
-                          placeholder="Check-in date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                        <input type="date" value={editItem.checkIn ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, checkIn: e.target.value } : prev)}
+                          className="flex-1 bg-transparent text-sm text-gray-700 outline-none" />
                       </div>
                       <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
                         <CalendarDays size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                        <input value={editItem.checkOut ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, checkOut: e.target.value } : prev)}
-                          placeholder="Check-out date" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+                        <input type="date" value={editItem.checkOut ?? ''} onChange={e => setEditItem(prev => prev ? { ...prev, checkOut: e.target.value } : prev)}
+                          className="flex-1 bg-transparent text-sm text-gray-700 outline-none" />
                       </div>
                     </div>
                     <div className="flex gap-2">
