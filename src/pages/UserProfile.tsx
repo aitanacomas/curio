@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Check, MapPin, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send } from 'lucide-react';
-import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getPostComments, addComment, deleteComment, type RealPost, type RealCollection, type RealPostPlace, type PostComment } from '../lib/supabase';
+import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getPostComments, addComment, deleteComment, getPlans, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan } from '../lib/supabase';
 
 function timeAgo(iso: string): string {
   if (!iso) return '';
@@ -35,7 +35,7 @@ interface Props {
   onMessage?: (userId: string) => void;
 }
 
-type ProfileTab = 'Posts' | 'Map' | 'Collections';
+type ProfileTab = 'Posts' | 'Map' | 'Collections' | 'Trips';
 
 export default function UserProfile({ userId, currentUserId, onBack, onFollowChange, onMessage }: Props) {
   const [profile, setProfile] = useState<{ name: string; username: string; avatarUrl: string | null; bio?: string | null; location?: string | null } | null>(null);
@@ -75,6 +75,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [postCommentText, setPostCommentText] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const postCommentInputRef = useRef<HTMLInputElement>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [loadingPlans, setLoadingPlans] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -96,6 +98,9 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
     getUserCollections(currentUserId).then(setMyCollections);
     // Fetch likes
     getLikedPosts(currentUserId).then(setLikedPosts);
+    // Fetch plans for this user
+    setLoadingPlans(true);
+    getPlans(userId).then(p => { setPlans(p); setLoadingPlans(false); });
   }, [userId, currentUserId]);
 
   // Load like counts + saved place ids whenever a post is opened
@@ -577,12 +582,12 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       </div>
 
       {/* Tabs */}
-      <div className="grid grid-cols-3 border-b border-gray-100 border-t">
-        {(['Posts', 'Map', 'Collections'] as ProfileTab[]).map(tab => (
+      <div className="grid grid-cols-4 border-b border-gray-100 border-t">
+        {(['Posts', 'Map', 'Collections', 'Trips'] as ProfileTab[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`py-3 text-sm font-medium transition-colors ${
+            className={`py-3 text-xs font-medium transition-colors ${
               activeTab === tab ? 'text-gray-900 font-bold border-b-2 border-gray-900 -mb-px' : 'text-gray-400'
             }`}
           >
@@ -664,6 +669,72 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           </div>
         );
       })()}
+
+      {activeTab === 'Trips' && (
+        loadingPlans ? (
+          <div className="px-4 pt-4 space-y-3">
+            {[0,1,2].map(i => <div key={i} className="h-24 bg-gray-100 rounded-2xl animate-pulse" />)}
+          </div>
+        ) : plans.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <span className="text-3xl">✈️</span>
+            </div>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No trips yet</p>
+            <p className="text-slate-400 text-sm text-center max-w-[200px]">
+              Trips {profile?.name.split(' ')[0]} plans will appear here
+            </p>
+          </div>
+        ) : (
+          <div className="px-4 pt-4 pb-10 space-y-3">
+            {plans.map(plan => {
+              const statusColors: Record<string, string> = {
+                dreaming: 'bg-purple-50 text-purple-600',
+                planning: 'bg-blue-50 text-blue-600',
+                upcoming: 'bg-green-50 text-green-600',
+                past: 'bg-gray-100 text-gray-500',
+              };
+              const statusLabel: Record<string, string> = {
+                dreaming: 'Dreaming', planning: 'Planning', upcoming: 'Upcoming', past: 'Past',
+              };
+              return (
+                <div key={plan.id} className="rounded-2xl overflow-hidden border border-gray-100">
+                  {plan.coverImageUrl ? (
+                    <div className="relative h-32">
+                      <img src={plan.coverImageUrl} alt={plan.title} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                      <div className="absolute bottom-0 left-0 right-0 px-3 pb-3">
+                        <p className="text-white font-bold text-sm leading-tight">{plan.title}</p>
+                        <p className="text-white/70 text-xs mt-0.5">{plan.country}{plan.dates ? ` · ${plan.dates}` : ''}</p>
+                      </div>
+                      <div className={`absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusColors[plan.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {statusLabel[plan.status] ?? plan.status}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">{plan.title}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{plan.country}{plan.dates ? ` · ${plan.dates}` : ''}</p>
+                      </div>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusColors[plan.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {statusLabel[plan.status] ?? plan.status}
+                      </span>
+                    </div>
+                  )}
+                  {plan.days.length > 0 && (
+                    <div className="px-3 py-2 bg-gray-50 border-t border-gray-100">
+                      <p className="text-[11px] text-gray-400">
+                        {plan.days.length} day{plan.days.length !== 1 ? 's' : ''} · {plan.days.reduce((acc, d) => acc + d.items.length, 0)} places
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
 
       {activeTab === 'Collections' && (
         collections.length > 0 ? (
