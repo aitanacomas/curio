@@ -245,9 +245,12 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
   const collabsByPost: Record<string, { id: string; name: string; username: string; avatarUrl: string | null }[]> = {};
   for (const c of (collabs ?? [])) {
     const pid = (c as any).post_id;
+    const cUserId = (c as any).user_id;
+    // Don't show the viewing user as a collaborator on their own grid
+    if (cUserId === userId) continue;
     if (!collabsByPost[pid]) collabsByPost[pid] = [];
     collabsByPost[pid].push({
-      id: (c as any).user_id,
+      id: cUserId,
       name: (c as any).profiles?.name ?? '',
       username: (c as any).profiles?.username ?? '',
       avatarUrl: (c as any).profiles?.avatar_url ?? null,
@@ -348,6 +351,43 @@ export async function getCollectionPlaces(collectionId: string): Promise<RealPos
       lat: pl.lat ?? null,
       lng: pl.lng ?? null,
     }));
+}
+
+/** Geocode any places missing lat/lng in parallel, update DB, return updated array */
+export async function geocodeMissingPlaces(places: RealPostPlace[], apiKey: string): Promise<RealPostPlace[]> {
+  if (!apiKey) return places;
+  const missing = places.filter(pl => pl.lat == null || pl.lng == null);
+  if (missing.length === 0) return places;
+
+  const results = await Promise.all(missing.map(async pl => {
+    try {
+      const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey },
+        body: JSON.stringify({ input: `${pl.name}, ${pl.city}, ${pl.country}`, languageCode: 'en' }),
+      });
+      const acData = await acRes.json();
+      const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
+      if (!placeId) return null;
+      const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+        headers: { 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': 'location' },
+      });
+      const det = await detRes.json();
+      if (det.location?.latitude != null)
+        return { id: pl.id, lat: det.location.latitude as number, lng: det.location.longitude as number };
+      return null;
+    } catch { return null; }
+  }));
+
+  const coords: Record<string, { lat: number; lng: number }> = {};
+  results.forEach(r => { if (r) coords[r.id] = { lat: r.lat, lng: r.lng }; });
+  if (Object.keys(coords).length === 0) return places;
+
+  // Persist to DB (best-effort, fire-and-forget)
+  Object.entries(coords).forEach(([id, c]) =>
+    supabase.from('post_places').update({ lat: c.lat, lng: c.lng }).eq('id', id)
+  );
+  return places.map(pl => coords[pl.id] ? { ...pl, ...coords[pl.id] } : pl);
 }
 
 export async function addPlaceToCollection(collectionId: string, postPlaceId: string) {
@@ -651,6 +691,12 @@ export async function reorderPostPlaces(orderedIds: string[]) {
     if (error) console.error(`[reorderPostPlaces] id=${orderedIds[i]} pos=${i} error:`, error.message);
     else console.log(`[reorderPostPlaces] id=${orderedIds[i]} pos=${i} updated rows:`, data?.length ?? 0, data);
   });
+}
+
+export async function updatePostPlace(id: string, data: { name?: string; neighborhood?: string; city?: string; country?: string; category?: string }): Promise<void> {
+  const { error, data: rows } = await supabase.from('post_places').update(data).eq('id', id).select();
+  if (error) console.error('[updatePostPlace] error:', error.message, error.details, error.hint);
+  else console.log('[updatePostPlace] updated rows:', rows?.length, 'id:', id, 'data:', data);
 }
 
 export async function searchProfiles(query: string, excludeId: string): Promise<FollowProfile[]> {

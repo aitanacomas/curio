@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -10,7 +11,11 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
+import { googleTypesToCategory } from '../lib/placeUtils';
+import PlaceSearch from '../components/PlaceSearch';
+
+const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
 function timeAgo(iso: string): string {
   if (!iso) return '';
@@ -65,7 +70,7 @@ const mockComments: Record<string, { userId: string; text: string; time: string 
 
 function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; isDraggingAny: boolean; onClick: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
-  const firstImage = post.places[0]?.photoUrl;
+  const firstImage = post.places.map(p => p.photoUrl).find(url => url && url.trim());
   if (!firstImage) return null;
   return (
     <div
@@ -74,9 +79,9 @@ function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; is
       {...attributes}
       {...listeners}
       onClick={() => { if (!isDraggingAny) onClick(); }}
-      className="aspect-square bg-white relative cursor-pointer touch-manipulation"
+      className="aspect-square bg-white relative cursor-pointer touch-manipulation overflow-hidden"
     >
-      <img src={firstImage} alt="" className="w-full h-full object-cover" draggable={false} />
+      <img src={firstImage} alt="" className="w-full h-full object-cover" draggable={false} onError={e => { (e.currentTarget.closest('[class*="aspect-square"]') as HTMLElement | null)?.style && ((e.currentTarget.closest('[class*="aspect-square"]') as HTMLElement).style.display = 'none'); }} />
       {isDragging && <div className="absolute inset-0 ring-2 ring-gray-900 ring-inset rounded-sm" />}
       {post.places.length > 1 && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
@@ -116,7 +121,6 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [saveError, setSaveError] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCreatorOnboard, setShowCreatorOnboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
@@ -169,6 +173,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [editPostHashtags, setEditPostHashtags] = useState<string[]>([]);
   const [editTagInput, setEditTagInput] = useState('');
   const [savingEditPost, setSavingEditPost] = useState(false);
+  const [expandedPlaceId, setExpandedPlaceId] = useState<string | null>(null);
   const [realCollections, setRealCollections] = useState<RealCollection[]>([]);
   const [showCreateCollection, setShowCreateCollection] = useState(false);
   const [selectedRealCollection, setSelectedRealCollection] = useState<RealCollection | null>(null);
@@ -180,8 +185,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [editColCoverFile, setEditColCoverFile] = useState<File | null>(null);
   const [editColCoverPreview, setEditColCoverPreview] = useState<string | null>(null);
   const [savingEditCollection, setSavingEditCollection] = useState(false);
-  const editColCoverInputRef = useRef<HTMLInputElement>(null);
   const [showAddPlacesSheet, setShowAddPlacesSheet] = useState(false);
+  const [addPlacesSearch, setAddPlacesSearch] = useState('');
   const [colPlaceIds, setColPlaceIds] = useState<Set<string>>(new Set());
   const [colFilter, setColFilter] = useState('all');
   const [showColMap, setShowColMap] = useState(true);
@@ -189,6 +194,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
   const [loadingPlaceCollections, setLoadingPlaceCollections] = useState(false);
   const [showInlineNewCol, setShowInlineNewCol] = useState(false);
+  const [showSaveAllPicker, setShowSaveAllPicker] = useState(false);
+  const [saveAllColIds, setSaveAllColIds] = useState<Set<string>>(new Set());
   const [inlineNewColName, setInlineNewColName] = useState('');
   const [savingInlineCol, setSavingInlineCol] = useState(false);
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
@@ -200,9 +207,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [newColCoverFile, setNewColCoverFile] = useState<File | null>(null);
   const [newColCoverPreview, setNewColCoverPreview] = useState<string | null>(null);
   const [savingCollection, setSavingCollection] = useState(false);
-  const colCoverInputRef = useRef<HTMLInputElement>(null);
   const [sharedCollections, setSharedCollections] = useState<RealCollection[]>([]);
-  const [subscribedCollections, setSubscribedCollections] = useState<RealCollection[]>([]);
   const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
   const [showInviteSheet, setShowInviteSheet] = useState(false);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -230,40 +235,53 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         }
         const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
-        // Auto-enrich any places missing neighbourhood or city (in memory + DB)
-        const missingLocation = posts.flatMap(p => p.places.filter(pl => !pl.neighborhood || !pl.city));
-        if (missingLocation.length > 0) {
-          const locationFixes: Record<string, { neighborhood?: string; city?: string; country?: string }> = {};
-          for (const pl of missingLocation) {
+        // Auto-enrich any places missing neighbourhood, city, or category (in memory + DB)
+        const missingData = posts.flatMap(p => p.places.filter(pl => !pl.neighborhood || !pl.city || !pl.category));
+        if (missingData.length > 0) {
+          // Normalize city abbreviations that Google Places doesn't recognise
+          const normalCity = (c: string) => ({ cdmx: 'Mexico City', 'ciudad de mexico': 'Mexico City', 'ciudad de méxico': 'Mexico City', nyc: 'New York City', la: 'Los Angeles', sf: 'San Francisco', dc: 'Washington DC' }[c?.toLowerCase()] ?? c);
+          const searchPlace = async (textQuery: string) => {
+            const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.types' },
+              body: JSON.stringify({ textQuery, languageCode: 'en' }),
+            });
+            const d = await r.json();
+            return d.places?.[0] ?? null;
+          };
+          // Run all enrichments in parallel
+          const enrichResults = await Promise.all(missingData.map(async (pl) => {
+            if (!pl.name) return null;
             try {
-              const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents' },
-                body: JSON.stringify({ textQuery: [pl.name, pl.city, pl.country].filter(Boolean).join(', '), languageCode: 'en' }),
-              });
-              const data = await res.json();
-              const comps: { types: string[]; longText: string }[] = data.places?.[0]?.addressComponents ?? [];
-              if (!comps.length) continue;
-              const find = (...types: string[]) => comps.find(c => types.some(t => c.types?.includes(t)))?.longText ?? '';
-              let hasPostalTown = comps.some(c => c.types?.includes('postal_town'));
+              const city = normalCity(pl.city);
+              // Try progressively simpler queries until one works
+              let place = await searchPlace([pl.name, city, pl.country].filter(Boolean).join(', '))
+                ?? await searchPlace([pl.name, pl.country].filter(Boolean).join(', '))
+                ?? await searchPlace(pl.name);
+              if (!place) return null;
+              const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
+              const types: string[] = place.types ?? [];
+              const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
               const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
-              const city = find('postal_town') || (!hasPostalTown ? find('locality') : '') || find('administrative_area_level_2');
+              const resolvedCity = find('postal_town') || find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1');
               const country = find('country');
               const fix: Record<string, string> = {};
               if (neighborhood && !pl.neighborhood) fix.neighborhood = neighborhood;
-              if (city && !pl.city) fix.city = city;
+              if (resolvedCity && !pl.city) fix.city = resolvedCity;
               if (country && !pl.country) fix.country = country;
-              if (Object.keys(fix).length) locationFixes[pl.id] = fix;
-            } catch { /* skip */ }
-          }
+              if (!pl.category && types.length) fix.category = googleTypesToCategory(types);
+              return Object.keys(fix).length ? { id: pl.id, fix } : null;
+            } catch { return null; }
+          }));
+          const locationFixes: Record<string, Record<string, string>> = {};
+          enrichResults.forEach(r => { if (r) locationFixes[r.id] = r.fix; });
           if (Object.keys(locationFixes).length > 0) {
             Object.entries(locationFixes).forEach(([id, fix]) =>
               supabase.from('post_places').update(fix).eq('id', id)
             );
-            setRealPosts(prev => prev.map(post => ({
-              ...post,
-              places: post.places.map(pl => locationFixes[pl.id] ? { ...pl, ...locationFixes[pl.id] } : pl),
-            })));
+            const applyFixes = (p: RealPost) => ({ ...p, places: p.places.map(pl => locationFixes[pl.id] ? { ...pl, ...locationFixes[pl.id] } : pl) });
+            setRealPosts(prev => prev.map(applyFixes));
+            setSelectedRealPost(prev => prev ? applyFixes(prev) : prev);
           }
         }
 
@@ -301,7 +319,6 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       });
       getUserCollections(appUser.id).then(setRealCollections);
       getSharedCollections(appUser.id).then(setSharedCollections);
-      getSubscribedCollections(appUser.id).then(setSubscribedCollections);
       getLikedPosts(appUser.id).then(setLikedRealPosts);
       getSavedPosts(appUser.id).then(setSavedRealPosts);
       getFollowingProfiles(appUser.id).then(setFollowingProfiles);
@@ -339,6 +356,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       setPostPlaceSavedIds(saved);
     });
   }, [selectedRealPost, appUser]);
+
+  // When "Save all" picker opens, compute which collections already contain ALL places
+  useEffect(() => {
+    if (!showSaveAllPicker || !selectedRealPost || selectedRealPost.places.length === 0) { setSaveAllColIds(new Set()); return; }
+    Promise.all(selectedRealPost.places.map(pl => getPlaceCollectionIds(pl.id))).then(sets => {
+      const intersection = sets.reduce<Set<string>>((acc, cur) => new Set([...acc].filter(id => cur.has(id))), sets[0] ?? new Set());
+      setSaveAllColIds(intersection);
+    });
+  }, [showSaveAllPicker]);
 
   const visitedPlaces = places.filter(p => myVisitedPlaceIds.includes(p.id));
   const user = currentUser;
@@ -462,24 +488,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               return (
                 <button
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${allSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
-                  onClick={async () => {
-                    if (!appUser) return;
-                    if (allSaved) {
-                      // unsave all places
-                      for (const place of selectedRealPost.places) {
-                        await unsavePlace(appUser.id, place.id);
-                        setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
-                      }
-                    } else {
-                      // save all unsaved places
-                      for (const place of selectedRealPost.places) {
-                        if (!postPlaceSavedIds.has(place.id)) {
-                          await savePlace(appUser.id, place.id);
-                          setPostPlaceSavedIds(prev => new Set(prev).add(place.id));
-                        }
-                      }
-                    }
-                  }}
+                  onClick={() => setShowSaveAllPicker(true)}
                 >
                   {allSaved && <Check size={13} strokeWidth={2} />}
                   {allSaved ? 'Saved' : 'Save all'}
@@ -687,6 +696,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     : `${first.name.split(',')[0].trim()} +${editPostPlaces.length - 1} · ${first.city}`;
                   // Save caption + hashtags + location_label
                   await updatePostCaption(selectedRealPost.id, editPostCaption, editPostHashtags, locationLabel);
+                  // Always persist all editable place fields to DB
+                  await Promise.all(editPostPlaces.map(ep =>
+                    updatePostPlace(ep.id, {
+                      name: ep.name,
+                      neighborhood: ep.neighborhood,
+                      city: ep.city,
+                      country: ep.country,
+                      category: ep.category,
+                    })
+                  ));
                   // Remove deleted places
                   const removedIds = selectedRealPost.places.filter(p => !editPostPlaces.find(ep => ep.id === p.id)).map(p => p.id);
                   for (const id of removedIds) await deletePostPlace(id);
@@ -713,51 +732,104 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none resize-none"
                 />
               </div>
-              {/* Places — reorder + remove */}
+              {/* Places — reorder + remove + edit address */}
               {editPostPlaces.length > 0 && (
                 <div>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Images & Places</p>
-                  <p className="text-xs text-gray-400 mb-2.5">Use the arrows to reorder — the first image becomes the cover</p>
+                  <p className="text-xs text-gray-400 mb-2.5">Tap a place to edit its details · use arrows to reorder</p>
                   <div className="space-y-2">
-                    {editPostPlaces.map((place, i) => (
-                      <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-2.5">
-                        {/* Number badge + image */}
-                        <div className="relative flex-shrink-0">
-                          {place.photoUrl
-                            ? <img src={place.photoUrl} alt={place.name} className="w-16 h-16 rounded-xl object-cover" />
-                            : <div className="w-16 h-16 rounded-xl bg-gray-200 flex items-center justify-center text-2xl">{categoryEmoji[place.category as keyof typeof categoryEmoji] ?? '📍'}</div>
-                          }
-                          <div className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-gray-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{i + 1}</div>
+                    {editPostPlaces.map((place, i) => {
+                      const isExpanded = expandedPlaceId === place.id;
+                      const updateField = (field: keyof RealPostPlace, value: string) =>
+                        setEditPostPlaces(prev => prev.map(p => p.id === place.id ? { ...p, [field]: value } : p));
+                      return (
+                        <div key={place.id} className="bg-gray-50 rounded-2xl overflow-hidden">
+                          {/* Collapsed row */}
+                          <div className="flex items-center gap-3 p-2.5">
+                            {/* Number badge + image */}
+                            <div className="relative flex-shrink-0">
+                              {place.photoUrl
+                                ? <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover" />
+                                : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center text-xl">{categoryEmoji[place.category as keyof typeof categoryEmoji] ?? '📍'}</div>
+                              }
+                              <div className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-gray-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{i + 1}</div>
+                            </div>
+                            {/* Name + location — tap to expand */}
+                            <button className="flex-1 min-w-0 text-left" onClick={() => setExpandedPlaceId(isExpanded ? null : place.id)}>
+                              <p className="text-sm font-semibold text-gray-900 truncate">{place.name || <span className="text-gray-400 italic">No name</span>}</p>
+                              <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country || <span className="italic">No location</span>}</p>
+                              {place.category && <p className="text-xs text-gray-400">{categoryEmoji[place.category as keyof typeof categoryEmoji]} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+                            </button>
+                            {/* Move up/down */}
+                            <div className="flex flex-col gap-1 flex-shrink-0">
+                              <button disabled={i === 0} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })} className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300">
+                                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2l3.5 4H1.5z" fill="currentColor"/></svg>
+                              </button>
+                              <button disabled={i === editPostPlaces.length - 1} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })} className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300">
+                                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 8L1.5 4h7z" fill="currentColor"/></svg>
+                              </button>
+                            </div>
+                            {/* Remove */}
+                            <button onClick={() => { setEditPostPlaces(prev => prev.filter(p => p.id !== place.id)); if (isExpanded) setExpandedPlaceId(null); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0">
+                              <X size={12} strokeWidth={2} className="text-gray-500" />
+                            </button>
+                          </div>
+                          {/* Expanded editor */}
+                          {isExpanded && (
+                            <div className="px-3 pb-3 space-y-3 border-t border-gray-100 pt-3">
+                              {/* Google Places search — fills all fields automatically */}
+                              <div>
+                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Search on Google Maps</p>
+                                <PlaceSearch
+                                  placeholder="Search to update address…"
+                                  onSelect={result => {
+                                    setEditPostPlaces(prev => prev.map(p => p.id === place.id ? {
+                                      ...p,
+                                      name: result.name || p.name,
+                                      neighborhood: result.neighborhood,
+                                      city: result.city,
+                                      country: result.country,
+                                      category: result.category || p.category,
+                                    } : p));
+                                  }}
+                                />
+                              </div>
+                              {/* Current resolved address (read + editable) */}
+                              <div className="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5">
+                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Current address</p>
+                                <input
+                                  value={place.name}
+                                  onChange={e => updateField('name', e.target.value)}
+                                  placeholder="Place name"
+                                  className="w-full text-sm font-semibold text-gray-900 bg-transparent outline-none border-b border-dashed border-gray-200 pb-1"
+                                />
+                                <input
+                                  value={[place.neighborhood, place.city, place.country].filter(Boolean).join(', ')}
+                                  readOnly
+                                  className="w-full text-xs text-gray-400 bg-transparent outline-none cursor-default"
+                                  placeholder="No address yet — search above"
+                                />
+                              </div>
+                              {/* Category chips */}
+                              <div>
+                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Category</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {(['restaurant','cafe','bar','food','hotel','attraction','nature','beach','shop','experience','sports','wellness'] as const).map(cat => (
+                                    <button
+                                      key={cat}
+                                      onClick={() => updateField('category', cat)}
+                                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${place.category === cat ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-500'}`}
+                                    >
+                                      {categoryEmoji[cat]} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        {/* Name + location */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
-                          <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
-                          <p className="text-xs text-gray-300">{categoryEmoji[place.category as keyof typeof categoryEmoji]} {place.category}</p>
-                        </div>
-                        {/* Move up/down */}
-                        <div className="flex flex-col gap-1">
-                          <button
-                            disabled={i === 0}
-                            onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300"
-                          >
-                            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2l3.5 4H1.5z" fill="currentColor"/></svg>
-                          </button>
-                          <button
-                            disabled={i === editPostPlaces.length - 1}
-                            onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300"
-                          >
-                            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 8L1.5 4h7z" fill="currentColor"/></svg>
-                          </button>
-                        </div>
-                        {/* Remove */}
-                        <button onClick={() => setEditPostPlaces(prev => prev.filter(p => p.id !== place.id))} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0">
-                          <X size={12} strokeWidth={2} className="text-gray-500" />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -887,6 +959,103 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 }}
                 className="w-full py-3 text-sm font-semibold text-red-500 bg-red-50 rounded-2xl"
               >Delete post</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save ALL places to collection picker */}
+      {showSaveAllPicker && selectedRealPost && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowSaveAllPicker(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900 mb-0.5">Save all to collection</h3>
+              <p className="text-xs text-gray-400">{selectedRealPost.places.length} place{selectedRealPost.places.length !== 1 ? 's' : ''}</p>
+            </div>
+            {realCollections.length > 0 && (
+              <div className="px-4 space-y-2 max-h-64 overflow-y-auto">
+                {realCollections.map(col => (
+                  <button
+                    key={col.id}
+                    onClick={async () => {
+                      if (!appUser) return;
+                      const alreadyIn = saveAllColIds.has(col.id);
+                      if (alreadyIn) {
+                        for (const place of selectedRealPost.places) {
+                          await removePlaceFromCollection(col.id, place.id);
+                        }
+                        setSaveAllColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                        setRealCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: Math.max(0, c.placesCount - selectedRealPost.places.length) } : c));
+                      } else {
+                        for (const place of selectedRealPost.places) {
+                          await addPlaceToCollection(col.id, place.id);
+                        }
+                        setSaveAllColIds(prev => new Set(prev).add(col.id));
+                        setPostPlaceSavedIds(prev => { const n = new Set(prev); selectedRealPost.places.forEach(p => n.add(p.id)); return n; });
+                        setRealCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: c.placesCount + selectedRealPost.places.length } : c));
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
+                  >
+                    <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                      {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${saveAllColIds.has(col.id) ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                      {saveAllColIds.has(col.id) && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* New collection */}
+            <div className="px-4 pt-3 pb-2">
+              {showInlineNewCol ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={inlineNewColName}
+                    onChange={e => setInlineNewColName(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && inlineNewColName.trim() && appUser) {
+                        setSavingInlineCol(true);
+                        const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                        setSavingInlineCol(false);
+                        if (!error && data) { setRealCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                      }
+                      if (e.key === 'Escape') { setShowInlineNewCol(false); setInlineNewColName(''); }
+                    }}
+                    placeholder="Collection name…"
+                    className="flex-1 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none text-gray-900 placeholder-gray-400"
+                  />
+                  <button
+                    disabled={!inlineNewColName.trim() || savingInlineCol}
+                    onClick={async () => {
+                      if (!inlineNewColName.trim() || !appUser) return;
+                      setSavingInlineCol(true);
+                      const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                      setSavingInlineCol(false);
+                      if (!error && data) { setRealCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                    }}
+                    className="px-4 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40"
+                  >{savingInlineCol ? '…' : 'Create'}</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setShowInlineNewCol(true); setInlineNewColName(''); }}
+                  className="w-full flex items-center gap-3 py-3 text-left"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <Plus size={18} strokeWidth={2} className="text-gray-500" />
+                  </div>
+                  <p className="text-sm font-semibold text-gray-700">New collection</p>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1086,9 +1255,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         </div>
         <div className="px-4 pt-6 space-y-5">
           {/* Avatar */}
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
+          {createPortal(
+            <input id="profile-avatar-input" type="file" accept="image/*" onChange={handleAvatarChange} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+            document.body
+          )}
           <div className="flex flex-col items-center gap-3">
-            <div className="relative" onClick={() => fileInputRef.current?.click()}>
+            <label htmlFor="profile-avatar-input" className="relative cursor-pointer w-20 h-20">
               {currentAvatar ? (
                 <img src={currentAvatar} alt={displayUser.name} className="w-20 h-20 rounded-full object-cover object-top" />
               ) : (
@@ -1096,11 +1268,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   <span className="text-2xl font-bold text-slate-400">{displayUser.name[0]?.toUpperCase()}</span>
                 </div>
               )}
-              <div className="absolute bottom-0 right-0 w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center">
+              <div className="absolute bottom-0 right-0 w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center pointer-events-none">
                 <Edit3 size={13} strokeWidth={1.5} className="text-white" />
               </div>
-            </div>
-            <button onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-gray-500">Change photo</button>
+            </label>
+            <label htmlFor="profile-avatar-input" className="text-sm font-semibold text-gray-500 cursor-pointer">
+              Change photo
+            </label>
           </div>
           {/* Fields */}
           <div>
@@ -1713,7 +1887,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
             <span className="text-4xl mb-3">📍</span>
             <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
-            <p className="text-slate-400 text-sm max-w-[220px]">Tap "+" to start building your collection</p>
+            <p className="text-slate-400 text-sm max-w-[220px] mb-5">Save places from your posts to start building this collection</p>
+            <button
+              onClick={() => { setColPlaceIds(new Set()); setShowAddPlacesSheet(true); }}
+              className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold"
+            >
+              <Plus size={14} strokeWidth={2.5} /> Add places
+            </button>
           </div>
         ) : (() => {
           const catEmoji = (cat: string) => {
@@ -1855,11 +2035,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               >{savingEditCollection ? 'Saving…' : 'Save'}</button>
             </div>
             <div className="px-4 space-y-4">
-              <input ref={editColCoverInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
-                const f = e.target.files?.[0]; if (!f) return;
-                setEditColCoverFile(f); setEditColCoverPreview(URL.createObjectURL(f));
-              }} />
-              <button onClick={() => editColCoverInputRef.current?.click()} className="w-full h-32 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center relative">
+              {createPortal(
+                <input id="edit-col-cover-input" type="file" accept="image/*" onChange={e => {
+                  const f = e.target.files?.[0]; if (!f) return;
+                  setEditColCoverFile(f); setEditColCoverPreview(URL.createObjectURL(f));
+                }} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+                document.body
+              )}
+              <label htmlFor="edit-col-cover-input" className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center relative cursor-pointer overflow-hidden">
                 {(editColCoverPreview ?? selectedRealCollection.coverImageUrl)
                   ? <img src={editColCoverPreview ?? selectedRealCollection.coverImageUrl!} className="w-full h-full object-cover" />
                   : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Change cover photo</span></div>
@@ -1869,7 +2052,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <span className="text-white text-xs font-semibold">Change photo</span>
                   </div>
                 )}
-              </button>
+              </label>
               <input value={editColName} onChange={e => setEditColName(e.target.value)} placeholder="Collection name" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
               <input value={editColDesc} onChange={e => setEditColDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
               <button
@@ -1891,20 +2074,63 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Add places sheet */}
       {showAddPlacesSheet && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddPlacesSheet(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddPlacesSheet(false); setAddPlacesSearch(''); }} />
           <div className="relative bg-white rounded-t-3xl pb-8 max-h-[80vh] flex flex-col">
             <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-            <div className="flex items-center justify-between px-4 pb-4 flex-shrink-0">
+            <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0">
               <h3 className="text-base font-bold text-gray-900">Add places</h3>
-              <button onClick={() => setShowAddPlacesSheet(false)} className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full">Done</button>
+              <button onClick={() => { setShowAddPlacesSheet(false); setAddPlacesSearch(''); }} className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full">Done</button>
             </div>
             {allUserPlaces.length === 0 ? (
               <div className="px-4 pb-4 text-center">
                 <p className="text-sm text-gray-400">Post some places first to add them here</p>
               </div>
             ) : (
+              <>
+              <div className="px-4 pb-3 flex-shrink-0 space-y-2">
+                <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 flex-shrink-0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                  <input
+                    value={addPlacesSearch}
+                    onChange={e => setAddPlacesSearch(e.target.value)}
+                    placeholder="Search places…"
+                    className="flex-1 text-sm text-gray-900 bg-transparent outline-none placeholder-gray-400"
+                  />
+                  {addPlacesSearch && <button onClick={() => setAddPlacesSearch('')} className="text-gray-400"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
+                </div>
+                {(() => {
+                  const filtered = allUserPlaces.filter(p => !addPlacesSearch.trim() || p.name.toLowerCase().includes(addPlacesSearch.toLowerCase()) || p.city?.toLowerCase().includes(addPlacesSearch.toLowerCase()));
+                  const allSelected = filtered.length > 0 && filtered.every(p => colPlaceIds.has(p.id));
+                  return (
+                    <button
+                      onClick={async () => {
+                        if (allSelected) {
+                          await Promise.all(filtered.map(p => removePlaceFromCollection(selectedRealCollection!.id, p.id)));
+                          setColPlaceIds(prev => { const n = new Set(prev); filtered.forEach(p => n.delete(p.id)); return n; });
+                          setRealCollectionPlaces(prev => prev.filter(p => !filtered.some(f => f.id === p.id)));
+                          setRealCollections(prev => prev.map(c => c.id === selectedRealCollection!.id ? { ...c, placesCount: Math.max(0, c.placesCount - filtered.filter(p => colPlaceIds.has(p.id)).length) } : c));
+                          setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - filtered.filter(p => colPlaceIds.has(p.id)).length) } : prev);
+                        } else {
+                          const toAdd = filtered.filter(p => !colPlaceIds.has(p.id));
+                          await Promise.all(toAdd.map(p => addPlaceToCollection(selectedRealCollection!.id, p.id)));
+                          setColPlaceIds(prev => { const n = new Set(prev); toAdd.forEach(p => n.add(p.id)); return n; });
+                          setRealCollectionPlaces(prev => [...prev, ...toAdd.map(p => ({ id: p.id, name: p.name, category: p.category, neighborhood: p.neighborhood ?? '', city: p.city, country: p.country, photoUrl: p.photoUrl, position: p.position, lat: p.lat, lng: p.lng }))]);
+                          setRealCollections(prev => prev.map(c => c.id === selectedRealCollection!.id ? { ...c, placesCount: c.placesCount + toAdd.length } : c));
+                          setSelectedRealCollection(prev => prev ? { ...prev, placesCount: prev.placesCount + toAdd.length } : prev);
+                        }
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2"
+                    >
+                      <span className="text-sm font-semibold text-gray-900">Select all</span>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${allSelected ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                        {allSelected && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                    </button>
+                  );
+                })()}
+              </div>
               <div className="px-4 space-y-2 overflow-y-auto pb-4">
-                {allUserPlaces.map(place => {
+                {allUserPlaces.filter(p => !addPlacesSearch.trim() || p.name.toLowerCase().includes(addPlacesSearch.toLowerCase()) || p.city?.toLowerCase().includes(addPlacesSearch.toLowerCase())).map(place => {
                   const inCol = colPlaceIds.has(place.id);
                   return (
                     <button
@@ -1938,6 +2164,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   );
                 })}
               </div>
+              </>
             )}
           </div>
         </div>
@@ -2135,7 +2362,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               onDragCancel={() => setIsDraggingPost(false)}
             >
               <SortableContext items={realPosts.map(p => p.id)} strategy={rectSortingStrategy}>
-                <div className="grid grid-cols-3 gap-px bg-gray-100 border-t border-gray-100">
+                <div className="grid grid-cols-3 gap-px bg-white border-t border-gray-100">
                   {realPosts.map(post => (
                     <SortablePostCell
                       key={post.id}
@@ -2231,8 +2458,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       setColFilter('all');
                       setCollectionCollaborators([]);
                       setLoadingCollectionPlaces(true);
-                      getCollectionPlaces(col.id).then(places => {
-                        setRealCollectionPlaces(places);
+                      getCollectionPlaces(col.id).then(async places => {
+                        const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY);
+                        setRealCollectionPlaces(geocoded);
                         setLoadingCollectionPlaces(false);
                       });
                       getCollectionCollaborators(col.id).then(setCollectionCollaborators);
@@ -2271,7 +2499,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       setColFilter('all');
                       setCollectionCollaborators([]);
                       setLoadingCollectionPlaces(true);
-                      getCollectionPlaces(col.id).then(places => { setRealCollectionPlaces(places); setLoadingCollectionPlaces(false); });
+                      getCollectionPlaces(col.id).then(async places => { const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY); setRealCollectionPlaces(geocoded); setLoadingCollectionPlaces(false); });
                       getCollectionCollaborators(col.id).then(setCollectionCollaborators);
                     }}>
                       <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
@@ -2287,35 +2515,6 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </div>
             )}
 
-            {/* Subscribed */}
-            {subscribedCollections.length > 0 && (
-              <div className="mt-6">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Subscribed</p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-                  {subscribedCollections.map(col => (
-                    <button key={col.id} className="text-left" onClick={() => {
-                      setSelectedRealCollection(col);
-                      setShowColMap(true);
-                      setColFilter('all');
-                      setCollectionCollaborators([]);
-                      setLoadingCollectionPlaces(true);
-                      getCollectionPlaces(col.id).then(places => { setRealCollectionPlaces(places); setLoadingCollectionPlaces(false); });
-                    }}>
-                      <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
-                        {col.coverImageUrl
-                          ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
-                          : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
-                        <div className="absolute bottom-1.5 right-1.5 w-5 h-5 bg-white/90 rounded-full flex items-center justify-center">
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-700"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-                        </div>
-                      </div>
-                      <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
-                      <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         ) : (
         <div className="px-4 pt-4 pb-6">
@@ -2377,16 +2576,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <div className="px-4 space-y-4">
               {/* Cover image */}
-              <input ref={colCoverInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                setNewColCoverFile(f);
-                setNewColCoverPreview(URL.createObjectURL(f));
-              }} />
-              <button
-                onClick={() => colCoverInputRef.current?.click()}
-                className="w-full h-32 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center relative"
-              >
+              {createPortal(
+                <input id="new-col-cover-input" type="file" accept="image/*" onChange={e => {
+                  const f = e.target.files?.[0]; if (!f) return;
+                  setNewColCoverFile(f); setNewColCoverPreview(URL.createObjectURL(f));
+                }} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+                document.body
+              )}
+              <label htmlFor="new-col-cover-input" className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center relative cursor-pointer overflow-hidden">
                 {newColCoverPreview
                   ? <img src={newColCoverPreview} className="w-full h-full object-cover" />
                   : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Add cover photo</span></div>
@@ -2396,7 +2593,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <span className="text-white text-xs font-semibold">Change photo</span>
                   </div>
                 )}
-              </button>
+              </label>
               {/* Name */}
               <input
                 value={newColName}

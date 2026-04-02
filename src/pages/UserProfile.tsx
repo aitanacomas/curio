@@ -1,6 +1,9 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Check, MapPin, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send } from 'lucide-react';
-import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getPostComments, addComment, deleteComment, getPlans, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan } from '../lib/supabase';
+import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, geocodeMissingPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getPostComments, addComment, deleteComment, getPlans, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan } from '../lib/supabase';
+import { googleTypesToCategory } from '../lib/placeUtils';
+
+const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
 function timeAgo(iso: string): string {
   if (!iso) return '';
@@ -35,7 +38,7 @@ interface Props {
   onMessage?: (userId: string) => void;
 }
 
-type ProfileTab = 'Posts' | 'Map' | 'Collections' | 'Trips';
+type ProfileTab = 'Posts' | 'Map' | 'Collections';
 
 export default function UserProfile({ userId, currentUserId, onBack, onFollowChange, onMessage }: Props) {
   const [profile, setProfile] = useState<{ name: string; username: string; avatarUrl: string | null; bio?: string | null; location?: string | null } | null>(null);
@@ -67,6 +70,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [showInlineNewCol, setShowInlineNewCol] = useState(false);
   const [inlineNewColName, setInlineNewColName] = useState('');
   const [savingInlineCol, setSavingInlineCol] = useState(false);
+  const [showSaveAllPicker, setShowSaveAllPicker] = useState(false);
+  const [saveAllColIds, setSaveAllColIds] = useState<Set<string>>(new Set());
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [postLikeCounts, setPostLikeCounts] = useState<Record<string, number>>({});
   const [showPostMap, setShowPostMap] = useState(false);
@@ -75,8 +80,6 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [postCommentText, setPostCommentText] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const postCommentInputRef = useRef<HTMLInputElement>(null);
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [loadingPlans, setLoadingPlans] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -98,9 +101,6 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
     getUserCollections(currentUserId).then(setMyCollections);
     // Fetch likes
     getLikedPosts(currentUserId).then(setLikedPosts);
-    // Fetch plans for this user
-    setLoadingPlans(true);
-    getPlans(userId).then(p => { setPlans(p); setLoadingPlans(false); });
   }, [userId, currentUserId]);
 
   // Load like counts + saved place ids whenever a post is opened
@@ -116,37 +116,47 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       }));
       setPostPlaceSavedIds(saved);
     });
-    // Auto-enrich any places missing neighbourhood, city, or coordinates (in-memory only for other users' posts)
-    const missingData = selectedPost.places.filter(pl => !pl.neighborhood || !pl.city || pl.lat == null);
+    // Auto-enrich any places missing neighbourhood, city, category, or coordinates (in-memory only for other users' posts)
+    const missingData = selectedPost.places.filter(pl => !pl.neighborhood || !pl.city || !pl.category || pl.lat == null);
     if (missingData.length === 0) return;
     const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
     (async () => {
-      const fixes: Record<string, { neighborhood?: string; city?: string; country?: string; lat?: number; lng?: number }> = {};
-      for (const pl of missingData) {
+      const normalCity = (c: string) => ({ cdmx: 'Mexico City', 'ciudad de mexico': 'Mexico City', 'ciudad de méxico': 'Mexico City', nyc: 'New York City', la: 'Los Angeles', sf: 'San Francisco', dc: 'Washington DC' }[c?.toLowerCase()] ?? c);
+      const searchPlace = async (textQuery: string) => {
+        const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.types,places.location' },
+          body: JSON.stringify({ textQuery, languageCode: 'en' }),
+        });
+        const d = await r.json();
+        return d.places?.[0] ?? null;
+      };
+      const enrichResults = await Promise.all(missingData.map(async (pl) => {
+        if (!pl.name) return null;
         try {
-          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.location' },
-            body: JSON.stringify({ textQuery: [pl.name, pl.city, pl.country].filter(Boolean).join(', '), languageCode: 'en' }),
-          });
-          const data = await res.json();
-          const place = data.places?.[0];
-          if (!place) continue;
-          const comps: { types: string[]; longText: string }[] = place.addressComponents ?? [];
-          const find = (...types: string[]) => comps.find(c => types.some(t => c.types?.includes(t)))?.longText ?? '';
-          const hasPostalTown = comps.some(c => c.types?.includes('postal_town'));
+          const city = normalCity(pl.city);
+          let place = await searchPlace([pl.name, city, pl.country].filter(Boolean).join(', '))
+            ?? await searchPlace([pl.name, pl.country].filter(Boolean).join(', '))
+            ?? await searchPlace(pl.name);
+          if (!place) return null;
+          const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
+          const types: string[] = place.types ?? [];
+          const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
           const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
-          const city = find('postal_town') || (!hasPostalTown ? find('locality') : '') || find('administrative_area_level_2');
+          const resolvedCity = find('postal_town') || find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1');
           const country = find('country');
           const fix: Record<string, any> = {};
           if (neighborhood && !pl.neighborhood) fix.neighborhood = neighborhood;
-          if (city && !pl.city) fix.city = city;
+          if (resolvedCity && !pl.city) fix.city = resolvedCity;
           if (country && !pl.country) fix.country = country;
+          if (!pl.category && types.length) fix.category = googleTypesToCategory(types);
           if (pl.lat == null && place.location?.latitude != null) fix.lat = place.location.latitude;
           if (pl.lng == null && place.location?.longitude != null) fix.lng = place.location.longitude;
-          if (Object.keys(fix).length) fixes[pl.id] = fix;
-        } catch { /* skip */ }
-      }
+          return Object.keys(fix).length ? { id: pl.id, fix } : null;
+        } catch { return null; }
+      }));
+      const fixes: Record<string, Record<string, any>> = {};
+      enrichResults.forEach(r => { if (r) fixes[r.id] = r.fix; });
       if (Object.keys(fixes).length > 0) {
         setPosts(prev => prev.map(post => ({
           ...post,
@@ -169,6 +179,15 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       setLoadingComments(false);
     });
   }, [selectedPost?.id]);
+
+  // When "Save all" picker opens, compute which collections already contain ALL places
+  useEffect(() => {
+    if (!showSaveAllPicker || !selectedPost || selectedPost.places.length === 0) { setSaveAllColIds(new Set()); return; }
+    Promise.all(selectedPost.places.map(pl => getPlaceCollectionIds(pl.id))).then(sets => {
+      const intersection = sets.reduce<Set<string>>((acc, cur) => new Set([...acc].filter(id => cur.has(id))), sets[0] ?? new Set());
+      setSaveAllColIds(intersection);
+    });
+  }, [showSaveAllPicker]);
 
   // When map tab opens, enrich any places missing coordinates (in-memory)
   useEffect(() => {
@@ -371,21 +390,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
             </div>
             <button
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${allSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
-              onClick={async () => {
-                if (allSaved) {
-                  for (const place of selectedPost.places) {
-                    await unsavePlace(currentUserId, place.id);
-                    setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
-                  }
-                } else {
-                  for (const place of selectedPost.places) {
-                    if (!postPlaceSavedIds.has(place.id)) {
-                      await savePlace(currentUserId, place.id);
-                      setPostPlaceSavedIds(prev => new Set(prev).add(place.id));
-                    }
-                  }
-                }
-              }}
+              onClick={() => setShowSaveAllPicker(true)}
             >
               {allSaved && <Check size={13} strokeWidth={2} />}
               {allSaved ? 'Saved' : 'Save all'}
@@ -586,8 +591,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       </div>
 
       {/* Tabs */}
-      <div className="grid grid-cols-4 border-b border-gray-100 border-t">
-        {(['Posts', 'Map', 'Collections', 'Trips'] as ProfileTab[]).map(tab => (
+      <div className="grid grid-cols-3 border-b border-gray-100 border-t">
+        {(['Posts', 'Map', 'Collections'] as ProfileTab[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -617,13 +622,14 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
             </p>
           </div>
         ) : (
+          <div className="bg-white">
           <div className="grid grid-cols-3 gap-px bg-white">
             {posts.map(post => {
-              const firstImage = post.places[0]?.photoUrl;
+              const firstImage = post.places.map(p => p.photoUrl).find(url => url && url.trim());
               if (!firstImage) return null;
               return (
-                <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative">
-                  <img src={firstImage} alt="" className="w-full h-full object-cover" />
+                <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative overflow-hidden">
+                  <img src={firstImage} alt="" className="w-full h-full object-cover" onError={e => { (e.currentTarget.closest('button') as HTMLElement | null)?.style && ((e.currentTarget.closest('button') as HTMLElement).style.display = 'none'); }} />
                   {post.places.length > 1 && (
                     <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
                       <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
@@ -635,6 +641,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                 </button>
               );
             })}
+          </div>
           </div>
         )
       )}
@@ -674,72 +681,6 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
         );
       })()}
 
-      {activeTab === 'Trips' && (
-        loadingPlans ? (
-          <div className="px-4 pt-4 space-y-3">
-            {[0,1,2].map(i => <div key={i} className="h-24 bg-gray-100 rounded-2xl animate-pulse" />)}
-          </div>
-        ) : plans.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-6">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-              <span className="text-3xl">✈️</span>
-            </div>
-            <p className="text-slate-800 font-semibold text-base mb-1.5">No trips yet</p>
-            <p className="text-slate-400 text-sm text-center max-w-[200px]">
-              Trips {profile?.name.split(' ')[0]} plans will appear here
-            </p>
-          </div>
-        ) : (
-          <div className="px-4 pt-4 pb-10 space-y-3">
-            {plans.map(plan => {
-              const statusColors: Record<string, string> = {
-                dreaming: 'bg-purple-50 text-purple-600',
-                planning: 'bg-blue-50 text-blue-600',
-                upcoming: 'bg-green-50 text-green-600',
-                past: 'bg-gray-100 text-gray-500',
-              };
-              const statusLabel: Record<string, string> = {
-                dreaming: 'Dreaming', planning: 'Planning', upcoming: 'Upcoming', past: 'Past',
-              };
-              return (
-                <div key={plan.id} className="rounded-2xl overflow-hidden border border-gray-100">
-                  {plan.coverImageUrl ? (
-                    <div className="relative h-32">
-                      <img src={plan.coverImageUrl} alt={plan.title} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                      <div className="absolute bottom-0 left-0 right-0 px-3 pb-3">
-                        <p className="text-white font-bold text-sm leading-tight">{plan.title}</p>
-                        <p className="text-white/70 text-xs mt-0.5">{plan.country}{plan.dates ? ` · ${plan.dates}` : ''}</p>
-                      </div>
-                      <div className={`absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusColors[plan.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {statusLabel[plan.status] ?? plan.status}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="px-4 py-3 flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-gray-900 text-sm">{plan.title}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{plan.country}{plan.dates ? ` · ${plan.dates}` : ''}</p>
-                      </div>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusColors[plan.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {statusLabel[plan.status] ?? plan.status}
-                      </span>
-                    </div>
-                  )}
-                  {plan.days.length > 0 && (
-                    <div className="px-3 py-2 bg-gray-50 border-t border-gray-100">
-                      <p className="text-[11px] text-gray-400">
-                        {plan.days.length} day{plan.days.length !== 1 ? 's' : ''} · {plan.days.reduce((acc, d) => acc + d.items.length, 0)} places
-                      </p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )
-      )}
-
       {activeTab === 'Collections' && (
         collections.length > 0 ? (
           <div className="px-4 pt-4 pb-10">
@@ -755,7 +696,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                     getCollectionPlaces(col.id),
                     isSubscribedToCollection(currentUserId, col.id),
                   ]);
-                  setCollectionPlaces(places);
+                  const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY);
+                  setCollectionPlaces(geocoded);
                   setIsSubscribed(subscribed);
                   setCollectionPlacesLoading(false);
                 }}>
@@ -989,6 +931,105 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           })()}
         </div>
       )}
+
+      {/* Save ALL places to collection picker */}
+      {showSaveAllPicker && (() => {
+        const post = selectedPost!;
+        return (
+          <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowSaveAllPicker(false)} />
+            <div className="relative bg-white rounded-t-3xl pb-8">
+              <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+              <div className="px-4 pb-4">
+                <h3 className="text-base font-bold text-gray-900 mb-0.5">Save all to collection</h3>
+                <p className="text-xs text-gray-400">{post.places.length} place{post.places.length !== 1 ? 's' : ''}</p>
+              </div>
+              {myCollections.length > 0 && (
+                <div className="px-4 space-y-2 max-h-64 overflow-y-auto">
+                  {myCollections.map(col => (
+                    <button
+                      key={col.id}
+                      onClick={async () => {
+                        const alreadyIn = saveAllColIds.has(col.id);
+                        if (alreadyIn) {
+                          for (const place of post.places) {
+                            await removePlaceFromCollection(col.id, place.id);
+                          }
+                          setSaveAllColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                          setMyCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: Math.max(0, c.placesCount - post.places.length) } : c));
+                        } else {
+                          for (const place of post.places) {
+                            await addPlaceToCollection(col.id, place.id);
+                          }
+                          setSaveAllColIds(prev => new Set(prev).add(col.id));
+                          setPostPlaceSavedIds(prev => { const n = new Set(prev); post.places.forEach(p => n.add(p.id)); return n; });
+                          setMyCollections(prev => prev.map(c => c.id === col.id ? { ...c, placesCount: c.placesCount + post.places.length } : c));
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 text-left"
+                    >
+                      <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                        {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                        <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                      </div>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${saveAllColIds.has(col.id) ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                        {saveAllColIds.has(col.id) && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* New collection quick-create */}
+              <div className="px-4 pt-3 pb-2">
+                {showInlineNewCol ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={inlineNewColName}
+                      onChange={e => setInlineNewColName(e.target.value)}
+                      onKeyDown={async e => {
+                        if (e.key === 'Enter' && inlineNewColName.trim()) {
+                          setSavingInlineCol(true);
+                          const { data, error } = await createCollection(currentUserId, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                          setSavingInlineCol(false);
+                          if (!error && data) { setMyCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                        }
+                        if (e.key === 'Escape') { setShowInlineNewCol(false); setInlineNewColName(''); }
+                      }}
+                      placeholder="Collection name…"
+                      className="flex-1 bg-gray-50 rounded-xl px-3 py-2.5 text-sm text-gray-700 outline-none"
+                    />
+                    <button
+                      disabled={!inlineNewColName.trim() || savingInlineCol}
+                      onClick={async () => {
+                        if (!inlineNewColName.trim()) return;
+                        setSavingInlineCol(true);
+                        const { data, error } = await createCollection(currentUserId, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
+                        setSavingInlineCol(false);
+                        if (!error && data) { setMyCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                      }}
+                      className="px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                    >{savingInlineCol ? '…' : 'Create'}</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowInlineNewCol(true)}
+                    className="w-full flex items-center gap-3 py-3 text-left"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                      <Plus size={18} strokeWidth={2} className="text-gray-500" />
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700">New collection</p>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Save-place-to-collection picker */}
       {savingPlace && (

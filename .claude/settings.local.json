@@ -123,7 +123,22 @@
       "Bash(vercel deploy:*)",
       "Bash(vercel list:*)",
       "Bash(sed -i '' 's/setPlanViewMode\\(''''itinerary''''\\);//g' src/pages/Saved.tsx)",
-      "Bash(sed -i '' 's/; setPlanViewMode\\(''''itinerary''''\\)//g' src/pages/Saved.tsx)"
+      "Bash(sed -i '' 's/; setPlanViewMode\\(''''itinerary''''\\)//g' src/pages/Saved.tsx)",
+      "Bash(grep -r \"Mail\\\\|envelope\\\\|inbox\" /Users/aitanacomas/Desktop/Social Media App/src --include=*.ts --include=*.tsx)",
+      "Bash(node scripts/backfill-neighborhoods.mjs)",
+      "Bash(node scripts/backfill-all-neighborhoods.mjs)",
+      "Bash(grep -v \"Use \\\\`node\")",
+      "Bash(find '/Users/aitanacomas/Desktop/Social Media App' -type f -name *.sql -o -name migrations -o -name schema*)",
+      "Bash(npx netlify:*)",
+      "Bash(node backfill-places.mjs)",
+      "Bash(curl -s \"https://leooulgankktjapregei.supabase.co/rest/v1/post_places?select=id&limit=1\" -H \"apikey: sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\" -H \"Authorization: Bearer sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\")",
+      "Bash(curl -s \"https://leooulgankktjapregei.supabase.co/rest/v1/post_places?select=id&limit=1\" -H \"apikey: sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\" -H \"Authorization: Bearer sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\" -X PATCH -H \"Content-Type: application/json\" -H \"Prefer: return=representation,count=exact\" -d '{\"\"neighborhood\"\":\"\"__rls_test__\"\"}')",
+      "Bash(curl -s \"https://leooulgankktjapregei.supabase.co/rest/v1/rpc/exec\" -H \"apikey: sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\" -H \"Authorization: Bearer sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd\" -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(grep -n \"top: ''-200px''\" src/pages/Profile.tsx src/pages/Auth.tsx src/pages/Saved.tsx)",
+      "Bash(npx netlify-cli@latest --version)",
+      "Bash(sudo npm:*)",
+      "Bash(./node_modules/.bin/netlify link:*)",
+      "Bash(find /Users/aitanacomas -name state.json -path *netlify*)"
     ]
   }
 }

@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, Eye, EyeOff, Camera } from 'lucide-react';
 import type { AppUser } from '../types';
 import { supabase, getPublicUrl } from '../lib/supabase';
@@ -25,7 +26,6 @@ export default function Auth({ onAuth }: AuthProps) {
   const [loginPassword, setLoginPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
   const usernameEdited = useRef(false);
 
   const handleUsernameFromName = (first: string) => {
@@ -199,14 +199,6 @@ export default function Auth({ onAuth }: AuthProps) {
             className="w-full py-4 bg-slate-900 text-white rounded-2xl font-semibold text-base disabled:opacity-40">
             {loading ? 'Logging in…' : 'Log in'}
           </button>
-          <div className="flex items-center gap-3 py-1">
-            <div className="flex-1 h-px bg-slate-100" />
-            <span className="text-xs text-slate-400">or</span>
-            <div className="flex-1 h-px bg-slate-100" />
-          </div>
-          <button onClick={handleDemoLogin} className="w-full py-3 text-slate-500 text-sm font-medium bg-slate-50 rounded-2xl">
-            Continue with demo account
-          </button>
         </div>
       </div>
     );
@@ -325,17 +317,19 @@ export default function Auth({ onAuth }: AuthProps) {
       </div>
       <h1 className="text-2xl font-bold text-slate-900 mb-1">Add a profile photo</h1>
       <p className="text-slate-500 text-sm mb-10">Let people know who you are</p>
-      <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+      {createPortal(
+        <input id="auth-avatar-input" type="file" accept="image/*" onChange={handlePhotoUpload} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+        document.body
+      )}
       <div className="flex-1 flex flex-col items-center justify-center gap-5">
-        <button onClick={() => fileRef.current?.click()}
-          className="w-32 h-32 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-slate-300">
+        <label htmlFor="auth-avatar-input" className="w-32 h-32 rounded-full bg-slate-100 flex items-center justify-center border-2 border-dashed border-slate-300 relative cursor-pointer overflow-hidden">
           {avatarPreview
             ? <img src={avatarPreview} alt="avatar" className="w-full h-full object-cover" />
             : <div className="flex flex-col items-center gap-2"><Camera className="w-8 h-8 text-slate-400" /><span className="text-xs text-slate-400">Add photo</span></div>
           }
-        </button>
+        </label>
         {avatarPreview
-          ? <button onClick={() => fileRef.current?.click()} className="text-sm text-slate-600 font-medium">Change photo</button>
+          ? <label htmlFor="auth-avatar-input" className="text-sm text-slate-600 font-medium cursor-pointer">Change photo</label>
           : <p className="text-sm text-slate-400">Tap to choose a photo</p>
         }
       </div>

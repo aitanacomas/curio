@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Camera, Sparkles, Check, MapPin, X, Heart, MessageCircle, Send, Pencil, Loader2, Plus, GripVertical, Search, RotateCcw, RotateCw } from 'lucide-react';
+import { ArrowLeft, Camera, Sparkles, Check, MapPin, X, Heart, MessageCircle, Send, Pencil, Loader2, Plus, GripVertical, RotateCcw, RotateCw } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -7,6 +7,8 @@ import ReactCrop, { type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import type { Category } from '../types';
 import { supabase, getPublicUrl } from '../lib/supabase';
+import { googleTypesToCategory } from '../lib/placeUtils';
+import PlaceSearch from '../components/PlaceSearch';
 
 type Step = 'upload' | 'places' | 'preview';
 type Visibility = 'map' | 'profile' | 'feed';
@@ -30,40 +32,6 @@ const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 // Extract only the place name (first comma-separated component)
 const shortName = (name: string) => name.split(',')[0].trim();
 
-function googleTypesToCategory(types: string[]): Category {
-  const has = (...t: string[]) => types.some(x => t.includes(x));
-  // Hotel / accommodation
-  if (has('lodging','hotel','motel','resort_hotel','hostel','bed_and_breakfast','extended_stay_hotel','guest_house','inn')) return 'hotel';
-  // Restaurant (includes all cuisine-specific types from Google Places API v1)
-  if (has('restaurant','american_restaurant','barbecue_restaurant','brazilian_restaurant','breakfast_restaurant','brunch_restaurant','buffet_restaurant','chinese_restaurant','french_restaurant','greek_restaurant','indian_restaurant','indonesian_restaurant','italian_restaurant','japanese_restaurant','korean_restaurant','lebanese_restaurant','mediterranean_restaurant','mexican_restaurant','middle_eastern_restaurant','pizza_restaurant','ramen_restaurant','seafood_restaurant','spanish_restaurant','steak_house','sushi_restaurant','thai_restaurant','turkish_restaurant','vegan_restaurant','vegetarian_restaurant','vietnamese_restaurant')) return 'restaurant';
-  // Café / coffee / bakery
-  if (has('cafe','coffee_shop','bakery','bagel_shop','tea_house','patisserie','dessert_shop','ice_cream_shop')) return 'cafe';
-  // Bar / nightlife
-  if (has('bar','night_club','wine_bar','cocktail_bar','sports_bar','pub','brewery','winery','distillery','karaoke')) return 'bar';
-  // Quick food / takeaway / delivery
-  if (has('food_court','fast_food_restaurant','meal_takeaway','meal_delivery','sandwich_shop','hamburger_restaurant','supermarket','grocery_store','convenience_store','deli','food_delivery')) return 'food';
-  // Transport
-  if (has('airport','train_station','bus_station','subway_station','transit_station','light_rail_station','ferry_terminal','taxi_stand','car_rental','bus_stop','airport_terminal')) return 'transport';
-  // Beach / water
-  if (has('beach','marina','diving_center','water_park')) return 'beach';
-  // Nature / outdoors
-  if (has('park','national_park','natural_feature','campground','hiking_area','rv_park','forest','nature_reserve','botanical_garden','wildlife_sanctuary')) return 'nature';
-  // Sports / fitness
-  if (has('stadium','sports_complex','gym','fitness_center','bowling_alley','golf_course','tennis_court','swimming_pool','ski_resort','rock_climbing_gym','cycling_studio','sports_club','athletic_field','race_track')) return 'sports';
-  // Wellness / beauty
-  if (has('spa','beauty_salon','hair_salon','hair_care','nail_salon','physiotherapist','massage','yoga_studio','sauna','wellness_center','massage_therapist')) return 'wellness';
-  // Shop / retail
-  if (has('store','shopping_mall','clothing_store','book_store','department_store','bicycle_store','electronics_store','furniture_store','home_goods_store','jewelry_store','shoe_store','pet_store','florist','gift_shop','market','liquor_store','toy_store','sporting_goods_store','pharmacy')) return 'shop';
-  // Street / road / landmark area
-  if (has('route','street_address','intersection')) return 'street';
-  // Event venue
-  if (has('event_venue','banquet_hall','convention_center','conference_center','wedding_venue','concert_hall')) return 'event';
-  // Airline
-  if (has('airline')) return 'flight';
-  // Attraction / landmark / cultural
-  if (has('museum','art_gallery','tourist_attraction','landmark','historical_landmark','cultural_landmark','monument','amusement_park','zoo','aquarium','movie_theater','performing_arts_theater','library','church','mosque','synagogue','hindu_temple','place_of_worship','embassy','city_hall','university','castle','ruins')) return 'attraction';
-  return 'experience';
-}
 
 async function readExifGps(file: File): Promise<{ lat: number; lng: number } | null> {
   return new Promise(resolve => {
@@ -152,16 +120,12 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
     const name = shortName(place.displayName?.text ?? '');
     const types: string[] = place.types ?? [];
     const category = googleTypesToCategory(types);
-    let neighborhood = '', city = '', country = '';
-    let hasPostalTown = false;
-    for (const comp of place.addressComponents ?? []) {
-      const t: string[] = comp.types ?? [];
-      if (t.includes('sublocality_level_1') || (!neighborhood && (t.includes('sublocality_level_2') || t.includes('sublocality') || t.includes('neighborhood')))) neighborhood = comp.longText ?? '';
-      if (t.includes('postal_town')) { city = comp.longText ?? ''; hasPostalTown = true; }
-      else if (!hasPostalTown && t.includes('locality')) city = comp.longText ?? '';
-      else if (!city && t.includes('administrative_area_level_2')) city = comp.longText ?? '';
-      if (t.includes('country')) country = comp.longText ?? '';
-    }
+    const addrComps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
+    const addrVal = (c: typeof addrComps[0]) => c.longText || c.shortText || '';
+    const addrFind = (...t: string[]) => { const c = addrComps.find(c => t.some(x => c.types?.includes(x))); return c ? addrVal(c) : ''; };
+    const neighborhood = addrFind('sublocality_level_1') || addrFind('sublocality_level_2') || addrFind('neighborhood') || addrFind('sublocality');
+    const city = addrFind('postal_town') || addrFind('locality') || addrFind('administrative_area_level_2') || addrFind('administrative_area_level_1');
+    const country = addrFind('country');
     return { name, category, neighborhood, city, country, lat, lng };
   } catch { return null; }
 }
@@ -189,107 +153,6 @@ interface Props {
   userId: string;
   userAvatar?: string | null;
   onComplete: (info: { visibility: Visibility; placesCount: number }) => void;
-}
-
-// ── Place search autocomplete ────────────────────────────────────────────────
-
-function PlaceSearch({ onSelect }: { onSelect: (result: Partial<IdentifiedPlace>) => void }) {
-  const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<{ placeId: string; text: string }[]>([]);
-  const [searching, setSearching] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleChange = (val: string) => {
-    setQuery(val);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (!val.trim()) { setSuggestions([]); return; }
-    timerRef.current = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-          body: JSON.stringify({ input: val, languageCode: 'en' }),
-        });
-        const data = await res.json();
-        setSuggestions(
-          (data.suggestions ?? [])
-            .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
-            .filter((s: any) => s.placeId)
-            .slice(0, 5)
-        );
-      } catch { setSuggestions([]); }
-      setSearching(false);
-    }, 400);
-  };
-
-  const handleSelect = async (placeId: string, text: string) => {
-    setQuery(text.split(',')[0].trim());
-    setSuggestions([]);
-    try {
-      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-        headers: {
-          'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-          'X-Goog-FieldMask': 'displayName,types,addressComponents,location',
-          'X-Goog-LanguageCode': 'en',
-        },
-      });
-      const place = await res.json();
-      const name = shortName(place.displayName?.text ?? text);
-      const types: string[] = place.types ?? [];
-      const category = googleTypesToCategory(types);
-      let neighborhood = '', city = '', country = '';
-      let hasPostalTown = false;
-      for (const comp of place.addressComponents ?? []) {
-        const t: string[] = comp.types ?? [];
-        if (t.includes('sublocality_level_1') || (!neighborhood && (t.includes('sublocality_level_2') || t.includes('sublocality') || t.includes('neighborhood')))) neighborhood = comp.longText ?? '';
-        if (t.includes('postal_town')) { city = comp.longText ?? ''; hasPostalTown = true; }
-        else if (!hasPostalTown && t.includes('locality')) city = comp.longText ?? '';
-        else if (!city && t.includes('administrative_area_level_2')) city = comp.longText ?? '';
-        if (t.includes('country')) country = comp.longText ?? '';
-      }
-      const lat: number | undefined = place.location?.latitude;
-      const lng: number | undefined = place.location?.longitude;
-      onSelect({ name, category, neighborhood, city, country, lat, lng });
-    } catch {
-      // API failed — parse what we can from the autocomplete text
-      // e.g. "Chinatown Gate, Wardour Street, London, UK"
-      const parts = text.split(',').map((s: string) => s.trim()).filter(Boolean);
-      onSelect({
-        name: parts[0] ?? text,
-        city: parts.length >= 3 ? parts[parts.length - 2] : (parts[1] ?? ''),
-        country: parts.length >= 2 ? parts[parts.length - 1] : '',
-      });
-    }
-  };
-
-  return (
-    <div className="relative mb-3">
-      <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2">
-        <Search size={13} className="text-gray-400 flex-shrink-0" />
-        <input
-          value={query}
-          onChange={e => handleChange(e.target.value)}
-          placeholder="Search for this place…"
-          className="flex-1 text-sm text-gray-900 bg-transparent outline-none placeholder-gray-400"
-        />
-        {searching && <Loader2 size={13} className="text-gray-400 animate-spin flex-shrink-0" />}
-      </div>
-      {suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
-          {suggestions.map(s => (
-            <button
-              key={s.placeId}
-              onClick={() => handleSelect(s.placeId, s.text)}
-              className="w-full text-left px-3 py-2.5 text-sm text-gray-800 active:bg-gray-50 border-b border-gray-50 last:border-0"
-            >
-              {s.text}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── Photo editor (crop + rotate) ─────────────────────────────────────────────
@@ -402,8 +265,10 @@ function SortablePlaceRow({
     zIndex: isDragging ? 10 : undefined,
   };
 
+  const needsAddress = !p.analyzing && !p.name;
+
   return (
-    <div ref={setNodeRef} style={style} className="bg-gray-50 rounded-2xl">
+    <div ref={setNodeRef} style={style} className={`rounded-2xl transition-colors ${needsAddress ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-gray-50'}`}>
       <div className="flex items-center gap-2 p-3">
         {/* Drag handle */}
         <button
@@ -430,9 +295,15 @@ function SortablePlaceRow({
               <div className="absolute inset-0 bg-black/20 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
                 <Pencil size={12} className="text-white" />
               </div>
-              <div className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
-                <Check size={10} className="text-white" strokeWidth={3} />
-              </div>
+              {needsAddress ? (
+                <div className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-amber-400 flex items-center justify-center">
+                  <span className="text-white text-[9px] font-black">!</span>
+                </div>
+              ) : (
+                <div className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                  <Check size={10} className="text-white" strokeWidth={3} />
+                </div>
+              )}
             </>
           )}
         </button>
@@ -443,14 +314,17 @@ function SortablePlaceRow({
               <div className="h-3 bg-gray-200 rounded-full w-3/4 animate-pulse" />
               <div className="h-2.5 bg-gray-200 rounded-full w-1/2 animate-pulse" />
             </div>
+          ) : needsAddress ? (
+            <button className="text-left w-full" onClick={() => onToggleExpanded(p.id)}>
+              <p className="font-semibold text-amber-600 text-sm">Address required</p>
+              <p className="text-xs text-amber-400 mt-0.5">Tap to search on Google Maps</p>
+            </button>
           ) : (
             <>
-              <p className="font-bold text-gray-900 text-sm truncate">
-                {p.name || <span className="text-gray-300 font-normal">Tap pencil to add</span>}
-              </p>
+              <p className="font-bold text-gray-900 text-sm truncate">{p.name}</p>
               <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
                 <MapPin size={10} />
-                {[p.neighborhood, p.city, p.country].filter(Boolean).join(', ') || 'No location set'}
+                {[p.neighborhood, p.city, p.country].filter(Boolean).join(', ') || p.country}
               </p>
             </>
           )}
@@ -461,10 +335,10 @@ function SortablePlaceRow({
             <button
               onClick={() => onToggleExpanded(p.id)}
               className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
-                p.expanded ? 'bg-gray-900' : 'bg-white shadow-sm'
+                p.expanded ? 'bg-gray-900' : needsAddress ? 'bg-amber-400' : 'bg-white shadow-sm'
               }`}
             >
-              <Pencil size={13} className={p.expanded ? 'text-white' : 'text-gray-500'} />
+              <Pencil size={13} className={p.expanded || needsAddress ? 'text-white' : 'text-gray-500'} />
             </button>
           )}
           <button
@@ -478,7 +352,9 @@ function SortablePlaceRow({
 
       {p.expanded && !p.analyzing && (
         <div className="border-t border-gray-100 bg-white px-3 pb-3 pt-3 rounded-b-2xl overflow-visible">
-          <PlaceSearch onSelect={result => onUpdate(p.id, result)} />
+          <div className="mb-3">
+            <PlaceSearch onSelect={result => onUpdate(p.id, result as Partial<IdentifiedPlace>)} />
+          </div>
           <input
             value={p.name}
             onChange={e => onUpdate(p.id, { name: e.target.value })}
@@ -641,9 +517,42 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
         return { ...p, photoUrl: getPublicUrl('post-photos', path) };
       }));
 
+      // Enrich any places still missing neighborhood / city / category before saving
+      const enrichedPlaces = await Promise.all(uploadedPlaces.map(async (p) => {
+        if (!p.name || (p.neighborhood && p.city && p.category && p.lat != null)) return p;
+        try {
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.addressComponents,places.types,places.location' },
+            body: JSON.stringify({ textQuery: [p.name, p.city, p.country].filter(Boolean).join(', '), languageCode: 'en' }),
+          });
+          const data = await res.json();
+          const place = data.places?.[0];
+          if (!place) return p;
+          const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
+          const types: string[] = place.types ?? [];
+          const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
+          const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
+          const city = find('postal_town') || find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1');
+          const country = find('country');
+          const category = googleTypesToCategory(types);
+          const lat = p.lat ?? (place.location?.latitude ?? null);
+          const lng = p.lng ?? (place.location?.longitude ?? null);
+          return {
+            ...p,
+            neighborhood: p.neighborhood || neighborhood,
+            city: p.city || city,
+            country: p.country || country,
+            category: (p.category || category) as Category | '',
+            lat,
+            lng,
+          };
+        } catch { return p; }
+      }));
+
       const allHashtags = [
-        ...places.map(p => shortName(p.name).replace(/\s+/g, '')),
-        ...[...new Set(places.map(p => p.city).filter(Boolean))],
+        ...enrichedPlaces.map(p => shortName(p.name).replace(/\s+/g, '')),
+        ...[...new Set(enrichedPlaces.map(p => p.city).filter(Boolean))],
         ...extraHashtags,
       ];
       const { data: post, error: postErr } = await supabase
@@ -653,7 +562,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
         .single();
       if (postErr) throw postErr;
 
-      const placesRows = uploadedPlaces.map((p, i) => ({
+      const placesRows = enrichedPlaces.map((p, i) => ({
         post_id: post.id,
         name: shortName(p.name),
         category: p.category || null,
@@ -766,6 +675,8 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
   if (step === 'places') {
     const anyAnalyzing = places.some(p => p.analyzing);
     const analyzingCount = places.filter(p => p.analyzing).length;
+    const missingAddress = places.filter(p => !p.analyzing && !p.name);
+    const allAddressed = !anyAnalyzing && missingAddress.length === 0;
 
     if (places.length === 0) {
       return (
@@ -791,7 +702,9 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
           <p className="text-sm text-gray-400 mt-0.5">
             {anyAnalyzing
               ? `${analyzingCount} remaining…`
-              : 'Tap the pencil to search and tag each place'}
+              : missingAddress.length > 0
+                ? `${missingAddress.length} place${missingAddress.length !== 1 ? 's' : ''} still need${missingAddress.length === 1 ? 's' : ''} an address`
+                : 'All places tagged — ready to continue'}
           </p>
         </div>
 
@@ -822,11 +735,16 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
         </div>
 
         <div className="px-4 pb-6 pt-3 border-t border-gray-100">
+          {!anyAnalyzing && missingAddress.length > 0 && (
+            <p className="text-center text-xs text-amber-500 font-medium mb-2">
+              Search an address for every photo to continue
+            </p>
+          )}
           <button
             onClick={() => setStep('preview')}
-            disabled={anyAnalyzing}
+            disabled={!allAddressed}
             className={`w-full py-4 rounded-2xl font-semibold text-base transition-all ${
-              anyAnalyzing ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-slate-900 text-white'
+              !allAddressed ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-slate-900 text-white'
             }`}
           >
             {anyAnalyzing ? 'Checking location…' : 'Write your caption'}

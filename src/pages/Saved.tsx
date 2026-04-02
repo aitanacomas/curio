@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
 import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link } from 'lucide-react';
@@ -166,8 +167,8 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
-import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
-import { getSavedPlaces, supabase, getPublicUrl } from '../lib/supabase';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
+import { getSavedPlaces, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, type RealPostPlace } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -686,7 +687,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [editPlanCoverImage, setEditPlanCoverImage] = useState('');
   const [editCollabSuggestions, setEditCollabSuggestions] = useState<FollowProfile[]>([]);
   const [editFollowList, setEditFollowList] = useState<FollowProfile[]>([]);
-  const editCoverInputRef = useRef<HTMLInputElement>(null);
   const [coverCropFile, setCoverCropFile] = useState<File | null>(null);
   const [coverCropTarget, setCoverCropTarget] = useState<'edit' | null>(null);
   const [coverCropSaving, setCoverCropSaving] = useState(false);
@@ -752,6 +752,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [newColDesc, setNewColDesc] = useState('');
   const [newColSaving, setNewColSaving] = useState(false);
   const [dbCollections, setDbCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
+  const [dbSubscribedCollections, setDbSubscribedCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
+  const [selectedRealCollection, setSelectedRealCollection] = useState<import('../lib/supabase').RealCollection | null>(null);
+  const [realCollectionPlaces, setRealCollectionPlaces] = useState<RealPostPlace[]>([]);
+  const [loadingRealCollectionPlaces, setLoadingRealCollectionPlaces] = useState(false);
+  const [realColFilter, setRealColFilter] = useState('all');
+  const [showRealColMap, setShowRealColMap] = useState(true);
   const [itemInvites, setItemInvites] = useState<ItemInvite[]>([]);
   const [newPlanDesc, setNewPlanDesc] = useState('');
   const [newPlanLocation, setNewPlanLocation] = useState('');
@@ -1231,6 +1237,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
     getItemInvites(userId).then(setItemInvites);
     getUserCollections(userId).then(setDbCollections);
+    getSubscribedCollections(userId).then(setDbSubscribedCollections);
   }, [userId]);
 
   // ── Enrich items in the opened trip with address/neighborhood/photo ──
@@ -1511,20 +1518,18 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </div>
           <div className="absolute bottom-4 left-4 right-4">
             <h2 className="text-2xl font-black text-white">{selectedTrip.destination}</h2>
-            <div className="flex items-center gap-3 mt-1">
-              {selectedTrip.dates && (
-                <p className="text-white text-xs flex items-center gap-1">
-                  <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
-                </p>
-              )}
-              {selectedTrip.country && (
-                <p className="text-white text-xs flex items-center gap-1">
-                  <MapPin size={11} strokeWidth={1.5} />{selectedTrip.country}
-                </p>
-              )}
-            </div>
+            {selectedTrip.dates && (
+              <p className="text-white text-xs flex items-center gap-1 mt-1">
+                <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
+              </p>
+            )}
+            {selectedTrip.country && (
+              <p className="text-white text-xs flex items-center gap-1 mt-0.5">
+                <MapPin size={11} strokeWidth={1.5} />{selectedTrip.country}
+              </p>
+            )}
             {selectedTrip.description && (
-              <p className="text-white text-xs mt-1.5 line-clamp-2">{selectedTrip.description}</p>
+              <p className="text-white text-xs mt-1 line-clamp-2">{selectedTrip.description}</p>
             )}
           </div>
         </div>
@@ -1872,32 +1877,25 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit plan</p>
 
               {/* Cover image preview */}
+              {createPortal(
+                <input id="saved-trip-cover-input" type="file" accept="image/*" onChange={(e) => {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  setCoverCropFile(file); setCoverCropTarget('edit'); e.currentTarget.value = '';
+                }} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+                document.body
+              )}
               <div className="relative h-28 rounded-2xl overflow-hidden mb-4">
                 <img src={editPlanCoverImage || editPlanTrip.coverImage} alt="" className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                   {coverCropSaving ? (
                     <Loader2 size={20} className="text-white animate-spin" />
                   ) : (
-                    <button onClick={() => editCoverInputRef.current?.click()} className="flex items-center gap-1.5 bg-white/90 text-gray-800 text-xs font-semibold px-3 py-1.5 rounded-full">
+                    <label htmlFor="saved-trip-cover-input" className="flex items-center gap-1.5 bg-white/90 text-gray-800 text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer">
                       <Pencil size={11} strokeWidth={2} /> Change cover
-                    </button>
+                    </label>
                   )}
                 </div>
               </div>
-              <input
-                ref={editCoverInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  setCoverCropFile(file);
-                  setCoverCropTarget('edit');
-                  e.target.value = '';
-                }}
-              />
-
               {/* Title */}
               <input
                 autoFocus
@@ -2354,23 +2352,27 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       </button>
                     </div>
                   ) : (
-                    <label className="w-full h-24 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-1 text-gray-400 cursor-pointer">
-                      <Plus size={18} strokeWidth={1.5} />
-                      <span className="text-xs">Add your own photo</span>
-                      <input type="file" accept="image/*" className="hidden" onChange={async e => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const preview = URL.createObjectURL(file);
-                        setAddPlaceCustomImage(preview);
-                        setAddPlaceUploading(true);
-                        if (userId) {
-                          const path = `plan-items/${userId}/${Date.now()}.jpg`;
-                          const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
-                          if (!error) setAddPlaceCustomImage(getPublicUrl('avatars', path));
-                        }
-                        setAddPlaceUploading(false);
-                      }} />
-                    </label>
+                    <>
+                      {createPortal(
+                        <input id="saved-add-place-photo" type="file" accept="image/*" onChange={async e => {
+                          const file = e.target.files?.[0]; if (!file) return;
+                          const preview = URL.createObjectURL(file);
+                          setAddPlaceCustomImage(preview);
+                          setAddPlaceUploading(true);
+                          if (userId) {
+                            const path = `plan-items/${userId}/${Date.now()}.jpg`;
+                            const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                            if (!error) setAddPlaceCustomImage(getPublicUrl('avatars', path));
+                          }
+                          setAddPlaceUploading(false);
+                        }} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+                        document.body
+                      )}
+                      <label htmlFor="saved-add-place-photo" className="w-full h-24 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center gap-1 text-gray-400 cursor-pointer">
+                        <Plus size={18} strokeWidth={1.5} />
+                        <span className="text-xs">Add your own photo</span>
+                      </label>
+                    </>
                   )}
                 </div>
 
@@ -2689,23 +2691,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     >
                       {categoryEmoji[editItem.category] ?? '📍'}
                     </div>
-                    <label className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 text-white text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer">
-                      <Pencil size={11} strokeWidth={2} /> Change photo
-                      <input type="file" accept="image/*" className="hidden" onChange={async e => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
+                    {createPortal(
+                      <input id="saved-edit-item-photo" type="file" accept="image/*" onChange={async e => {
+                        const file = e.target.files?.[0]; if (!file) return;
                         setEditItem(prev => prev ? { ...prev, image: URL.createObjectURL(file) } : prev);
                         setEditItemUploading(true);
                         if (userId) {
                           const path = `plan-items/${userId}/${Date.now()}.jpg`;
                           const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
-                          if (!error) {
-                            const publicUrl = getPublicUrl('avatars', path);
-                            setEditItem(prev => prev ? { ...prev, image: publicUrl } : prev);
-                          }
+                          if (!error) { const publicUrl = getPublicUrl('avatars', path); setEditItem(prev => prev ? { ...prev, image: publicUrl } : prev); }
                         }
                         setEditItemUploading(false);
-                      }} />
+                      }} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+                      document.body
+                    )}
+                    <label htmlFor="saved-edit-item-photo" className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 text-white text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer">
+                      <Pencil size={11} strokeWidth={2} /><span>Change photo</span>
                     </label>
                     {editItem.image && editItem.image !== 'none' && (
                       <button
@@ -3095,6 +3096,141 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </div>
         )}
 
+      </div>
+    );
+  }
+
+  // ── Real Collection Detail ────────────────────────────────────
+  if (selectedRealCollection) {
+    const catEmoji = (cat: string) => {
+      const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', dining: '🍽️', bar: '🍸', cocktail: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
+      return m[cat.toLowerCase()] ?? '📍';
+    };
+    const mapPlaces = realCollectionPlaces
+      .filter(pl => pl.lat != null && pl.lng != null)
+      .map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
+    const isOwn = selectedRealCollection.userId === userId;
+
+    const RealPlaceCard = ({ place }: { place: RealPostPlace }) => (
+      <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+        {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+          <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+            <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+            {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+          </p>
+          {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="bg-white min-h-screen">
+        {/* Hero */}
+        <div className="relative h-64">
+          {selectedRealCollection.coverImageUrl ? (
+            <img src={selectedRealCollection.coverImageUrl} alt={selectedRealCollection.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+              <span className="text-7xl">{selectedRealCollection.emoji || '🗂️'}</span>
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
+          <button
+            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); setRealColFilter('all'); setShowRealColMap(true); }}
+            className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+          >
+            <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={() => { const url = `${window.location.origin}/collection/${selectedRealCollection.id}`; navigator.share?.({ title: selectedRealCollection.name, url }); }}
+              className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+            >
+              <Share2 size={15} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+          </div>
+          <div className="absolute bottom-4 left-4 right-4">
+            <h2 className="text-2xl font-black text-white">{selectedRealCollection.name}</h2>
+            {selectedRealCollection.description && (
+              <p className="text-white/70 text-xs mt-1">{selectedRealCollection.description}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Places */}
+        {loadingRealCollectionPlaces ? (
+          <div className="px-4 pt-4 space-y-3">
+            <div className="h-52 bg-gray-100 rounded-2xl animate-pulse" />
+            {[0,1,2].map(i => <div key={i} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />)}
+          </div>
+        ) : realCollectionPlaces.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <span className="text-4xl mb-3">📍</span>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No places yet</p>
+            <p className="text-slate-400 text-sm max-w-[220px]">{isOwn ? 'Save places from your posts to start building this collection' : 'No places have been added to this collection yet'}</p>
+          </div>
+        ) : (() => {
+          const chipClass = (active: boolean) =>
+            `flex-shrink-0 flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${active ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`;
+          const cats = Array.from(new Set(realCollectionPlaces.map(p => p.category).filter(Boolean)));
+          return (
+            <>
+              {/* Count + show/hide map */}
+              <div className="flex items-center justify-between px-4 pt-4 pb-1">
+                <p className="text-sm font-semibold text-gray-900">{realCollectionPlaces.length} place{realCollectionPlaces.length !== 1 ? 's' : ''} in this collection</p>
+                {mapPlaces.length > 0 && (
+                  <button
+                    onClick={() => setShowRealColMap(v => !v)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showRealColMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    {showRealColMap ? 'Hide map' : 'Show map'}
+                  </button>
+                )}
+              </div>
+
+              {/* Map */}
+              {showRealColMap && mapPlaces.length > 0 && (
+                <div className="px-4 pt-2">
+                  <div className="rounded-2xl overflow-hidden">
+                    <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
+                      <MapView places={mapPlaces} height="220px" />
+                    </Suspense>
+                  </div>
+                </div>
+              )}
+
+              {/* Category filter chips */}
+              {cats.length >= 2 && (
+                <div className="flex gap-2 px-4 pt-3 overflow-x-auto no-scrollbar">
+                  <button onClick={() => setRealColFilter('all')} className={chipClass(realColFilter === 'all')}>All</button>
+                  {cats.map(cat => (
+                    <button key={cat} onClick={() => setRealColFilter(realColFilter === cat ? 'all' : cat)} className={chipClass(realColFilter === cat)}>
+                      {catEmoji(cat)} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Places grouped by neighborhood */}
+              <div className="px-4 pt-3 pb-10 space-y-3">
+                {(() => {
+                  const filtered = realColFilter === 'all' ? realCollectionPlaces : realCollectionPlaces.filter(p => p.category === realColFilter);
+                  const byArea: Record<string, typeof filtered> = {};
+                  filtered.forEach(p => { const k = p.neighborhood || p.city || 'Other'; if (!byArea[k]) byArea[k] = []; byArea[k].push(p); });
+                  if (Object.keys(byArea).length === 0) return <p className="text-center text-sm text-gray-400 py-8">No places match this filter</p>;
+                  return Object.entries(byArea).map(([area, areaPlaces]) => (
+                    <div key={area}>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{area}</p>
+                      <div className="space-y-3">{areaPlaces.map(place => <RealPlaceCard key={place.id} place={place} />)}</div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </>
+          );
+        })()}
       </div>
     );
   }
@@ -3498,7 +3634,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
       {/* Collections Tab */}
       {activeTab === 'Collections' && (
-        isNewUser && myCollections.length === 0 && dbCollections.length === 0 ? (
+        isNewUser && myCollections.length === 0 && dbCollections.length === 0 && dbSubscribedCollections.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
               <span className="text-3xl">🗂️</span>
@@ -3515,13 +3651,17 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Mine</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-              {myCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => setSelectedCollection(col)}>
-                  <div className="rounded-xl overflow-hidden aspect-square relative">
-                    <img src={col.coverImage} alt={col.name} className="w-full h-full object-cover" style={col.id === 'col-8' ? { transform: 'scale(1.11)' } : undefined} />
+              {dbCollections.map(col => (
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); setRealCollectionPlaces(geocoded); setLoadingRealCollectionPlaces(false); }); }}>
+                  <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
+                    {col.coverImageUrl ? (
+                      <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-4xl">{col.emoji || '🗂️'}</div>
+                    )}
                   </div>
                   <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                  <p className="text-xs text-gray-400">{col.placeIds.length} places</p>
+                  <p className="text-xs text-gray-400">{col.placesCount} places</p>
                 </div>
               ))}
               <div className="cursor-pointer" onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }}>
@@ -3534,35 +3674,26 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </div>
 
           {/* Following */}
+          {dbSubscribedCollections.length > 0 && (
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Subscribed</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-              {followingCollections.map(col => {
-                const curator = col.curatorId ? users.find(u => u.id === col.curatorId) : null;
-                return (
-                  <div key={col.id} className="cursor-pointer" onClick={() => setSelectedCollection(col)}>
-                    <div className="rounded-xl overflow-hidden aspect-square relative">
-                      <img src={col.coverImage} alt={col.name} className="w-full h-full object-cover" />
-                      {col.isPremium && (
-                        <div className="absolute top-2 left-2 bg-amber-400 rounded-full px-2 py-0.5 flex items-center gap-1">
-                          <Lock size={9} strokeWidth={1.5} className="text-white" />
-                          <p className="text-xs font-bold text-white">Premium · ${col.price}</p>
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                    {curator && (
-                      <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-0.5">
-                        by {curator.name}
-                        {curator.isCreator && <BadgeCheck size={11} className="text-blue-500 fill-blue-500" strokeWidth={1.5} />}
-                      </p>
+              {dbSubscribedCollections.map(col => (
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); setRealCollectionPlaces(geocoded); setLoadingRealCollectionPlaces(false); }); }}>
+                  <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
+                    {col.coverImageUrl ? (
+                      <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-4xl">{col.emoji || '🗂️'}</div>
                     )}
-                    <p className="text-xs text-gray-400">{col.placeIds.length} places · {col.followerCount?.toLocaleString()} subscribers</p>
                   </div>
-                );
-              })}
+                  <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
+                  <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                </div>
+              ))}
             </div>
           </div>
+          )}
         </div>
         )
       )}
