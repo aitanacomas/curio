@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Check, MapPin, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send, Search } from 'lucide-react';
+import { ArrowLeft, Check, MapPin, Map, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send, Search } from 'lucide-react';
 import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, geocodeMissingPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getSavedPlaceIds, getPostComments, addComment, deleteComment, getPlans, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan } from '../lib/supabase';
 import { googleTypesToCategory } from '../lib/placeUtils';
 
@@ -427,16 +427,15 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
             </button>
           </div>
 
-          {/* Caption + hashtags + date */}
+          {/* Caption + hashtags */}
           {(selectedPost.caption || selectedPost.hashtags.length > 0) && (
-            <div className="px-5 pt-4 pb-5">
+            <div className="px-5 pb-5">
               {selectedPost.caption && <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>}
               {selectedPost.hashtags.length > 0 && (() => {
                 const seen = new Set<string>();
                 const unique = selectedPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
                 return <p className="text-xs text-orange-400 mt-2">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
               })()}
-              <p className="text-xs text-gray-400 mt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
             </div>
           )}
 
@@ -451,6 +450,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                   onClick={() => setShowPostMap(v => !v)}
                   className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
                 >
+                  <Map size={11} strokeWidth={1.5} />
                   {showPostMap ? 'Hide map' : 'View on map'}
                 </button>
               )}
@@ -503,33 +503,36 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
             </div>
           </div>
 
-          {/* Comments section */}
-          <div className="px-5 pt-4 pb-6 border-t border-gray-100">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-          {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
-          {!loadingComments && postComments.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
-          )}
-          <div className="space-y-3 mb-4">
-            {postComments.map(c => (
-              <div key={c.id} className="flex items-start gap-2">
-                {c.profile.avatarUrl
-                  ? <img src={c.profile.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                  : <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 flex-shrink-0">{c.profile.name[0]?.toUpperCase() || '?'}</div>}
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-900"><span className="font-semibold">{c.profile.username}</span> {c.text}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(c.createdAt)}</p>
-                </div>
-                {c.userId === currentUserId && (
-                  <button onClick={async () => { await deleteComment(c.id); setPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-0.5">✕</button>
-                )}
+          {/* Comments */}
+          {postComments.length > 0 && (
+            <div className="px-5 pt-4 border-t border-gray-100">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+              <div className="space-y-3">
+                {postComments.map(c => (
+                  <div key={c.id} className="flex items-start gap-2.5">
+                    {c.profile.avatarUrl
+                      ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                      : <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 flex-shrink-0 mt-0.5">{c.profile.name[0]?.toUpperCase() || '?'}</div>}
+                    <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl px-3 py-2.5">
+                      <div className="flex items-baseline gap-1.5">
+                        <p className="text-xs font-semibold text-gray-900">{c.profile.name.split(' ')[0]}</p>
+                        <p className="text-[10px] text-gray-400">{timeAgo(c.createdAt)}</p>
+                      </div>
+                      <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
+                    </div>
+                    {c.userId === currentUserId && (
+                      <button onClick={async () => { await deleteComment(c.id); setPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-0.5">✕</button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
           {/* Comment input */}
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />
-            <div className="flex-1 flex items-center bg-gray-100 rounded-full px-3 py-2 gap-2">
+          <div className="px-5 pt-4">
+            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3">
+              <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
               <input
                 ref={postCommentInputRef}
                 value={postCommentText}
@@ -543,7 +546,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                   }
                 }}
                 placeholder="Add a comment…"
-                className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
+                className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
               />
               {postCommentText.trim() && (
                 <button
@@ -554,12 +557,15 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                     const saved = await addComment(currentUserId, selectedPost.id, text);
                     if (saved) setPostComments(prev => [...prev, saved]);
                   }}
-                  className="text-xs font-bold text-gray-900 flex-shrink-0"
+                  className="text-xs font-bold text-gray-900"
                 >Post</button>
               )}
             </div>
           </div>
-        </div>
+
+          {/* Date — very end of post */}
+          <p className="text-xs text-gray-400 px-5 pb-6 pt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+
         </div>
       </div>
     );
