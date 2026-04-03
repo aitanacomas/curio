@@ -335,10 +335,37 @@ export async function getUserCollections(userId: string): Promise<RealCollection
 
 // ── Collection Places ─────────────────────────────────────────────────────────
 export async function getCollectionPlaces(collectionId: string): Promise<RealPostPlace[]> {
-  const { data } = await supabase
+  // Try with added_by + profile join first; fall back to simple query if column doesn't exist
+  const { data, error } = await supabase
     .from('collection_places')
     .select('added_by, profiles!added_by ( name, avatar_url ), post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )')
     .eq('collection_id', collectionId);
+
+  if (error) {
+    // Column or relationship missing — fall back to simple query without added_by
+    const { data: fallback } = await supabase
+      .from('collection_places')
+      .select('post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )')
+      .eq('collection_id', collectionId);
+    return (fallback ?? [])
+      .filter((r: any) => r.post_places)
+      .map((r: any) => ({
+        id: r.post_places.id,
+        name: r.post_places.name ?? '',
+        category: r.post_places.category ?? '',
+        neighborhood: r.post_places.neighborhood ?? '',
+        city: r.post_places.city ?? '',
+        country: r.post_places.country ?? '',
+        photoUrl: r.post_places.photo_url ?? '',
+        position: r.post_places.position ?? 0,
+        lat: r.post_places.lat ?? null,
+        lng: r.post_places.lng ?? null,
+        addedBy: null,
+        addedByName: null,
+        addedByAvatar: null,
+      }));
+  }
+
   return (data ?? [])
     .filter((r: any) => r.post_places)
     .map((r: any) => ({
@@ -638,7 +665,14 @@ export async function geocodeMissingPlaces(
 }
 
 export async function addPlaceToCollection(collectionId: string, postPlaceId: string, addedBy?: string) {
-  await supabase.from('collection_places').insert({ collection_id: collectionId, post_place_id: postPlaceId, ...(addedBy ? { added_by: addedBy } : {}) });
+  const base = { collection_id: collectionId, post_place_id: postPlaceId };
+  if (addedBy) {
+    const { error } = await supabase.from('collection_places').insert({ ...base, added_by: addedBy });
+    // If added_by column doesn't exist yet, fall back to insert without it
+    if (error) await supabase.from('collection_places').insert(base);
+  } else {
+    await supabase.from('collection_places').insert(base);
+  }
 }
 
 export async function removePlaceFromCollection(collectionId: string, postPlaceId: string) {
