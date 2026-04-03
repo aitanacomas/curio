@@ -2266,34 +2266,40 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {showInviteSheet && selectedRealCollection && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowInviteSheet(false)} />
-          <div className="relative bg-white rounded-t-3xl pb-8 max-h-[80vh] flex flex-col">
-            <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-            <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0">
-              <h3 className="text-base font-bold text-gray-900">Invite collaborators</h3>
-              <button onClick={() => setShowInviteSheet(false)} className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full">Done</button>
+          <div className="relative bg-white rounded-t-3xl max-h-[75vh] flex flex-col">
+            {/* Handle + header */}
+            <div className="px-5 pt-4 pb-0 flex-shrink-0">
+              <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+              <button onClick={() => setShowInviteSheet(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                <X size={15} strokeWidth={2} className="text-gray-500" />
+              </button>
+              <p className="text-base font-bold text-gray-900 mb-4">Invite collaborators</p>
+              {/* Search bar */}
+              <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3 mb-3">
+                <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={inviteSearch}
+                  onChange={async e => {
+                    const val = e.target.value;
+                    setInviteSearch(val);
+                    if (appUser) searchProfiles(val, appUser.id).then(setInviteResults);
+                  }}
+                  placeholder="Search people..."
+                  className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder:text-gray-400"
+                />
+              </div>
             </div>
-            {/* Search input */}
-            <div className="px-4 pb-3 flex-shrink-0">
-              <input
-                value={inviteSearch}
-                onChange={async e => {
-                  const val = e.target.value;
-                  setInviteSearch(val);
-                  if (appUser) searchProfiles(val, appUser.id).then(setInviteResults);
-                }}
-                placeholder="Search by name or username…"
-                className="w-full bg-gray-100 rounded-full px-4 py-2 text-sm outline-none"
-              />
-            </div>
-            {/* Existing collaborators */}
-            {collectionCollaborators.length > 0 && (
-              <div className="px-4 pb-2 flex-shrink-0">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Current collaborators</p>
+
+            {/* Current collaborators */}
+            {collectionCollaborators.length > 0 && !inviteSearch && (
+              <div className="px-3 flex-shrink-0">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Current collaborators</p>
                 {collectionCollaborators.map(c => (
-                  <div key={c.id} className="flex items-center gap-3 py-2">
+                  <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
                     {c.profile.avatarUrl
-                      ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-                      : <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
+                      ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
                       <p className="text-xs text-gray-400">@{c.profile.username}</p>
@@ -2303,19 +2309,20 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                         await removeCollaborator(selectedRealCollection.id, c.userId);
                         setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
                       }}
-                      className="text-xs text-red-500 font-semibold"
+                      className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
                     >Remove</button>
                   </div>
                 ))}
               </div>
             )}
+
             {/* Search results */}
-            <div className="overflow-y-auto flex-1 px-4">
+            <div className="overflow-y-auto flex-1 px-3">
               {inviteResults.filter(r => !collectionCollaborators.some(c => c.userId === r.id)).map(user => (
-                <div key={user.id} className="flex items-center gap-3 py-2.5">
+                <div key={user.id} className="flex items-center gap-3 py-2.5 px-2">
                   {user.avatarUrl
-                    ? <img src={user.avatarUrl} alt={user.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
-                    : <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{user.name.charAt(0)}</div>}
+                    ? <img src={user.avatarUrl} alt={user.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{user.name.charAt(0)}</div>}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{user.name}</p>
                     <p className="text-xs text-gray-400">@{user.username}</p>
@@ -2333,13 +2340,37 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       }
                       setInvitingUserId(null);
                     }}
-                    className="text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full disabled:opacity-50"
+                    className={`text-xs font-bold px-5 py-2 rounded-full flex-shrink-0 transition-colors ${invitingUserId === user.id ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}
                   >{invitingUserId === user.id ? '…' : 'Invite'}</button>
                 </div>
               ))}
               {inviteSearch && inviteResults.filter(r => !collectionCollaborators.some(c => c.userId === r.id)).length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-4">No users found</p>
+                <p className="text-sm text-gray-400 text-center py-4">No users found on curio</p>
               )}
+            </div>
+
+            {/* Invite externally */}
+            <div className="border-t border-gray-100 px-3 pb-10 flex-shrink-0">
+              <button
+                onClick={async () => {
+                  const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                  const msg = `Join me on curio and collaborate on my collection! ${url}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ url, title: 'Join my curio collection', text: msg }); } catch {}
+                  } else {
+                    navigator.clipboard.writeText(msg).catch(() => {});
+                  }
+                }}
+                className="w-full flex items-center gap-3 py-3.5 px-2 rounded-2xl active:bg-gray-50"
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Send size={16} strokeWidth={1.5} className="text-gray-700" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-gray-900">Invite externally</p>
+                  <p className="text-xs text-gray-400">They'll need to create a curio account</p>
+                </div>
+              </button>
             </div>
           </div>
         </div>
