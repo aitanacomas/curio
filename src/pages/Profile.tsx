@@ -1968,9 +1968,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <p className="text-xs text-gray-400">
               {collectionCollaborators.length === 1
-                ? `@${collectionCollaborators[0].profile.username} can edit`
-                : `${collectionCollaborators.length} collaborator${collectionCollaborators.length > 1 ? 's' : ''}`}
-              {pendingCollabIds.size > 0 && <span className="text-amber-500 ml-1">· {pendingCollabIds.size} pending</span>}
+                ? `@${collectionCollaborators[0].profile.username} invited`
+                : `${collectionCollaborators.length} invited`}
+              <span className="text-amber-500 ml-1">· pending</span>
             </p>
           </button>
         )}
@@ -2307,58 +2307,29 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </div>
             </div>
 
-            {/* Pending + current collaborators */}
+            {/* All invited collaborators — shown as Pending until acceptance flow exists */}
             {collectionCollaborators.length > 0 && !inviteSearch && (
               <div className="px-3 flex-shrink-0">
-                {/* Pending */}
-                {collectionCollaborators.filter(c => pendingCollabIds.has(c.userId)).length > 0 && (
-                  <>
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
-                    {collectionCollaborators.filter(c => pendingCollabIds.has(c.userId)).map(c => (
-                      <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
-                        {c.profile.avatarUrl
-                          ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
-                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
-                          <p className="text-xs text-amber-500 font-medium">Invite sent</p>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            await removeCollaborator(selectedRealCollection.id, c.userId);
-                            setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
-                            setPendingCollabIds(prev => { const n = new Set(prev); n.delete(c.userId); return n; });
-                          }}
-                          className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
-                        >Remove</button>
-                      </div>
-                    ))}
-                  </>
-                )}
-                {/* Accepted */}
-                {collectionCollaborators.filter(c => !pendingCollabIds.has(c.userId)).length > 0 && (
-                  <>
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1 mt-2">Collaborators</p>
-                    {collectionCollaborators.filter(c => !pendingCollabIds.has(c.userId)).map(c => (
-                      <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
-                        {c.profile.avatarUrl
-                          ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
-                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
-                          <p className="text-xs text-gray-400">@{c.profile.username}</p>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            await removeCollaborator(selectedRealCollection.id, c.userId);
-                            setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
-                          }}
-                          className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
-                        >Remove</button>
-                      </div>
-                    ))}
-                  </>
-                )}
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
+                {collectionCollaborators.map(c => (
+                  <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
+                    {c.profile.avatarUrl
+                      ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
+                      <p className="text-xs text-amber-500 font-medium">Invite sent</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await removeCollaborator(selectedRealCollection.id, c.userId);
+                        setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
+                        setPendingCollabIds(prev => { const n = new Set(prev); n.delete(c.userId); return n; });
+                      }}
+                      className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
+                    >Remove</button>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -2375,7 +2346,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900">{user.name}</p>
                       {alreadyAdded
-                        ? <p className="text-xs font-medium text-amber-500">{isPending ? 'Invite sent' : 'Already a collaborator'}</p>
+                        ? <p className="text-xs font-medium text-amber-500">Invite sent</p>
                         : <p className="text-xs text-gray-400">@{user.username}</p>}
                     </div>
                     {!alreadyAdded && (

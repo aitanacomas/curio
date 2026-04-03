@@ -168,7 +168,7 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
-import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, type RealPostPlace, type RealPost, type CollectionCollaborator } from '../lib/supabase';
+import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, type RealPostPlace, type RealPost, type CollectionCollaborator } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -3435,11 +3435,33 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
             {/* User list */}
             <div className="overflow-y-auto flex-1 px-3">
-              {/* Pending section */}
-              {colInvitedPeople.length > 0 && !colInviteSearch && (
+              {/* All invited collaborators — shown as Pending until acceptance flow exists */}
+              {(colCollaborators.length > 0 || colInvitedPeople.length > 0) && !colInviteSearch && (
                 <div className="mb-1">
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
-                  {colInvitedPeople.map(person => (
+                  {/* DB collaborators */}
+                  {colCollaborators.map(c => (
+                    <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
+                      {c.profile.avatarUrl
+                        ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                        : <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name[0]}</div>
+                      }
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
+                        <p className="text-xs text-amber-500 font-medium">Invite sent</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!selectedRealCollection) return;
+                          await removeCollaborator(selectedRealCollection.id, c.userId);
+                          setColCollaborators(prev => prev.filter(x => x.id !== c.id));
+                        }}
+                        className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
+                      >Remove</button>
+                    </div>
+                  ))}
+                  {/* Invited this session (not yet in DB fetch) */}
+                  {colInvitedPeople.filter(p => !colCollaborators.some(c => c.userId === p.id)).map(person => (
                     <div key={person.id} className="flex items-center gap-3 py-2.5 px-2">
                       {person.avatarUrl
                         ? <img src={person.avatarUrl} alt={person.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
@@ -3449,15 +3471,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                         <p className="text-sm font-semibold text-gray-900">{person.name}</p>
                         <p className="text-xs text-amber-500 font-medium">Invite sent</p>
                       </div>
-                      <button
-                        onClick={async () => {
-                          if (!userId || !selectedRealCollection) return;
-                          await addCollaborator(selectedRealCollection.id, person.id, userId);
-                          setColInvitedPeople(prev => prev.filter(p => p.id !== person.id));
-                          setColInviteSent(prev => prev.filter(id => id !== person.id));
-                        }}
-                        className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
-                      >Remove</button>
                     </div>
                   ))}
                 </div>
@@ -3475,7 +3488,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900">{person.name}</p>
                       {alreadyAdded || isPending
-                        ? <p className="text-xs font-medium text-amber-500">{alreadyAdded && !isPending ? 'Already a collaborator' : 'Invite sent'}</p>
+                        ? <p className="text-xs font-medium text-amber-500">Invite sent</p>
                         : <p className="text-xs text-gray-400">@{person.username}</p>
                       }
                     </div>
