@@ -1416,7 +1416,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                 {[0, 1].map(i => <div key={i} className="h-14 bg-gray-100 rounded-2xl animate-pulse" />)}
               </div>
             ) : (
-              <div className="px-4 space-y-2 max-h-72 overflow-y-auto">
+              <div className="px-4 space-y-2 max-h-64 overflow-y-auto">
                 {userCollections.map(col => {
                   const inCol = placeInCollections.has(col.id);
                   return (
@@ -1452,6 +1452,63 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                 })}
               </div>
             )}
+            {/* New collection */}
+            <div className="px-4 pt-3 pb-8">
+              {showNewColInput ? (
+                <div className="flex items-center gap-2 bg-gray-50 rounded-2xl px-3 py-2.5">
+                  <input
+                    autoFocus
+                    value={newColName}
+                    onChange={e => setNewColName(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && newColName.trim() && appUser) {
+                        setSavingNewCol(true);
+                        const { data, error } = await createCollection(appUser.id, { name: newColName.trim(), emoji: '', description: '', cover_image_url: null });
+                        if (!error && data) {
+                          await addPlaceToCollection(data.id, addToColPlace.id);
+                          setUserCollections(prev => [{ ...data, placesCount: 1 }, ...prev]);
+                          setPlaceInCollections(prev => new Set(prev).add(data.id));
+                        }
+                        setSavingNewCol(false);
+                        setShowNewColInput(false);
+                        setNewColName('');
+                      }
+                    }}
+                    placeholder="Collection name…"
+                    className="flex-1 text-sm text-gray-900 bg-transparent outline-none placeholder-gray-400"
+                  />
+                  <button
+                    disabled={!newColName.trim() || savingNewCol}
+                    onClick={async () => {
+                      if (!newColName.trim() || !appUser) return;
+                      setSavingNewCol(true);
+                      const { data, error } = await createCollection(appUser.id, { name: newColName.trim(), emoji: '', description: '', cover_image_url: null });
+                      if (!error && data) {
+                        await addPlaceToCollection(data.id, addToColPlace.id);
+                        setUserCollections(prev => [{ ...data, placesCount: 1 }, ...prev]);
+                        setPlaceInCollections(prev => new Set(prev).add(data.id));
+                      }
+                      setSavingNewCol(false);
+                      setShowNewColInput(false);
+                      setNewColName('');
+                    }}
+                    className="text-xs font-bold text-gray-900 disabled:opacity-40"
+                  >
+                    {savingNewCol ? '…' : 'Create'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowNewColInput(true)}
+                  className="w-full flex items-center gap-3 py-2 text-left"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <Plus size={18} strokeWidth={2} className="text-gray-500" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700">New collection</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
