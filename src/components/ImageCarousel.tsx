@@ -58,9 +58,9 @@ export default function ImageCarousel({ images, labels, sublabels, scales, onCli
       <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 flex items-end justify-between gap-3">
         {labels && labels[index] ? (
           <div className="min-w-0">
-            <p className="text-white font-semibold text-xs leading-tight truncate">{labels[index]}</p>
+            <p className="text-white font-bold text-[15px] leading-tight truncate drop-shadow-sm">{labels[index]}</p>
             {sublabels && sublabels[index] && (
-              <p className="text-white/70 text-[10px] mt-0.5 truncate">{sublabels[index]}</p>
+              <p className="text-white/80 text-xs mt-0.5 truncate drop-shadow-sm">{sublabels[index]}</p>
             )}
           </div>
         ) : <span />}

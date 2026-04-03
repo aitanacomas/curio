@@ -376,13 +376,6 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                 }
                 <p className="text-white font-semibold text-sm leading-tight truncate">{profile?.username || profile?.name}</p>
               </div>
-              <div className="flex-1" />
-              <button
-                onClick={() => setShowSaveAllPicker(true)}
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
-              >
-                <Send size={15} strokeWidth={1.5} className="text-white" />
-              </button>
             </div>
           </div>
         </div>
@@ -408,7 +401,11 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                 <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
                 <span className="text-sm font-medium text-gray-500">{postComments.length}</span>
               </button>
-              <button onClick={() => setShowSaveAllPicker(true)}>
+              <button onClick={() => {
+                const url = window.location.href;
+                if (navigator.share) { navigator.share({ title: selectedPost.caption || 'Check this out on curio', url }); }
+                else { navigator.clipboard?.writeText(url); }
+              }}>
                 <Send size={21} strokeWidth={1.5} className="text-gray-800" />
               </button>
             </div>
@@ -444,7 +441,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
         </div>
 
         {/* Places + map */}
-        <div className="px-4 pt-4 pb-6">
+        <div className="bg-white px-4 pt-4 pb-6">
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
               {selectedPost.places.length} Place{selectedPost.places.length !== 1 ? 's' : ''}
@@ -509,7 +506,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
         </div>
 
         {/* Comments section */}
-        <div className="px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
+        <div className="bg-white px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
           {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
           {!loadingComments && postComments.length === 0 && (
