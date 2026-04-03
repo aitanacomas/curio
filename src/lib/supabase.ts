@@ -17,6 +17,9 @@ export interface RealPostPlace {
   position: number;
   lat?: number | null;
   lng?: number | null;
+  addedBy?: string | null;
+  addedByName?: string | null;
+  addedByAvatar?: string | null;
 }
 
 export interface RealPost {
@@ -334,22 +337,24 @@ export async function getUserCollections(userId: string): Promise<RealCollection
 export async function getCollectionPlaces(collectionId: string): Promise<RealPostPlace[]> {
   const { data } = await supabase
     .from('collection_places')
-    .select('post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )')
+    .select('added_by, profiles!added_by ( name, avatar_url ), post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )')
     .eq('collection_id', collectionId);
   return (data ?? [])
-    .map((r: any) => r.post_places)
-    .filter(Boolean)
-    .map((pl: any) => ({
-      id: pl.id,
-      name: pl.name ?? '',
-      category: pl.category ?? '',
-      neighborhood: pl.neighborhood ?? '',
-      city: pl.city ?? '',
-      country: pl.country ?? '',
-      photoUrl: pl.photo_url ?? '',
-      position: pl.position ?? 0,
-      lat: pl.lat ?? null,
-      lng: pl.lng ?? null,
+    .filter((r: any) => r.post_places)
+    .map((r: any) => ({
+      id: r.post_places.id,
+      name: r.post_places.name ?? '',
+      category: r.post_places.category ?? '',
+      neighborhood: r.post_places.neighborhood ?? '',
+      city: r.post_places.city ?? '',
+      country: r.post_places.country ?? '',
+      photoUrl: r.post_places.photo_url ?? '',
+      position: r.post_places.position ?? 0,
+      lat: r.post_places.lat ?? null,
+      lng: r.post_places.lng ?? null,
+      addedBy: r.added_by ?? null,
+      addedByName: (r.profiles as any)?.name ?? null,
+      addedByAvatar: (r.profiles as any)?.avatar_url ?? null,
     }));
 }
 
@@ -632,8 +637,8 @@ export async function geocodeMissingPlaces(
   return current;
 }
 
-export async function addPlaceToCollection(collectionId: string, postPlaceId: string) {
-  await supabase.from('collection_places').insert({ collection_id: collectionId, post_place_id: postPlaceId });
+export async function addPlaceToCollection(collectionId: string, postPlaceId: string, addedBy?: string) {
+  await supabase.from('collection_places').insert({ collection_id: collectionId, post_place_id: postPlaceId, ...(addedBy ? { added_by: addedBy } : {}) });
 }
 
 export async function removePlaceFromCollection(collectionId: string, postPlaceId: string) {

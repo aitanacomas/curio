@@ -2010,6 +2010,17 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{locationLine(place)}
                 </p>
                 {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+                {collectionCollaborators.length > 0 && place.addedBy && (
+                  <div className="flex items-center gap-1 mt-1.5">
+                    {place.addedByAvatar
+                      ? <img src={place.addedByAvatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-3.5 h-3.5 rounded-full bg-gray-300 flex items-center justify-center text-[7px] font-bold text-white flex-shrink-0">{(place.addedByName ?? '?')[0].toUpperCase()}</div>
+                    }
+                    <span className="text-[10px] text-gray-400">
+                      {place.addedBy === appUser?.id ? 'You' : (place.addedByName ?? 'Someone')} added this
+                    </span>
+                  </div>
+                )}
               </div>
               <button
                 onClick={async () => {
@@ -2353,34 +2364,41 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
             {/* Search results */}
             <div className="overflow-y-auto flex-1 px-3">
-              {inviteResults.filter(r => !collectionCollaborators.some(c => c.userId === r.id)).map(user => (
-                <div key={user.id} className="flex items-center gap-3 py-2.5 px-2">
-                  {user.avatarUrl
-                    ? <img src={user.avatarUrl} alt={user.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
-                    : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{user.name.charAt(0)}</div>}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">{user.name}</p>
-                    <p className="text-xs text-gray-400">@{user.username}</p>
+              {inviteResults.map(user => {
+                const alreadyAdded = collectionCollaborators.some(c => c.userId === user.id);
+                const isPending = pendingCollabIds.has(user.id);
+                return (
+                  <div key={user.id} className="flex items-center gap-3 py-2.5 px-2">
+                    {user.avatarUrl
+                      ? <img src={user.avatarUrl} alt={user.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{user.name.charAt(0)}</div>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{user.name}</p>
+                      {alreadyAdded
+                        ? <p className="text-xs font-medium text-amber-500">{isPending ? 'Invite sent' : 'Already a collaborator'}</p>
+                        : <p className="text-xs text-gray-400">@{user.username}</p>}
+                    </div>
+                    {!alreadyAdded && (
+                      <button
+                        disabled={invitingUserId === user.id}
+                        onClick={async () => {
+                          if (!appUser) return;
+                          setInvitingUserId(user.id);
+                          const err = await addCollaborator(selectedRealCollection.id, user.id, appUser.id);
+                          if (!err) {
+                            const newCollab: CollectionCollaborator = { id: `${Date.now()}`, collectionId: selectedRealCollection.id, userId: user.id, invitedBy: appUser.id, createdAt: new Date().toISOString(), profile: { name: user.name, username: user.username, avatarUrl: user.avatarUrl } };
+                            setCollectionCollaborators(prev => [...prev, newCollab]);
+                            setPendingCollabIds(prev => new Set(prev).add(user.id));
+                          }
+                          setInvitingUserId(null);
+                        }}
+                        className={`text-xs font-bold px-5 py-2 rounded-full flex-shrink-0 transition-colors ${invitingUserId === user.id ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}
+                      >{invitingUserId === user.id ? '…' : 'Invite'}</button>
+                    )}
                   </div>
-                  <button
-                    disabled={invitingUserId === user.id}
-                    onClick={async () => {
-                      if (!appUser) return;
-                      setInvitingUserId(user.id);
-                      const err = await addCollaborator(selectedRealCollection.id, user.id, appUser.id);
-                      if (!err) {
-                        const newCollab: CollectionCollaborator = { id: `${Date.now()}`, collectionId: selectedRealCollection.id, userId: user.id, invitedBy: appUser.id, createdAt: new Date().toISOString(), profile: { name: user.name, username: user.username, avatarUrl: user.avatarUrl } };
-                        setCollectionCollaborators(prev => [...prev, newCollab]);
-                        setPendingCollabIds(prev => new Set(prev).add(user.id));
-                        setInviteResults(prev => prev.filter(r => r.id !== user.id));
-                      }
-                      setInvitingUserId(null);
-                    }}
-                    className={`text-xs font-bold px-5 py-2 rounded-full flex-shrink-0 transition-colors ${invitingUserId === user.id ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}
-                  >{invitingUserId === user.id ? '…' : 'Invite'}</button>
-                </div>
-              ))}
-              {inviteSearch && inviteResults.filter(r => !collectionCollaborators.some(c => c.userId === r.id)).length === 0 && (
+                );
+              })}
+              {inviteSearch && inviteResults.length === 0 && (
                 <p className="text-sm text-gray-400 text-center py-4">No users found on curio</p>
               )}
             </div>
