@@ -2612,8 +2612,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <p className="text-xs text-gray-400">Your places will appear here as you add posts</p>
                   </div>
                 )}
-                {/* Stats overlay */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3 pointer-events-none">
+                {/* Stats overlay — only covers left half so zoom controls stay visible */}
+                <div className="absolute bottom-0 left-0 w-3/5 bg-gradient-to-t from-black/70 to-transparent px-4 py-3 pointer-events-none">
                   <div className="flex gap-6">
                     <div>
                       <p className="text-base font-black text-white">{countriesCount}</p>
