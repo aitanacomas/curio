@@ -95,6 +95,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [postComments, setPostComments] = useState<PostComment[]>([]);
   const [postCommentText, setPostCommentText] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
+  const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const postCommentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -115,6 +116,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
     });
     // Fetch current user's own collections for the "save place" picker
     getUserCollections(currentUserId).then(setMyCollections);
+    // Fetch current user's avatar for comment input
+    getProfile(currentUserId).then(p => setCurrentUserAvatar(p?.avatar_url ?? null));
     // Fetch likes
     getLikedPosts(currentUserId).then(setLikedPosts);
     // Fetch all saved place IDs for bookmark state
@@ -531,7 +534,9 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               </div>
             )}
             <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
-              <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
+              {currentUserAvatar
+                ? <img src={currentUserAvatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                : <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />}
               <input
                 ref={postCommentInputRef}
                 value={postCommentText}

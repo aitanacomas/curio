@@ -285,6 +285,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
           onToggleFollow={() => toggleFollow(selectedPlace.post.userId)}
           onClose={() => setSelectedPlace(null)}
           userId={appUser?.id}
+          userAvatar={appUser?.avatar}
           onViewUser={(uid) => { setSelectedPlace(null); setViewingUserId(uid); }}
         />
       )}
@@ -324,13 +325,14 @@ const modalCatEmoji: Record<string, string> = {
   sports: '🎾', wellness: '💆', street: '🏙️', event: '🎟️', food: '🍕',
 };
 
-function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, userId, onViewUser }: {
+function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, userId, userAvatar, onViewUser }: {
   place: FlatPlace;
   isFollowing: boolean;
   isOwnPost: boolean;
   onToggleFollow: () => void;
   onClose: () => void;
   userId?: string;
+  userAvatar?: string | null;
   onViewUser?: (userId: string) => void;
 }) {
   const { post, indexInPost } = place;
@@ -384,12 +386,10 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
     }
   }, [userId]);
 
-  // Load comments when comment section is opened
+  // Load comments on mount
   useEffect(() => {
-    if (showComments) {
-      getPostComments(post.id).then(setComments);
-    }
-  }, [showComments, post.id]);
+    getPostComments(post.id).then(setComments);
+  }, [post.id]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -668,10 +668,10 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
             {/* Comments section */}
             <div ref={commentsTopRef} className="px-5 pt-5 border-t border-gray-100">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-              {showComments && comments.length === 0 && (
+              {comments.length === 0 && (
                 <p className="text-sm text-gray-400 text-center py-3">Be the first one to add a comment ✨</p>
               )}
-              {showComments && comments.length > 0 && (
+              {comments.length > 0 && (
                 <div className="space-y-3 mb-4">
                   {comments.map(c => (
                     <div key={c.id} className="flex items-start gap-2.5">
@@ -691,7 +691,10 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
               )}
               {userId && (
                 <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
-                  <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
+                  {userAvatar
+                    ? <img src={userAvatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
+                  }
                   <input
                     value={commentText}
                     onChange={e => setCommentText(e.target.value)}
