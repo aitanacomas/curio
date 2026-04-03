@@ -505,8 +505,8 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
           <div ref={scrollableRef}>
 
             {/* Actions row */}
-            <div className="flex items-center justify-between px-4 pt-3 pb-3 border-b border-gray-100">
-              <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-5">
                 <button
                   className="flex items-center gap-1.5"
                   onClick={() => {
@@ -516,21 +516,17 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                     isLiked ? unlikePost(userId, post.id) : likePost(userId, post.id);
                   }}
                 >
-                  <Heart size={19} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-500'} />
-                  <span className="text-xs text-gray-400">{likeCount}</span>
+                  <Heart size={22} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
+                  <span className="text-sm font-medium text-gray-500">{likeCount}</span>
                 </button>
                 <button className="flex items-center gap-1.5" onClick={() => {
-                  setShowComments(p => {
-                    const next = !p;
-                    if (next) setTimeout(() => commentsTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-                    return next;
-                  });
+                  setShowComments(p => !p);
                 }}>
-                  <MessageCircle size={19} strokeWidth={1.5} className={showComments ? 'text-gray-900' : 'text-gray-500'} />
-                  <span className="text-xs text-gray-400">{comments.length}</span>
+                  <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
+                  <span className="text-sm font-medium text-gray-500">{comments.length}</span>
                 </button>
                 <button onClick={() => setShowShareSheet(true)}>
-                  <Send size={19} strokeWidth={1.5} className={showShareSheet ? 'text-gray-900' : 'text-gray-500'} />
+                  <Send size={21} strokeWidth={1.5} className="text-gray-800" />
                 </button>
               </div>
               <button
@@ -553,27 +549,27 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                 }}
               >
                 {allPlacesSaved
-                  ? <BookmarkCheck size={19} strokeWidth={1.5} className="text-gray-900" />
-                  : <Bookmark size={19} strokeWidth={1.5} className="text-gray-500" />
+                  ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
+                  : <Bookmark size={22} strokeWidth={1.5} className="text-gray-700" />
                 }
               </button>
             </div>
 
             {/* Caption + hashtags */}
             {(post.caption || post.hashtags.length > 0) && (
-              <div className="px-4 pt-4 pb-3 border-b border-gray-100">
-                {post.caption && <p className="text-sm text-gray-800 leading-snug">{post.caption}</p>}
+              <div className="px-5 pb-5">
+                {post.caption && <p className="text-sm text-gray-800 leading-relaxed">{post.caption}</p>}
                 {post.hashtags.length > 0 && (() => {
                   const seen = new Set<string>();
-                  const unique = post.hashtags.filter(h => { const k = h.toLowerCase().replace(/\s/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
-                  return <p className="text-xs text-gray-300 mt-1.5 line-clamp-2">{unique.map(h => `#${h.replace(/\s+/g, '')}`).join(' ')}</p>;
+                  const unique = post.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+                  return <p className="text-xs text-orange-400 mt-2">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
                 })()}
               </div>
             )}
 
             {/* Places list */}
             {uniquePlaces.length > 0 && (
-              <div className="px-4 pt-5 pb-28 space-y-2">
+              <div className="px-5 pt-4 border-t border-gray-100">
                 {(() => {
                   const mapPlaces = uniquePlaces.filter(p => p.lat && p.lng).map(p => ({
                     id: p.id, name: p.name.split(',')[0].trim(), lat: p.lat!, lng: p.lng!,
@@ -584,15 +580,15 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                   const hasCoords = mapPlaces.length > 0 && centerPlace;
                   return (
                     <div className="flex items-center justify-between mb-3">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                        {uniquePlaces.length} Place{uniquePlaces.length !== 1 ? 's' : ''}
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                        {uniquePlaces.length} place{uniquePlaces.length !== 1 ? 's' : ''}
                       </p>
                       {hasCoords && (
                         <button
                           onClick={() => setShowMap(p => !p)}
                           className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
                         >
-                          <Map size={12} strokeWidth={1.5} />
+                          <Map size={11} strokeWidth={1.5} />
                           {showMap ? 'Hide map' : 'View on map'}
                         </button>
                       )}
@@ -617,6 +613,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                     </div>
                   );
                 })()}
+                <div className="space-y-2.5 pb-5">
                 {uniquePlaces.map((pl, i) => {
                   const emoji = modalCatEmoji[pl.category?.toLowerCase() ?? ''] ?? '📍';
                   const isSaved = savedPlaceIds.has(pl.id);
@@ -631,15 +628,13 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                           : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-xl">{emoji}</span></div>
                         }
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate leading-tight">{pl.name.split(',')[0].trim()}</p>
-                          <p className="text-xs text-gray-400 mt-0.5 truncate flex items-center gap-0.5">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{pl.name.split(',')[0].trim()}</p>
+                          <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-0.5">
                             <MapPin size={9} strokeWidth={1.5} className="flex-shrink-0" />
                             {[pl.neighborhood, resolveCity(pl.city)].filter(Boolean).join(', ') || pl.country}
                           </p>
                           {pl.category && (
-                            <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-gray-400 font-medium">
-                              {emoji} <span className="capitalize">{pl.category}</span>
-                            </span>
+                            <p className="text-xs text-gray-400 mt-0.5">{emoji} {pl.category.charAt(0).toUpperCase() + pl.category.slice(1)}</p>
                           )}
                         </div>
                       </button>
@@ -650,17 +645,15 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                             if (isSaved) {
                               toggleSavePlace(pl.id);
                             } else {
-                              // Immediately save to All Saved (optimistic)
                               setSavedPlaceIds(prev => new Set(prev).add(pl.id));
                               savePlace(userId, pl.id);
-                              // Show optional collection picker
                               setShowSaveSheet(pl.id);
                             }
                           }}
-                          className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 flex-shrink-0"
+                          className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${isSaved ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
                         >
                           {isSaved
-                            ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-gray-900" />
+                            ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
                             : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />
                           }
                         </button>
@@ -668,63 +661,71 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
 
-            {/* Comments section — at the bottom */}
-            {showComments && (
-              <div ref={commentsTopRef} className="px-4 pt-4 pb-24 border-t border-gray-100 mt-2">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Comments</p>
-                {comments.length > 0 && (
-                  <div className="space-y-3 mb-4">
-                    {comments.map(c => (
-                      <div key={c.id} className="flex items-start gap-2.5">
-                        {c.profile.avatarUrl
-                          ? <img src={c.profile.avatarUrl} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
-                          : <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-[10px] font-semibold text-gray-500">{c.profile.name[0]}</span></div>
-                        }
-                        <div className="flex-1">
-                          <p className="text-xs font-semibold text-gray-900">{c.profile.name} <span className="font-normal text-gray-500">{c.text}</span></p>
+            {/* Comments section */}
+            {showComments && comments.length > 0 && (
+              <div ref={commentsTopRef} className="px-5 pt-4 border-t border-gray-100">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+                <div className="space-y-3">
+                  {comments.map(c => (
+                    <div key={c.id} className="flex items-start gap-2.5">
+                      {c.profile.avatarUrl
+                        ? <img src={c.profile.avatarUrl} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                        : <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 mt-0.5"><span className="text-[10px] font-semibold text-gray-500">{c.profile.name[0]}</span></div>
+                      }
+                      <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl px-3 py-2.5">
+                        <div className="flex items-baseline gap-1.5">
+                          <p className="text-xs font-semibold text-gray-900">{c.profile.name.split(' ')[0]}</p>
                         </div>
+                        <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
                       </div>
-                    ))}
-                  </div>
-                )}
-                {!comments.length && <p className="text-xs text-gray-400 mb-3">No comments yet. Be first!</p>}
-                {userId && (
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={commentText}
-                      onChange={e => setCommentText(e.target.value)}
-                      onKeyDown={async e => {
-                        if (e.key === 'Enter' && commentText.trim() && !commentSending) {
-                          setCommentSending(true);
-                          const c = await addComment(userId, post.id, commentText.trim());
-                          if (c) setComments(prev => [...prev, c]);
-                          setCommentText('');
-                          setCommentSending(false);
-                        }
-                      }}
-                      placeholder="Add a comment..."
-                      className="flex-1 text-sm bg-gray-100 rounded-full px-3 py-2 outline-none placeholder-gray-400"
-                    />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Comment input */}
+            {userId && (
+              <div className="px-5 pt-4 pb-6">
+                <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3">
+                  <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
+                  <input
+                    value={commentText}
+                    onChange={e => setCommentText(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && commentText.trim() && !commentSending) {
+                        setCommentSending(true);
+                        const c = await addComment(userId, post.id, commentText.trim());
+                        if (c) { setComments(prev => [...prev, c]); setShowComments(true); }
+                        setCommentText('');
+                        setCommentSending(false);
+                      }
+                    }}
+                    placeholder="Add a comment…"
+                    className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
+                  />
+                  {commentText.trim() && (
                     <button
-                      disabled={!commentText.trim() || commentSending}
+                      disabled={commentSending}
                       onClick={async () => {
                         if (!commentText.trim() || commentSending) return;
                         setCommentSending(true);
                         const c = await addComment(userId, post.id, commentText.trim());
-                        if (c) setComments(prev => [...prev, c]);
+                        if (c) { setComments(prev => [...prev, c]); setShowComments(true); }
                         setCommentText('');
                         setCommentSending(false);
                       }}
                       className="text-xs font-bold text-gray-900 disabled:text-gray-300"
                     >Post</button>
-                  </div>
-                )}
-                <div ref={commentsEndRef} />
+                  )}
+                </div>
               </div>
             )}
+            <div ref={commentsEndRef} />
           </div>
         </div>
       </div>
