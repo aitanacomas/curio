@@ -380,8 +380,9 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           </div>
         </div>
 
-        {/* ── Content ── */}
+        {/* ── Content — all inside one bg-white wrapper ── */}
         <div className="bg-white">
+
           {/* Actions */}
           <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
             <div className="flex items-center gap-5">
@@ -438,75 +439,72 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               <p className="text-xs text-gray-400 mt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
             </div>
           )}
-        </div>
 
-        {/* Places + map */}
-        <div className="bg-white px-4 pt-4 pb-6">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              {selectedPost.places.length} Place{selectedPost.places.length !== 1 ? 's' : ''}
-            </p>
-            {selectedPost.places.some(p => p.lat != null) && (
-              <button
-                onClick={() => setShowPostMap(v => !v)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
-              >
-                {showPostMap ? 'Hide map' : 'Show map'}
-              </button>
-            )}
-          </div>
-          {showPostMap && (() => {
-            const mapPlaces = selectedPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name.split(',')[0].trim(), city: p.city, country: p.country }));
-            return mapPlaces.length > 0 ? (
-              <div className="rounded-2xl overflow-hidden mb-3">
-                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
-                  <MapView places={mapPlaces} height="200px" />
-                </Suspense>
-              </div>
-            ) : null;
-          })()}
-          <div className="space-y-3">
-            {selectedPost.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i).map(place => (
-              <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
-                  <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
-                  </p>
-                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
-                </div>
+          {/* Places + map */}
+          <div className="px-5 pt-4 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                {selectedPost.places.length} place{selectedPost.places.length !== 1 ? 's' : ''}
+              </p>
+              {selectedPost.places.some(p => p.lat != null) && (
                 <button
-                  onClick={async () => {
-                    const isSaved = allSavedIds.has(place.id);
-                    if (isSaved) {
-                      setAllSavedIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
-                      unsavePlace(currentUserId, place.id);
-                    } else {
-                      // Immediately save to All Saved
-                      setAllSavedIds(prev => new Set(prev).add(place.id));
-                      savePlace(currentUserId, place.id);
-                      // Show optional collection picker
-                      setSavingPlace({ id: place.id, name: place.name.split(',')[0].trim() });
-                      setLoadingPlaceInCols(true);
-                      const ids = await getPlaceCollectionIds(place.id);
-                      setPlaceInMyCollections(ids);
-                      setLoadingPlaceInCols(false);
-                    }
-                  }}
-                  className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${allSavedIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
+                  onClick={() => setShowPostMap(v => !v)}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
                 >
-                  {allSavedIds.has(place.id)
-                    ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
-                    : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
+                  {showPostMap ? 'Hide map' : 'View on map'}
                 </button>
-              </div>
-            ))}
+              )}
+            </div>
+            {showPostMap && (() => {
+              const mapPlaces = selectedPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name.split(',')[0].trim(), city: p.city, country: p.country }));
+              return mapPlaces.length > 0 ? (
+                <div className="rounded-2xl overflow-hidden mb-3">
+                  <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
+                    <MapView places={mapPlaces} height="200px" />
+                  </Suspense>
+                </div>
+              ) : null;
+            })()}
+            <div className="space-y-2.5 pb-5">
+              {selectedPost.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i).map(place => (
+                <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                  {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
+                    <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                      <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+                    </p>
+                    {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const isSaved = allSavedIds.has(place.id);
+                      if (isSaved) {
+                        setAllSavedIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
+                        unsavePlace(currentUserId, place.id);
+                      } else {
+                        setAllSavedIds(prev => new Set(prev).add(place.id));
+                        savePlace(currentUserId, place.id);
+                        setSavingPlace({ id: place.id, name: place.name.split(',')[0].trim() });
+                        setLoadingPlaceInCols(true);
+                        const ids = await getPlaceCollectionIds(place.id);
+                        setPlaceInMyCollections(ids);
+                        setLoadingPlaceInCols(false);
+                      }
+                    }}
+                    className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${allSavedIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
+                  >
+                    {allSavedIds.has(place.id)
+                      ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                      : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Comments section */}
-        <div className="bg-white px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
+          {/* Comments section */}
+          <div className="px-5 pt-4 pb-6 border-t border-gray-100">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
           {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
           {!loadingComments && postComments.length === 0 && (
@@ -561,6 +559,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               )}
             </div>
           </div>
+        </div>
         </div>
       </div>
     );
