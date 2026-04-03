@@ -250,6 +250,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [inviteSearch, setInviteSearch] = useState('');
   const [inviteResults, setInviteResults] = useState<FollowProfile[]>([]);
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
+  const [pendingCollabIds, setPendingCollabIds] = useState<Set<string>>(new Set());
   const [postCollaborators, setPostCollaborators] = useState<PostCollaborator[]>([]);
   const [postCollabSearch, setPostCollabSearch] = useState('');
   const [postCollabResults, setPostCollabResults] = useState<FollowProfile[]>([]);
@@ -1952,9 +1953,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
         </div>
 
-        {/* Collaborators row */}
+        {/* Collaborators row — tappable to open invite sheet */}
         {collectionCollaborators.length > 0 && (
-          <div className="flex items-center gap-2 px-4 pt-3">
+          <button
+            onClick={() => setShowInviteSheet(true)}
+            className="flex items-center gap-2 px-4 pt-3 w-full text-left active:opacity-70"
+          >
             <div className="flex -space-x-2">
               {collectionCollaborators.slice(0, 5).map(c => (
                 c.profile.avatarUrl
@@ -1965,9 +1969,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             <p className="text-xs text-gray-400">
               {collectionCollaborators.length === 1
                 ? `@${collectionCollaborators[0].profile.username} can edit`
-                : `${collectionCollaborators.length} collaborators`}
+                : `${collectionCollaborators.length} collaborator${collectionCollaborators.length > 1 ? 's' : ''}`}
+              {pendingCollabIds.size > 0 && <span className="text-amber-500 ml-1">· {pendingCollabIds.size} pending</span>}
             </p>
-          </div>
+          </button>
         )}
 
         {loadingCollectionPlaces ? (
@@ -2265,12 +2270,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Invite collaborator sheet */}
       {showInviteSheet && selectedRealCollection && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowInviteSheet(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowInviteSheet(false); setPendingCollabIds(new Set()); }} />
           <div className="relative bg-white rounded-t-3xl max-h-[75vh] flex flex-col">
             {/* Handle + header */}
             <div className="px-5 pt-4 pb-0 flex-shrink-0">
               <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-              <button onClick={() => setShowInviteSheet(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+              <button onClick={() => { setShowInviteSheet(false); setPendingCollabIds(new Set()); }} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                 <X size={15} strokeWidth={2} className="text-gray-500" />
               </button>
               <p className="text-base font-bold text-gray-900 mb-4">Invite collaborators</p>
@@ -2291,28 +2296,58 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </div>
             </div>
 
-            {/* Current collaborators */}
+            {/* Pending + current collaborators */}
             {collectionCollaborators.length > 0 && !inviteSearch && (
               <div className="px-3 flex-shrink-0">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Current collaborators</p>
-                {collectionCollaborators.map(c => (
-                  <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
-                    {c.profile.avatarUrl
-                      ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
-                      : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
-                      <p className="text-xs text-gray-400">@{c.profile.username}</p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        await removeCollaborator(selectedRealCollection.id, c.userId);
-                        setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
-                      }}
-                      className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
-                    >Remove</button>
-                  </div>
-                ))}
+                {/* Pending */}
+                {collectionCollaborators.filter(c => pendingCollabIds.has(c.userId)).length > 0 && (
+                  <>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
+                    {collectionCollaborators.filter(c => pendingCollabIds.has(c.userId)).map(c => (
+                      <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
+                        {c.profile.avatarUrl
+                          ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
+                          <p className="text-xs text-amber-500 font-medium">Invite sent</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await removeCollaborator(selectedRealCollection.id, c.userId);
+                            setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
+                            setPendingCollabIds(prev => { const n = new Set(prev); n.delete(c.userId); return n; });
+                          }}
+                          className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
+                        >Remove</button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {/* Accepted */}
+                {collectionCollaborators.filter(c => !pendingCollabIds.has(c.userId)).length > 0 && (
+                  <>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1 mt-2">Collaborators</p>
+                    {collectionCollaborators.filter(c => !pendingCollabIds.has(c.userId)).map(c => (
+                      <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
+                        {c.profile.avatarUrl
+                          ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{c.profile.name.charAt(0)}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900">{c.profile.name}</p>
+                          <p className="text-xs text-gray-400">@{c.profile.username}</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await removeCollaborator(selectedRealCollection.id, c.userId);
+                            setCollectionCollaborators(prev => prev.filter(x => x.id !== c.id));
+                          }}
+                          className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
+                        >Remove</button>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 
@@ -2336,6 +2371,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       if (!err) {
                         const newCollab: CollectionCollaborator = { id: `${Date.now()}`, collectionId: selectedRealCollection.id, userId: user.id, invitedBy: appUser.id, createdAt: new Date().toISOString(), profile: { name: user.name, username: user.username, avatarUrl: user.avatarUrl } };
                         setCollectionCollaborators(prev => [...prev, newCollab]);
+                        setPendingCollabIds(prev => new Set(prev).add(user.id));
                         setInviteResults(prev => prev.filter(r => r.id !== user.id));
                       }
                       setInvitingUserId(null);

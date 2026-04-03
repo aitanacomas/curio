@@ -768,6 +768,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [colInviteResults, setColInviteResults] = useState<import('../lib/supabase').FollowProfile[]>([]);
   const [colInviteSending, setColInviteSending] = useState<string | null>(null);
   const [colInviteSent, setColInviteSent] = useState<string[]>([]);
+  const [colInvitedPeople, setColInvitedPeople] = useState<import('../lib/supabase').FollowProfile[]>([]);
   const [itemInvites, setItemInvites] = useState<ItemInvite[]>([]);
   const [newPlanDesc, setNewPlanDesc] = useState('');
   const [newPlanLocation, setNewPlanLocation] = useState('');
@@ -3391,7 +3392,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       {/* Invite Collaborators Sheet */}
       {showColInviteSheet && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowColInviteSheet(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowColInviteSheet(false); setColInviteSent([]); setColInvitedPeople([]); }} />
           <div className="relative bg-white rounded-t-3xl max-h-[75vh] flex flex-col">
             {/* Handle + header */}
             <div className="px-5 pt-4 pb-0 flex-shrink-0">
@@ -3421,8 +3422,36 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
             {/* User list */}
             <div className="overflow-y-auto flex-1 px-3">
-              {colInviteResults.length > 0 ? (
-                colInviteResults.map(person => (
+              {/* Pending section */}
+              {colInvitedPeople.length > 0 && !colInviteSearch && (
+                <div className="mb-1">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
+                  {colInvitedPeople.map(person => (
+                    <div key={person.id} className="flex items-center gap-3 py-2.5 px-2">
+                      {person.avatarUrl
+                        ? <img src={person.avatarUrl} alt={person.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                        : <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{person.name[0]}</div>
+                      }
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">{person.name}</p>
+                        <p className="text-xs text-amber-500 font-medium">Invite sent</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!userId || !selectedRealCollection) return;
+                          await addCollaborator(selectedRealCollection.id, person.id, userId);
+                          setColInvitedPeople(prev => prev.filter(p => p.id !== person.id));
+                          setColInviteSent(prev => prev.filter(id => id !== person.id));
+                        }}
+                        className="text-xs font-semibold text-red-500 px-3 py-1.5 rounded-full bg-red-50"
+                      >Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Search results */}
+              {colInviteResults.filter(r => !colInviteSent.includes(r.id)).length > 0 ? (
+                colInviteResults.filter(r => !colInviteSent.includes(r.id)).map(person => (
                   <div key={person.id} className="flex items-center gap-3 py-2.5 px-2">
                     {person.avatarUrl
                       ? <img src={person.avatarUrl} alt={person.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
@@ -3433,17 +3462,20 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                       <p className="text-xs text-gray-400">@{person.username}</p>
                     </div>
                     <button
-                      disabled={colInviteSent.includes(person.id) || colInviteSending === person.id}
+                      disabled={colInviteSending === person.id}
                       onClick={async () => {
                         if (!userId || !selectedRealCollection) return;
                         setColInviteSending(person.id);
                         await addCollaborator(selectedRealCollection.id, person.id, userId);
                         setColInviteSent(prev => [...prev, person.id]);
+                        setColInvitedPeople(prev => [...prev, person]);
                         setColInviteSending(null);
+                        setColInviteSearch('');
+                        setColInviteResults([]);
                       }}
-                      className={`text-xs font-bold px-5 py-2 rounded-full flex-shrink-0 transition-colors ${colInviteSent.includes(person.id) ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}
+                      className="text-xs font-bold px-5 py-2 rounded-full flex-shrink-0 bg-gray-900 text-white"
                     >
-                      {colInviteSending === person.id ? '…' : colInviteSent.includes(person.id) ? 'Added ✓' : 'Invite'}
+                      {colInviteSending === person.id ? '…' : 'Invite'}
                     </button>
                   </div>
                 ))
