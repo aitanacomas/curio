@@ -666,10 +666,13 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
             )}
 
             {/* Comments section */}
-            {showComments && comments.length > 0 && (
-              <div ref={commentsTopRef} className="px-5 pt-4 border-t border-gray-100">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-                <div className="space-y-3">
+            <div ref={commentsTopRef} className="px-5 pt-5 border-t border-gray-100">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+              {showComments && comments.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-3">Be the first one to add a comment ✨</p>
+              )}
+              {showComments && comments.length > 0 && (
+                <div className="space-y-3 mb-4">
                   {comments.map(c => (
                     <div key={c.id} className="flex items-start gap-2.5">
                       {c.profile.avatarUrl
@@ -685,13 +688,9 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Comment input */}
-            {userId && (
-              <div className="px-5 pt-4 pb-6">
-                <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3">
+              )}
+              {userId && (
+                <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
                   <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
                   <input
                     value={commentText}
@@ -723,8 +722,13 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                     >Post</button>
                   )}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Date — very end */}
+            <p className="text-xs text-gray-400 px-5 pt-4 pb-8">
+              {new Date(post.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </p>
             <div ref={commentsEndRef} />
           </div>
         </div>

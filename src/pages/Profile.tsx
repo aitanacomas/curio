@@ -1664,7 +1664,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
           {/* Caption */}
           {selectedPost.caption && (
-            <div className="px-5 pb-5">
+            <div className="px-5 pt-4 pb-5">
               <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
             </div>
           )}
@@ -1728,10 +1728,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           )}
 
           {/* Comments */}
-          {comments.length > 0 && (
-            <div className="px-5 pt-4 border-t border-gray-100">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-              <div className="space-y-3">
+          <div className="px-5 pt-5 border-t border-gray-100">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+            {comments.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-3">Be the first one to add a comment ✨</p>
+            )}
+            {comments.length > 0 && (
+              <div className="space-y-3 mb-4">
                 {comments.map((c, i) => {
                   const commenter = getUserById(c.userId);
                   return (
@@ -1748,12 +1751,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   );
                 })}
               </div>
-            </div>
-          )}
-
-          {/* Comment input */}
-          <div className="px-5 pt-4">
-            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3">
+            )}
+            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
               <img src={postUser.avatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
               <input
                 value={commentText}
@@ -1766,6 +1765,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               )}
             </div>
           </div>
+
+          {/* Date — very end */}
+          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{selectedPost.createdAt}</p>
+
         </div>
       </div>
       <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />

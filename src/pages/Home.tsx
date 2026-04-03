@@ -743,16 +743,18 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
             </button>
           </div>
 
-          {/* Full caption */}
-          <div className="px-4 pb-4 border-b border-gray-100">
-            <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
-          </div>
+          {/* Caption */}
+          {selectedPost.caption && (
+            <div className="px-5 pt-4 pb-5">
+              <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
+            </div>
+          )}
 
           {/* Places in this post */}
-          <div className="px-4 pt-4">
+          <div className="px-5 pt-4 border-t border-gray-100">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                {postPlaces.length} Place{postPlaces.length !== 1 ? 's' : ''} in this post
+                {postPlaces.length} place{postPlaces.length !== 1 ? 's' : ''}
               </p>
               {postPlaces.length >= 1 && (
                 <button
@@ -781,49 +783,33 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
               </div>
             )}
 
-            {/* Individual place list */}
-            <div className="space-y-3">
+            <div className="space-y-2.5 pb-5">
               {postPlaces.map(place => {
                 const isSaved = savedPlaces.has(place.id);
                 return (
                   <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                    <img
-                      src={place.image}
-                      alt={place.name}
-                      className="w-14 h-14 rounded-xl object-cover flex-shrink-0"
-                    />
+                    <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 leading-snug">{place.name.split(',')[0].trim()}</p>
-                      <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5 flex-wrap">
-                        <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
+                      <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                        <MapPin size={9} strokeWidth={1.5} className="flex-shrink-0" />
                         {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
                       </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {place.savedCount.toLocaleString()} saves{place.rating ? ` · ★ ${place.rating}` : ''}
-                      </p>
+                      {place.category && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          📍 {place.category.charAt(0).toUpperCase() + place.category.slice(1)}
+                        </p>
+                      )}
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       {place.bookingAvailable && (
-                        <button
-                          onClick={() => setBookingPlace(place)}
-                          className="text-xs font-bold bg-gray-900 text-white rounded-full px-2.5 py-1"
-                        >
-                          Book
-                        </button>
+                        <button onClick={() => setBookingPlace(place)} className="text-xs font-bold bg-gray-900 text-white rounded-full px-2.5 py-1">Book</button>
                       )}
                       <button
                         onClick={() => isSaved ? toggleSavePlace(place.id) : setSaveTarget({ type: 'place', id: place.id })}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${
-                          isSaved ? 'bg-gray-900 border-gray-900' : 'border-gray-200 bg-white'
-                        }`}
+                        className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${isSaved ? 'bg-gray-900 border-gray-900' : 'border-gray-200 bg-white'}`}
                       >
                         <Bookmark size={13} strokeWidth={1.5} className={isSaved ? 'fill-white text-white' : 'text-gray-600'} />
-                      </button>
-                      <button
-                        onClick={() => setShareTarget({ type: 'place', label: `${place.name.split(',')[0].trim()} · ${place.city}`, image: place.image })}
-                        className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-white"
-                      >
-                        <Send size={13} strokeWidth={1.5} className="text-gray-600" />
                       </button>
                     </div>
                   </div>
@@ -833,50 +819,52 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
           </div>
 
           {/* Comments */}
-          {comments.length > 0 && (
-            <div className="px-4 pt-5 border-t border-gray-100 mt-4">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-              <div className="space-y-4">
+          <div className="px-5 pt-5 border-t border-gray-100">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+            {comments.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-3">Be the first one to add a comment ✨</p>
+            )}
+            {comments.length > 0 && (
+              <div className="space-y-3 mb-4">
                 {(showAllComments ? comments : comments.slice(0, 2)).map((c, i) => {
                   const commenter = getUserById(c.userId);
                   return (
                     <div key={i} className="flex items-start gap-2.5">
                       <img src={commenter.avatar} alt={commenter.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" style={{ objectPosition: commenter.avatarPosition ?? 'top' }} />
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl px-3 py-2.5">
                         <div className="flex items-baseline gap-1.5">
                           <p className="text-xs font-semibold text-gray-900">{commenter.name.split(' ')[0]}</p>
-                          <p className="text-xs text-gray-400">{c.time}</p>
+                          <p className="text-[10px] text-gray-400">{c.time}</p>
                         </div>
                         <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
                       </div>
                     </div>
                   );
                 })}
+                {!showAllComments && selectedPost.comments > 2 && (
+                  <button onClick={() => setShowAllComments(true)} className="text-xs text-gray-400 font-medium">
+                    See all {selectedPost.comments} comments
+                  </button>
+                )}
               </div>
-              {!showAllComments && selectedPost.comments > 2 && (
-                <button
-                  onClick={() => setShowAllComments(true)}
-                  className="mt-3 text-xs text-gray-400 font-medium"
-                >
-                  See all {selectedPost.comments} comments
-                </button>
-              )}
-            </div>
-          )}
-          {/* Comment input — inline, scrolls with content */}
-          <div className="px-4 pt-2 pb-4 mt-1">
-            <div className="flex items-center gap-3 border border-gray-200 rounded-2xl px-4 py-3">
+            )}
+            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
+              <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
               <input
                 value={commentText}
                 onChange={e => setCommentText(e.target.value)}
-                placeholder="Write a comment..."
+                placeholder="Add a comment…"
                 className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
               />
-              <button onClick={() => setCommentText('')} className="text-xs font-semibold text-gray-400">
-                Post
-              </button>
+              {commentText.trim() && (
+                <button onClick={() => setCommentText('')} className="text-xs font-bold text-gray-900">Post</button>
+              )}
             </div>
           </div>
+
+          {/* Date — very end */}
+          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{selectedPost.createdAt}</p>
+
       </div>
       {saveSheet}
       <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
