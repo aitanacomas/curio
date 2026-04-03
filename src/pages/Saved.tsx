@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link } from 'lucide-react';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon } from 'lucide-react';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
@@ -168,7 +168,7 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
-import { getSavedPlaces, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, type RealPostPlace } from '../lib/supabase';
+import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, type RealPostPlace, type RealPost } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 
 const MapView = lazy(() => import('../components/MapView'));
@@ -671,6 +671,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [plansLoading, setPlansLoading] = useState(false);
   const [realSavedPlaces, setRealSavedPlaces] = useState<SavedPlace[]>([]);
   const [realSavedPlaceIds, setRealSavedPlaceIds] = useState<Set<string>>(new Set());
+  const [selectedSavedPost, setSelectedSavedPost] = useState<RealPost | null>(null);
   const [showMap, setShowMap] = useState(false);
   const [mapCoords, setMapCoords] = useState<Record<string, { lat: number; lng: number }>>({});
   const [mapLoading, setMapLoading] = useState(false);
@@ -758,6 +759,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [loadingRealCollectionPlaces, setLoadingRealCollectionPlaces] = useState(false);
   const [realColFilter, setRealColFilter] = useState('all');
   const [showRealColMap, setShowRealColMap] = useState(true);
+  const [showEditColSheet, setShowEditColSheet] = useState(false);
+  const [editColName, setEditColName] = useState('');
+  const [editColDesc, setEditColDesc] = useState('');
+  const [editColSaving, setEditColSaving] = useState(false);
+  const [showColInviteSheet, setShowColInviteSheet] = useState(false);
+  const [colInviteSearch, setColInviteSearch] = useState('');
+  const [colInviteResults, setColInviteResults] = useState<import('../lib/supabase').FollowProfile[]>([]);
+  const [colInviteSending, setColInviteSending] = useState<string | null>(null);
+  const [colInviteSent, setColInviteSent] = useState<string[]>([]);
   const [itemInvites, setItemInvites] = useState<ItemInvite[]>([]);
   const [newPlanDesc, setNewPlanDesc] = useState('');
   const [newPlanLocation, setNewPlanLocation] = useState('');
@@ -3111,21 +3121,60 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       .map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
     const isOwn = selectedRealCollection.userId === userId;
 
-    const RealPlaceCard = ({ place }: { place: RealPostPlace }) => (
-      <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-        {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-          <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-            <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-            {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
-          </p>
-          {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+    const RealPlaceCard = ({ place }: { place: RealPostPlace }) => {
+      const isSaved = realSavedPlaceIds.has(place.id);
+      return (
+        <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+          {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+            <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+              <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+              {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+            </p>
+            {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+          </div>
+          {userId && isOwn ? (
+            /* Owner: show X to remove from collection */
+            <button
+              onClick={async () => {
+                await removePlaceFromCollection(selectedRealCollection.id, place.id);
+                setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
+                setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
+                setDbCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+              }}
+              className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0"
+            >
+              <X size={12} strokeWidth={2} className="text-gray-500" />
+            </button>
+          ) : userId ? (
+            /* Non-owner: show bookmark toggle */
+            <button
+              onClick={async () => {
+                if (isSaved) {
+                  await unsavePlace(userId, place.id);
+                  setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
+                  setRealSavedPlaces(prev => prev.filter(p => p.id !== place.id));
+                } else {
+                  await savePlace(userId, place.id);
+                  setRealSavedPlaceIds(prev => new Set(prev).add(place.id));
+                  setRealSavedPlaces(prev => [...prev, { id: place.id, postId: '', name: place.name, category: place.category ?? '', neighborhood: place.neighborhood ?? '', city: place.city ?? '', country: place.country ?? '', photoUrl: place.photoUrl ?? '', lat: place.lat ?? null, lng: place.lng ?? null }]);
+                }
+              }}
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 flex-shrink-0"
+            >
+              {isSaved
+                ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-gray-900" />
+                : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />
+              }
+            </button>
+          ) : null}
         </div>
-      </div>
-    );
+      );
+    };
 
     return (
+      <>
       <div className="bg-white min-h-screen">
         {/* Hero */}
         <div className="relative h-64">
@@ -3144,12 +3193,45 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
           <div className="absolute top-4 right-4 flex gap-2">
+            {!isOwn && userId && (
+              <button
+                onClick={async () => {
+                  await unsubscribeFromCollection(userId, selectedRealCollection.id);
+                  setDbSubscribedCollections(prev => prev.filter(c => c.id !== selectedRealCollection.id));
+                  setSelectedRealCollection(null);
+                  setRealCollectionPlaces([]);
+                }}
+                className="h-8 px-3 rounded-full bg-white/90 flex items-center justify-center text-xs font-semibold text-gray-700"
+              >
+                Unsubscribe
+              </button>
+            )}
+            {isOwn && (
+              <button
+                onClick={() => { setColInviteSearch(''); setColInviteResults([]); setColInviteSent([]); setShowColInviteSheet(true); }}
+                className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+              >
+                <UserPlus size={14} strokeWidth={1.5} className="text-gray-700" />
+              </button>
+            )}
             <button
-              onClick={() => { const url = `${window.location.origin}/collection/${selectedRealCollection.id}`; navigator.share?.({ title: selectedRealCollection.name, url }); }}
+              onClick={() => {
+                const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                if (navigator.share) navigator.share({ title: selectedRealCollection.name, url });
+                else navigator.clipboard?.writeText(url);
+              }}
               className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
             >
               <Share2 size={15} strokeWidth={1.5} className="text-gray-700" />
             </button>
+            {isOwn && (
+              <button
+                onClick={() => { setEditColName(selectedRealCollection.name); setEditColDesc(selectedRealCollection.description ?? ''); setShowEditColSheet(true); }}
+                className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
+              >
+                <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
+              </button>
+            )}
           </div>
           <div className="absolute bottom-4 left-4 right-4">
             <h2 className="text-2xl font-black text-white">{selectedRealCollection.name}</h2>
@@ -3179,25 +3261,56 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <>
               {/* Count + show/hide map */}
               <div className="flex items-center justify-between px-4 pt-4 pb-1">
-                <p className="text-sm font-semibold text-gray-900">{realCollectionPlaces.length} place{realCollectionPlaces.length !== 1 ? 's' : ''} in this collection</p>
-                {mapPlaces.length > 0 && (
-                  <button
-                    onClick={() => setShowRealColMap(v => !v)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showRealColMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
-                  >
-                    {showRealColMap ? 'Hide map' : 'Show map'}
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-900">{realCollectionPlaces.length} place{realCollectionPlaces.length !== 1 ? 's' : ''} in this collection</p>
+                  {isOwn && (
+                    <button
+                      onClick={() => {/* future: open add places sheet */}}
+                      className="w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 text-gray-500"
+                    >
+                      <Plus size={10} strokeWidth={3} />
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={async () => {
+                    if (showRealColMap) { setShowRealColMap(false); return; }
+                    setShowRealColMap(true);
+                    const missing = realCollectionPlaces.filter(p => p.lat == null || p.lng == null);
+                    if (missing.length > 0) {
+                      await geocodeMissingPlaces(
+                        realCollectionPlaces,
+                        GOOGLE_PLACES_KEY,
+                        (updated) => {
+                          const coordMap: Record<string, { lat: number; lng: number }> = {};
+                          updated.forEach(pl => { if (pl.lat != null) coordMap[pl.id] = { lat: pl.lat!, lng: pl.lng! }; });
+                          setRealCollectionPlaces(prev => prev.map(pl => coordMap[pl.id] ? { ...pl, ...coordMap[pl.id] } : pl));
+                        }
+                      );
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showRealColMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+                >
+                  <MapIcon size={11} strokeWidth={1.5} />
+                  {showRealColMap ? 'Hide map' : 'View on map'}
+                </button>
               </div>
 
               {/* Map */}
-              {showRealColMap && mapPlaces.length > 0 && (
+              {showRealColMap && (
                 <div className="px-4 pt-2">
-                  <div className="rounded-2xl overflow-hidden">
-                    <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
-                      <MapView places={mapPlaces} height="220px" />
-                    </Suspense>
-                  </div>
+                  {mapPlaces.length > 0 ? (
+                    <div className="rounded-2xl overflow-hidden">
+                      <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
+                        <MapView places={mapPlaces} height="220px" />
+                      </Suspense>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl bg-gray-50 h-28 flex flex-col items-center justify-center gap-1">
+                      <MapIcon size={18} strokeWidth={1.5} className="text-gray-300" />
+                      <p className="text-xs text-gray-400">Map not available for these places</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3232,6 +3345,109 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           );
         })()}
       </div>
+
+      {/* Edit Collection Sheet */}
+      {showEditColSheet && selectedRealCollection && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditColSheet(false)} />
+          <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10">
+            <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <button onClick={() => setShowEditColSheet(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+              <X size={15} strokeWidth={2} className="text-gray-500" />
+            </button>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit collection</p>
+            <input
+              value={editColName}
+              onChange={e => setEditColName(e.target.value)}
+              placeholder="Collection name"
+              className="w-full text-xl font-black text-gray-900 outline-none placeholder:text-gray-300 mb-3 bg-transparent border-b border-gray-100 pb-2"
+            />
+            <textarea
+              value={editColDesc}
+              onChange={e => setEditColDesc(e.target.value)}
+              placeholder="Description (optional)"
+              rows={2}
+              className="w-full text-sm text-gray-700 outline-none placeholder:text-gray-400 bg-gray-50 rounded-xl px-3 py-2.5 resize-none mb-4"
+            />
+            <button
+              disabled={editColSaving || !editColName.trim()}
+              onClick={async () => {
+                setEditColSaving(true);
+                await updateCollection(selectedRealCollection.id, { name: editColName.trim(), description: editColDesc.trim() });
+                const updated = { ...selectedRealCollection, name: editColName.trim(), description: editColDesc.trim() };
+                setSelectedRealCollection(updated);
+                setDbCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, name: editColName.trim(), description: editColDesc.trim() } : c));
+                setEditColSaving(false);
+                setShowEditColSheet(false);
+              }}
+              className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold disabled:opacity-40"
+            >
+              {editColSaving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Collaborators Sheet */}
+      {showColInviteSheet && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowColInviteSheet(false)} />
+          <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10 max-h-[70vh] flex flex-col">
+            <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <button onClick={() => setShowColInviteSheet(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+              <X size={15} strokeWidth={2} className="text-gray-500" />
+            </button>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Invite collaborators</p>
+            <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5 mb-4">
+              <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+              <input
+                value={colInviteSearch}
+                onChange={async e => {
+                  setColInviteSearch(e.target.value);
+                  if (e.target.value.trim().length > 1) {
+                    const results = await searchProfiles(e.target.value.trim(), userId ?? '');
+                    setColInviteResults(results);
+                  } else setColInviteResults([]);
+                }}
+                placeholder="Search by name or username…"
+                className="flex-1 bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-400"
+              />
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-1">
+              {colInviteResults.map(person => (
+                <div key={person.id} className="flex items-center gap-3 py-2.5">
+                  {person.avatarUrl
+                    ? <img src={person.avatarUrl} alt={person.name} className="w-10 h-10 rounded-full object-cover" />
+                    : <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500">{person.name[0]}</div>
+                  }
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{person.name}</p>
+                    <p className="text-xs text-gray-400">@{person.username}</p>
+                  </div>
+                  <button
+                    disabled={colInviteSent.includes(person.id) || colInviteSending === person.id}
+                    onClick={async () => {
+                      setColInviteSending(person.id);
+                      // Share collection link as invite (future: proper invite system)
+                      const url = `${window.location.origin}/collection/${selectedRealCollection?.id}`;
+                      await navigator.clipboard?.writeText(url);
+                      setColInviteSent(prev => [...prev, person.id]);
+                      setColInviteSending(null);
+                    }}
+                    className={`text-xs font-bold px-4 py-2 rounded-full flex-shrink-0 transition-colors ${colInviteSent.includes(person.id) ? 'bg-green-100 text-green-700' : 'bg-gray-900 text-white'}`}
+                  >
+                    {colInviteSent.includes(person.id) ? '✓ Link copied' : 'Invite'}
+                  </button>
+                </div>
+              ))}
+              {colInviteSearch.length > 1 && colInviteResults.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-4">No users found</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
     );
   }
 
@@ -3558,7 +3774,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           ) : (
             <div className="grid grid-cols-2 gap-3 px-4 pt-3">
               {realSavedPlaces.map(place => (
-                <div key={place.id} className="relative rounded-2xl overflow-hidden cursor-pointer">
+                <div
+                  key={place.id}
+                  className="relative rounded-2xl overflow-hidden cursor-pointer active:scale-95 transition-transform"
+                  onClick={async () => {
+                    if (!place.postId) return;
+                    const post = await getPostById(place.postId);
+                    if (post) setSelectedSavedPost(post);
+                  }}
+                >
                   <img src={place.photoUrl} alt={place.name} className="w-full aspect-square object-cover" />
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-2.5 pb-2.5 pt-6">
                     <p className="text-white text-xs font-semibold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
@@ -3569,6 +3793,65 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 </div>
               ))}
             </div>
+          )}
+          {/* Post detail overlay when a saved place card is tapped */}
+          {selectedSavedPost && (
+              <div className="fixed inset-0 z-50 bg-white overflow-y-auto pb-24">
+                {/* Frosted glass header */}
+                <div className="relative">
+                  <div className="w-full bg-gray-100" style={{ aspectRatio: '3/4', position: 'relative' }}>
+                    {selectedSavedPost.places.length > 0 && (
+                      <img src={selectedSavedPost.places[0].photoUrl} className="w-full h-full object-cover" alt="" />
+                    )}
+                    {selectedSavedPost.places.length > 1 && (
+                      <div className="absolute bottom-3 right-3 bg-black/50 rounded-full px-2 py-0.5 text-white text-xs font-medium">
+                        1 / {selectedSavedPost.places.length}
+                      </div>
+                    )}
+                  </div>
+                  <div className="absolute top-0 left-0 right-0 px-4 pt-12 pb-8 bg-gradient-to-b from-black/55 via-black/10 to-transparent">
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        onClick={() => setSelectedSavedPost(null)}
+                        className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
+                      >
+                        <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
+                      </button>
+                      <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[65%] overflow-hidden">
+                        {selectedSavedPost.profile.avatarUrl
+                          ? <img src={selectedSavedPost.profile.avatarUrl} className="w-7 h-7 rounded-full object-cover flex-shrink-0" alt="" />
+                          : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">{selectedSavedPost.profile.name[0]?.toUpperCase()}</span></div>
+                        }
+                        <p className="text-white font-semibold text-sm leading-tight truncate">
+                          {selectedSavedPost.collaborators?.length
+                            ? `${selectedSavedPost.profile.username || selectedSavedPost.profile.name} & ${selectedSavedPost.collaborators.map(c => c.username || c.name).join(', ')}`
+                            : selectedSavedPost.profile.username || selectedSavedPost.profile.name}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* Post content */}
+                <div className="bg-white px-5 pt-4 pb-5">
+                  {selectedSavedPost.hashtags.length > 0 && (() => {
+                    const seen = new Set<string>();
+                    const unique = selectedSavedPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+                    return <p className="text-xs text-orange-400 mb-4">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
+                  })()}
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">{selectedSavedPost.places.length} place{selectedSavedPost.places.length !== 1 ? 's' : ''}</p>
+                  <div className="space-y-3">
+                    {selectedSavedPost.places.map(pl => (
+                      <div key={pl.id} className="flex items-center gap-3">
+                        <img src={pl.photoUrl} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" alt={pl.name} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 leading-snug">{pl.name.split(',')[0].trim()}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{[pl.neighborhood, pl.city].filter(Boolean).join(', ')}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
           )}
         </div>
       )}
@@ -3652,7 +3935,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Mine</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
               {dbCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); setRealCollectionPlaces(geocoded); setLoadingRealCollectionPlaces(false); }); }}>
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
                   <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
                     {col.coverImageUrl ? (
                       <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
@@ -3679,7 +3962,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Subscribed</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
               {dbSubscribedCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); setRealCollectionPlaces(geocoded); setLoadingRealCollectionPlaces(false); }); }}>
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
                   <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
                     {col.coverImageUrl ? (
                       <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />

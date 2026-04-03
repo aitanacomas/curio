@@ -9,7 +9,7 @@ import Profile from './pages/Profile';
 import Auth from './pages/Auth';
 import Onboarding from './pages/Onboarding';
 import PublicCollection from './pages/PublicCollection';
-import { supabase, getProfile, addCollaborator } from './lib/supabase';
+import { supabase, getProfile, addCollaborator, fixCityAbbreviationsInDB } from './lib/supabase';
 
 type AuthStage = 'loading' | 'auth' | 'onboarding' | 'app';
 
@@ -56,6 +56,7 @@ export default function App() {
             followingCount: profile.following_count ?? 0,
           });
           setAuthStage('app');
+          fixCityAbbreviationsInDB(); // fire-and-forget: fix any "AZ"/"AR" abbreviations stored in DB
           return;
         }
       }

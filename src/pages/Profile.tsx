@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
@@ -16,6 +16,41 @@ import { googleTypesToCategory } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+
+const US_STATES: Record<string, string> = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+  DC: 'Washington DC',
+};
+
+function fixAndDeduplicatePlaces(places: RealPostPlace[]): RealPostPlace[] {
+  // Fix US state abbreviations stored as city
+  const fixed = places.map(pl => {
+    const city = (pl.city ?? '').trim();
+    if (/^[A-Z]{2}$/.test(city) && US_STATES[city]) {
+      const fullName = US_STATES[city];
+      supabase.from('post_places').update({ city: fullName }).eq('id', pl.id);
+      return { ...pl, city: fullName };
+    }
+    return pl;
+  });
+  // Deduplicate by name — keep first occurrence
+  const seen = new Set<string>();
+  return fixed.filter(pl => {
+    const key = pl.name.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function timeAgo(iso: string): string {
   if (!iso) return '';
@@ -144,6 +179,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
   const [postPlaceSavedIds, setPostPlaceSavedIds] = useState<Set<string>>(new Set());
   const [showPostMap, setShowPostMap] = useState(false);
+  const [geocodingPostMap, setGeocodingPostMap] = useState(false);
   const [postCommentText, setPostCommentText] = useState('');
   const [postComments, setPostComments] = useState<import('../lib/supabase').PostComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -189,6 +225,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [addPlacesSearch, setAddPlacesSearch] = useState('');
   const [colPlaceIds, setColPlaceIds] = useState<Set<string>>(new Set());
   const [colFilter, setColFilter] = useState('all');
+  const [mapSearch, setMapSearch] = useState('');
   const [showColMap, setShowColMap] = useState(true);
   const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
@@ -235,8 +272,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         }
         const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
-        // Auto-enrich any places missing neighbourhood, city, or category (in memory + DB)
-        const missingData = posts.flatMap(p => p.places.filter(pl => !pl.neighborhood || !pl.city || !pl.category));
+        // Auto-enrich any places missing neighbourhood, city, or category — or with a 2-letter state abbreviation stored as city
+        const isAbbreviation = (s: string) => /^[A-Z]{2}$/.test((s ?? '').trim());
+        const missingData = posts.flatMap(p => p.places.filter(pl => !pl.neighborhood || !pl.city || !pl.category || isAbbreviation(pl.city)));
         if (missingData.length > 0) {
           // Normalize city abbreviations that Google Places doesn't recognise
           const normalCity = (c: string) => ({ cdmx: 'Mexico City', 'ciudad de mexico': 'Mexico City', 'ciudad de méxico': 'Mexico City', nyc: 'New York City', la: 'Los Angeles', sf: 'San Francisco', dc: 'Washington DC' }[c?.toLowerCase()] ?? c);
@@ -262,12 +300,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
               const types: string[] = place.types ?? [];
               const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
-              const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
-              const resolvedCity = find('postal_town') || find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1');
-              const country = find('country');
+              const findLong = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || '') : ''; };
+              const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality') || find('administrative_area_level_2');
+              const resolvedCity = find('postal_town') || find('locality') || findLong('administrative_area_level_1');
+              const country = findLong('country') || find('country');
               const fix: Record<string, string> = {};
               if (neighborhood && !pl.neighborhood) fix.neighborhood = neighborhood;
-              if (resolvedCity && !pl.city) fix.city = resolvedCity;
+              if (resolvedCity && (!pl.city || isAbbreviation(pl.city))) fix.city = resolvedCity;
               if (country && !pl.country) fix.country = country;
               if (!pl.category && types.length) fix.category = googleTypesToCategory(types);
               return Object.keys(fix).length ? { id: pl.id, fix } : null;
@@ -285,37 +324,20 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           }
         }
 
-        // Auto-geocode any places missing lat/lng (in memory + DB)
-        const missing = posts.flatMap(p => p.places.filter(pl => pl.lat == null || pl.lng == null));
-        if (missing.length === 0) return;
-        const coords: Record<string, { lat: number; lng: number }> = {};
-        for (const pl of missing) {
-          try {
-            const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY },
-              body: JSON.stringify({ input: `${pl.name}, ${pl.city}, ${pl.country}` }),
-            });
-            const acData = await acRes.json();
-            const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
-            if (!placeId) continue;
-            const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-              headers: { 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'location' },
-            });
-            const det = await detRes.json();
-            if (det.location?.latitude != null)
-              coords[pl.id] = { lat: det.location.latitude, lng: det.location.longitude };
-          } catch { /* skip */ }
+        // Auto-geocode any places missing lat/lng — with Nominatim fallback
+        const allPlaces = posts.flatMap(p => p.places);
+        const missingCoords = allPlaces.filter(pl => pl.lat == null || pl.lng == null);
+        if (missingCoords.length > 0) {
+          const geocoded = await geocodeMissingPlaces(allPlaces, GKEY);
+          const coordMap: Record<string, { lat: number; lng: number }> = {};
+          geocoded.forEach(pl => { if (pl.lat != null) coordMap[pl.id] = { lat: pl.lat!, lng: pl.lng! }; });
+          if (Object.keys(coordMap).length > 0) {
+            setRealPosts(prev => prev.map(post => ({
+              ...post,
+              places: post.places.map(pl => coordMap[pl.id] ? { ...pl, ...coordMap[pl.id] } : pl),
+            })));
+          }
         }
-        if (Object.keys(coords).length === 0) return;
-        // Update DB (best effort) and update local state immediately
-        Object.entries(coords).forEach(([id, c]) =>
-          supabase.from('post_places').update({ lat: c.lat, lng: c.lng }).eq('id', id)
-        );
-        setRealPosts(prev => prev.map(post => ({
-          ...post,
-          places: post.places.map(pl => coords[pl.id] ? { ...pl, ...coords[pl.id] } : pl),
-        })));
       });
       getUserCollections(appUser.id).then(setRealCollections);
       getSharedCollections(appUser.id).then(setSharedCollections);
@@ -418,44 +440,69 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     const labels = selectedRealPost.places.map(pl => pl.name.split(',')[0].trim());
     return (
       <>
-      <div className="bg-white min-h-screen">
-        <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
-          <button onClick={() => setSelectedRealPost(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
-            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
-          </button>
-          {(avatarPreview ?? appUser?.avatar) ? (
-            <img src={avatarPreview ?? appUser!.avatar!} alt={displayUser.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
-              <span className="text-xs font-bold text-slate-400">{displayUser.name[0]?.toUpperCase()}</span>
+      <div className="bg-white min-h-screen pb-24">
+
+        {/* ── Full-bleed photo with frosted glass controls ── */}
+        <div className="relative">
+          {images.length > 0
+            ? <ImageCarousel images={images} labels={labels} sublabels={selectedRealPost.places.map(pl => [pl.neighborhood, pl.city].filter(Boolean).join(', ') || pl.country)} />
+            : <div className="w-full bg-gray-100" style={{ aspectRatio: '3/4' }} />
+          }
+          {/* Top overlay: back | user info | edit */}
+          <div className="absolute top-0 left-0 right-0 px-4 pt-5 pb-8 bg-gradient-to-b from-black/55 via-black/10 to-transparent">
+            <div className="flex items-center gap-2.5">
+              {/* Back */}
+              <button
+                onClick={() => setSelectedRealPost(null)}
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
+              >
+                <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
+              </button>
+              {/* Avatar + name — frosted glass pill, shows collaborators too */}
+              {(() => {
+                const collabs = selectedRealPost.collaborators ?? [];
+                return (
+                  <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[65%] overflow-hidden">
+                    {/* Stacked avatars */}
+                    <div className="flex items-center flex-shrink-0">
+                      {(avatarPreview ?? appUser?.avatar)
+                        ? <img src={avatarPreview ?? appUser!.avatar!} alt={displayUser.name} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20" />
+                        : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20"><span className="text-xs font-bold text-white">{displayUser.name[0]?.toUpperCase()}</span></div>
+                      }
+                      {collabs.slice(0, 2).map(c => (
+                        c.avatarUrl
+                          ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="w-7 h-7 rounded-full object-cover -ml-2 ring-1 ring-white/20" />
+                          : <div key={c.id} className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center -ml-2 ring-1 ring-white/20"><span className="text-xs font-bold text-white">{c.name[0]?.toUpperCase()}</span></div>
+                      ))}
+                    </div>
+                    {/* Name(s) */}
+                    <p className="text-white font-semibold text-sm leading-tight truncate">
+                      {collabs.length > 0
+                        ? `${displayUser.username || displayUser.name} & ${collabs.map(c => c.username || c.name).join(', ')}`
+                        : displayUser.username || displayUser.name}
+                    </p>
+                  </div>
+                );
+              })()}
+              {/* Spacer */}
+              <div className="flex-1" />
+              {/* Edit */}
+              <button
+                onClick={() => { setEditPostCaption(selectedRealPost.caption); setEditPostPlaces([...selectedRealPost.places]); setEditPostHashtags([...selectedRealPost.hashtags]); setEditTagInput(''); getPostCollaborators(selectedRealPost.id).then(setPostCollaborators); setPostCollabSearch(''); setPostCollabResults([]); setShowEditPost(true); }}
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
+              >
+                <Edit3 size={15} strokeWidth={1.5} className="text-white" />
+              </button>
             </div>
-          )}
-          <div className="flex-1 min-w-0 mr-3">
-            <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{displayUser.name}</p>
-            {selectedRealPost.places.length > 0 && (
-              <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
-                <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                <span className="truncate">
-                  {selectedRealPost.locationLabel
-                    ? selectedRealPost.locationLabel
-                    : selectedRealPost.places.length === 1
-                      ? selectedRealPost.places[0].city || selectedRealPost.places[0].name.split(',')[0].trim()
-                      : `${selectedRealPost.places[0].city || selectedRealPost.places[0].name.split(',')[0].trim()} +${selectedRealPost.places.length - 1}`}
-                </span>
-              </p>
-            )}
           </div>
-          <button
-            onClick={() => { setEditPostCaption(selectedRealPost.caption); setEditPostPlaces([...selectedRealPost.places]); setEditPostHashtags([...selectedRealPost.hashtags]); setEditTagInput(''); getPostCollaborators(selectedRealPost.id).then(setPostCollaborators); setPostCollabSearch(''); setPostCollabResults([]); setShowEditPost(true); }}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
-          >
-            <Edit3 size={16} strokeWidth={1.5} className="text-gray-700" />
-          </button>
         </div>
-        {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
-        <div className="px-4 pt-3 pb-4 border-b border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-4">
+
+        {/* ── Content ── */}
+        <div className="bg-white">
+
+          {/* Actions */}
+          <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
+            <div className="flex items-center gap-5">
               <button
                 className="flex items-center gap-1.5"
                 onClick={() => {
@@ -466,157 +513,184 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   isLiked ? unlikePost(appUser.id, selectedRealPost.id) : likePost(appUser.id, selectedRealPost.id);
                 }}
               >
-                <Heart size={22} strokeWidth={1.5} className={likedRealPosts.has(selectedRealPost.id) ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
-                <span className="text-xs text-gray-500">{realPostLikeCounts[selectedRealPost.id] ?? 0}</span>
+                <Heart size={22} strokeWidth={1.5} className={likedRealPosts.has(selectedRealPost.id) ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
+                <span className="text-sm font-medium text-gray-500">{realPostLikeCounts[selectedRealPost.id] ?? 0}</span>
               </button>
               <button
                 className="flex items-center gap-1.5"
                 onClick={() => { setTimeout(() => postCommentInputRef.current?.focus(), 50); }}
               >
-                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
-                <span className="text-xs text-gray-500">{postComments.length}</span>
+                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
+                <span className="text-sm font-medium text-gray-500">{postComments.length}</span>
               </button>
-              <button
-                onClick={() => { setPostSentTo(new Set()); setShowPostShareSheet(true); }}
-                className="flex items-center gap-1.5"
-              >
-                <Send size={20} strokeWidth={1.5} className="text-gray-700" />
+              <button onClick={() => { setPostSentTo(new Set()); setShowPostShareSheet(true); }}>
+                <Send size={21} strokeWidth={1.5} className="text-gray-800" />
               </button>
             </div>
             {(() => {
               const allSaved = selectedRealPost.places.length > 0 && selectedRealPost.places.every(p => postPlaceSavedIds.has(p.id));
               return (
-                <button
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${allSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
-                  onClick={() => setShowSaveAllPicker(true)}
-                >
-                  {allSaved && <Check size={13} strokeWidth={2} />}
-                  {allSaved ? 'Saved' : 'Save all'}
+                <button onClick={() => setShowSaveAllPicker(true)}>
+                  {allSaved
+                    ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
+                    : <Bookmark size={22} strokeWidth={1.5} className="text-gray-700" />}
                 </button>
               );
             })()}
           </div>
-          <p className="text-sm text-gray-800 leading-relaxed">{selectedRealPost.caption}</p>
-          {selectedRealPost.hashtags.length > 0 && (
-            <p className="text-xs text-orange-400 mt-1">{selectedRealPost.hashtags.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>
-          )}
-          <p className="text-xs text-gray-400 mt-2">{new Date(selectedRealPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-        </div>
 
-        {/* Places + map */}
-        <div className="px-4 pt-4 pb-2">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              {selectedRealPost.places.length} Place{selectedRealPost.places.length !== 1 ? 's' : ''}
-            </p>
-            {selectedRealPost.places.some(p => p.lat != null) && (
-              <button
-                onClick={() => setShowPostMap(v => !v)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
-              >
-                {showPostMap ? 'Hide map' : 'Show map'}
-              </button>
-            )}
-          </div>
-          {showPostMap && (() => {
-            const mapPlaces = selectedRealPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name, city: p.city, country: p.country }));
-            return mapPlaces.length > 0 ? (
-              <div className="rounded-2xl overflow-hidden mb-3">
-                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
-                  <MapView places={mapPlaces} height="200px" />
-                </Suspense>
-              </div>
-            ) : null;
-          })()}
-          <div className="space-y-3">
-            {selectedRealPost.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i).map(place => (
-              <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
-                  <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                    <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
-                  </p>
-                  {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
-                </div>
-                {realCollections.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setAddToColPlace({ id: place.id, name: place.name });
-                      setLoadingPlaceCollections(true);
-                      getPlaceCollectionIds(place.id).then(ids => {
-                        setPlaceInCollections(ids);
-                        setLoadingPlaceCollections(false);
-                      });
-                    }}
-                    className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${postPlaceSavedIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
-                  >
-                    {postPlaceSavedIds.has(place.id)
-                      ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
-                      : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Comments */}
-        <div className="px-4 pt-4 pb-6 border-t border-gray-100 mt-2">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-          {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
-          {!loadingComments && postComments.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
+          {/* Caption + hashtags */}
+          {(selectedRealPost.caption || selectedRealPost.hashtags.length > 0) && (
+            <div className="px-5 pt-4 pb-5">
+              {selectedRealPost.caption && <p className="text-sm text-gray-800 leading-relaxed">{selectedRealPost.caption}</p>}
+              {selectedRealPost.hashtags.length > 0 && (() => {
+                const seen = new Set<string>();
+                const unique = selectedRealPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+                return <p className="text-xs text-orange-400 mt-2">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
+              })()}
+            </div>
           )}
-          <div className="space-y-3 mb-4">
-            {postComments.map(c => (
-              <div key={c.id} className="flex items-start gap-2">
-                {c.profile.avatarUrl
-                  ? <img src={c.profile.avatarUrl} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                  : <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />}
-                <div className="flex-1">
-                  <span className="text-xs font-semibold text-gray-900">{c.profile.username} </span>
-                  <span className="text-xs text-gray-700">{c.text}</span>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(c.createdAt)}</p>
-                </div>
-                {c.userId === appUser?.id && (
-                  <button onClick={async () => { await deleteComment(c.id); setPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-0.5">✕</button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            {appUser?.avatar
-              ? <img src={appUser.avatar} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
-              : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />}
-            <div className="flex-1 flex items-center bg-gray-100 rounded-full px-3 py-2 gap-2">
-              <input
-                ref={postCommentInputRef}
-                value={postCommentText}
-                onChange={e => setPostCommentText(e.target.value)}
-                onKeyDown={async e => {
-                  if (e.key === 'Enter' && postCommentText.trim() && appUser?.id && selectedRealPost) {
-                    const text = postCommentText.trim();
-                    setPostCommentText('');
-                    const saved = await addComment(appUser.id, selectedRealPost.id, text);
-                    if (saved) setPostComments(prev => [...prev, saved]);
-                  }
-                }}
-                placeholder="Add a comment…"
-                className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
-              />
-              {postCommentText.trim() && (
+
+          {/* Places + map */}
+          {selectedRealPost.places.length > 0 && (
+            <div className="px-5 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  {selectedRealPost.places.length} place{selectedRealPost.places.length !== 1 ? 's' : ''}
+                </p>
                 <button
                   onClick={async () => {
-                    if (!appUser?.id || !selectedRealPost) return;
-                    const text = postCommentText.trim();
-                    setPostCommentText('');
+                    if (showPostMap) { setShowPostMap(false); return; }
+                    setShowPostMap(true);
+                    // Geocode any missing coords right now
+                    const missing = selectedRealPost.places.filter(p => p.lat == null || p.lng == null);
+                    if (missing.length > 0) {
+                      setGeocodingPostMap(true);
+                      await geocodeMissingPlaces(
+                        selectedRealPost.places,
+                        GOOGLE_PLACES_KEY,
+                        (updated) => {
+                          const coordMap: Record<string, { lat: number; lng: number }> = {};
+                          updated.forEach(pl => { if (pl.lat != null) coordMap[pl.id] = { lat: pl.lat!, lng: pl.lng! }; });
+                          setSelectedRealPost(prev => prev ? { ...prev, places: prev.places.map(pl => coordMap[pl.id] ? { ...pl, ...coordMap[pl.id] } : pl) } : prev);
+                          setRealPosts(prev => prev.map(rp => ({ ...rp, places: rp.places.map(pl => coordMap[pl.id] ? { ...pl, ...coordMap[pl.id] } : pl) })));
+                        }
+                      );
+                      setGeocodingPostMap(false);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showPostMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
+                >
+                  <Map size={11} strokeWidth={1.5} />
+                  {showPostMap ? 'Hide map' : 'View on map'}
+                </button>
+              </div>
+              {showPostMap && (() => {
+                const mapPlaces = selectedRealPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name, city: p.city, country: p.country }));
+                if (geocodingPostMap && mapPlaces.length === 0) return (
+                  <div className="rounded-2xl bg-gray-50 h-28 flex flex-col items-center justify-center gap-1 animate-pulse mb-3">
+                    <Map size={18} strokeWidth={1.5} className="text-gray-300" />
+                    <p className="text-xs text-gray-400">Loading map…</p>
+                  </div>
+                );
+                return mapPlaces.length > 0 ? (
+                  <div className="rounded-2xl overflow-hidden mb-3">
+                    <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
+                      <MapView places={mapPlaces} height="200px" />
+                    </Suspense>
+                  </div>
+                ) : null;
+              })()}
+              <div className="space-y-2.5 pb-5">
+                {selectedRealPost.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i).map(place => (
+                  <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                    {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 leading-snug">{place.name.split(',')[0].trim()}</p>
+                      <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5 flex-wrap">
+                        <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+                      </p>
+                      {place.category && <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[place.category] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+                    </div>
+                    {realCollections.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setAddToColPlace({ id: place.id, name: place.name });
+                          setLoadingPlaceCollections(true);
+                          getPlaceCollectionIds(place.id).then(ids => { setPlaceInCollections(ids); setLoadingPlaceCollections(false); });
+                        }}
+                        className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${postPlaceSavedIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
+                      >
+                        {postPlaceSavedIds.has(place.id)
+                          ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                          : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Comments */}
+          <div className="px-5 pt-4 border-t border-gray-100">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+            {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
+            {!loadingComments && postComments.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
+            )}
+            <div className="space-y-3 mb-4">
+              {postComments.map(c => (
+                <div key={c.id} className="flex items-start gap-2.5">
+                  {c.profile.avatarUrl
+                    ? <img src={c.profile.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />}
+                  <div className="flex-1 bg-gray-50 rounded-2xl px-3 py-2.5">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xs font-semibold text-gray-900">{c.profile.username}</span>
+                      <span className="text-[10px] text-gray-400">{timeAgo(c.createdAt)}</span>
+                    </div>
+                    <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
+                  </div>
+                  {c.userId === appUser?.id && (
+                    <button onClick={async () => { await deleteComment(c.id); setPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-2">✕</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pb-4">
+              {appUser?.avatar
+                ? <img src={appUser.avatar} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />}
+              <div className="flex-1 flex items-center bg-gray-50 rounded-2xl px-4 py-2.5 gap-2">
+                <input
+                  ref={postCommentInputRef}
+                  value={postCommentText}
+                  onChange={e => setPostCommentText(e.target.value)}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter' && postCommentText.trim() && appUser?.id && selectedRealPost) {
+                      const text = postCommentText.trim();
+                      setPostCommentText('');
+                      const saved = await addComment(appUser.id, selectedRealPost.id, text);
+                      if (saved) setPostComments(prev => [...prev, saved]);
+                    }
+                  }}
+                  placeholder="Add a comment…"
+                  className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
+                />
+                {postCommentText.trim() && (
+                  <button
+                    onClick={async () => {
+                      if (!appUser?.id || !selectedRealPost) return;
+                      const text = postCommentText.trim();
+                      setPostCommentText('');
                     const saved = await addComment(appUser.id, selectedRealPost.id, text);
                     if (saved) setPostComments(prev => [...prev, saved]);
                   }}
                   className="text-xs font-bold text-gray-900 flex-shrink-0"
                 >Post</button>
               )}
+              </div>
             </div>
           </div>
         </div>
@@ -1522,129 +1596,142 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
     return (
       <>
-      <div className="bg-white min-h-screen flex flex-col">
-        <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
-          <button
-            onClick={() => { setSelectedPost(null); setShowMap(false); setCommentText(''); }}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
-          >
-            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
-          </button>
-          <img src={postUser.avatar} alt={postUser.name} className="w-8 h-8 rounded-full object-cover object-top flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 leading-tight">{postUser.name}</p>
-            <p className="text-xs text-gray-400">{selectedPost.createdAt}</p>
-          </div>
-        </div>
+      <div className="bg-white min-h-screen pb-24">
 
-        <div className="flex-1 overflow-y-auto pb-4">
+        {/* ── Photo with overlaid controls ── */}
+        <div className="relative">
           <ImageCarousel
             images={selectedPost.images}
             labels={postPlaces.map(p => p.name.split(',')[0].trim())}
+            sublabels={postPlaces.map(p => [p.neighbourhood, p.city].filter(Boolean).join(', ') || p.country)}
             scales={selectedPost.id === 'feed-8' ? [1.02, 1, 1, 1, 1.05] : selectedPost.id === 'feed-9' ? [1, 1, 1, 1, 1.07, 1] : undefined}
           />
+          {/* Back */}
+          <button
+            onClick={() => { setSelectedPost(null); setShowMap(false); setCommentText(''); }}
+            className="absolute top-3 left-3 z-20 w-9 h-9 flex items-center justify-center bg-black/55 backdrop-blur-md rounded-full"
+          >
+            <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
+          </button>
+          {/* Profile pill */}
+          <div className="absolute top-3 left-14 z-20 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-full pl-1 pr-3 py-1 pointer-events-none">
+            <img src={postUser.avatar} alt={postUser.name} className="w-6 h-6 rounded-full object-cover object-top flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-white text-[11px] font-semibold leading-tight truncate">{postUser.name}</p>
+              <p className="text-white/60 text-[9px] leading-tight">{selectedPost.createdAt}</p>
+            </div>
+          </div>
+          {/* Edit */}
+          <button className="absolute top-3 right-3 z-20 w-9 h-9 flex items-center justify-center bg-black/55 backdrop-blur-md rounded-full">
+            <Edit3 size={15} strokeWidth={1.5} className="text-white" />
+          </button>
+        </div>
 
-          {/* Like / Comment / Save */}
-          <div className="flex items-center justify-between px-4 pt-3 pb-2">
-            <div className="flex items-center gap-4">
+        {/* ── Content ── */}
+        <div className="bg-white">
+
+          {/* Actions */}
+          <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
+            <div className="flex items-center gap-5">
               <button
                 onClick={() => setLikedPosts(prev => { const n = new Set(prev); if (n.has(selectedPost.id)) n.delete(selectedPost.id); else n.add(selectedPost.id); return n; })}
                 className="flex items-center gap-1.5"
               >
-                <Heart size={22} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
-                <span className="text-xs text-gray-500">{(selectedPost.likes + (isLiked ? 1 : 0)).toLocaleString()}</span>
+                <Heart size={22} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
+                <span className="text-sm font-medium text-gray-500">{(selectedPost.likes + (isLiked ? 1 : 0)).toLocaleString()}</span>
               </button>
-              <div className="flex items-center gap-1.5 text-gray-700">
-                <MessageCircle size={22} strokeWidth={1.5} />
-                <span className="text-xs text-gray-500">{selectedPost.comments}</span>
-              </div>
+              <button className="flex items-center gap-1.5">
+                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
+                <span className="text-sm font-medium text-gray-500">{selectedPost.comments}</span>
+              </button>
+              <button><Send size={21} strokeWidth={1.5} className="text-gray-800" /></button>
             </div>
-            <button
-              onClick={() => setSavedPosts(prev => { const n = new Set(prev); if (n.has(selectedPost.id)) n.delete(selectedPost.id); else n.add(selectedPost.id); return n; })}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${isSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
-            >
-              {isSaved && <Check size={13} strokeWidth={2} />}
-              {isSaved ? 'Saved' : 'Save'}
+            <button onClick={() => setSavedPosts(prev => { const n = new Set(prev); if (n.has(selectedPost.id)) n.delete(selectedPost.id); else n.add(selectedPost.id); return n; })}>
+              {isSaved
+                ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
+                : <Bookmark size={22} strokeWidth={1.5} className="text-gray-700" />}
             </button>
           </div>
 
           {/* Caption */}
-          <div className="px-4 pb-4 border-b border-gray-100">
-            <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
-          </div>
+          {selectedPost.caption && (
+            <div className="px-5 pb-5">
+              <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
+            </div>
+          )}
 
           {/* Places */}
-          <div className="px-4 pt-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                {postPlaces.length} Place{postPlaces.length !== 1 ? 's' : ''} in this post
-              </p>
-              {postPlaces.length >= 1 && (
+          {postPlaces.length > 0 && (
+            <div className="px-5 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  {postPlaces.length} place{postPlaces.length !== 1 ? 's' : ''}
+                </p>
                 <button
                   onClick={() => setShowMap(p => !p)}
                   className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
                 >
-                  <Map size={12} strokeWidth={1.5} />
+                  <Map size={11} strokeWidth={1.5} />
                   {showMap ? 'Hide map' : 'View on map'}
                 </button>
-              )}
-            </div>
-
-            {showMap && centerPlace && (
-              <div className="mb-4 rounded-2xl overflow-hidden">
-                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
-                  <MapView places={postPlaces} center={[centerPlace.lat, centerPlace.lng]} zoom={15} height="200px" />
-                </Suspense>
               </div>
-            )}
 
-            <div className="space-y-3">
-              {postPlaces.map(place => {
-                const isSavedPlace = savedPlaces.has(place.id);
-                return (
-                  <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                    <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
-                      <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                        <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-                        {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {place.savedCount.toLocaleString()} saves{place.rating ? ` · ★ ${place.rating}` : ''}
-                      </p>
+              {showMap && centerPlace && (
+                <div className="mb-3 rounded-2xl overflow-hidden">
+                  <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
+                    <MapView places={postPlaces} center={[centerPlace.lat, centerPlace.lng]} zoom={15} height="200px" />
+                  </Suspense>
+                </div>
+              )}
+
+              <div className="space-y-2.5 pb-5">
+                {postPlaces.map(place => {
+                  const isSavedPlace = savedPlaces.has(place.id);
+                  return (
+                    <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                      <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
+                        <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                          <MapPin size={9} strokeWidth={1.5} className="flex-shrink-0" />
+                          {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {place.savedCount.toLocaleString()} saves{place.rating ? ` · ★ ${place.rating}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        {place.bookingAvailable && (
+                          <button onClick={() => setBookingPlace(place)} className="text-xs font-bold bg-gray-900 text-white rounded-full px-2.5 py-1">Book</button>
+                        )}
+                        <button
+                          onClick={() => setSavedPlaces(prev => { const n = new Set(prev); if (n.has(place.id)) n.delete(place.id); else n.add(place.id); return n; })}
+                          className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${isSavedPlace ? 'bg-gray-900 border-gray-900' : 'border-gray-200 bg-white'}`}
+                        >
+                          <Bookmark size={13} strokeWidth={1.5} className={isSavedPlace ? 'fill-white text-white' : 'text-gray-600'} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2 flex-shrink-0">
-                      {place.bookingAvailable && (
-                        <button onClick={() => setBookingPlace(place)} className="text-xs font-bold bg-gray-900 text-white rounded-full px-2.5 py-1">Book</button>
-                      )}
-                      <button
-                        onClick={() => setSavedPlaces(prev => { const n = new Set(prev); if (n.has(place.id)) n.delete(place.id); else n.add(place.id); return n; })}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${isSavedPlace ? 'bg-gray-900 border-gray-900' : 'border-gray-200 bg-white'}`}
-                      >
-                        <Bookmark size={13} strokeWidth={1.5} className={isSavedPlace ? 'fill-white text-white' : 'text-gray-600'} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Comments */}
           {comments.length > 0 && (
-            <div className="px-4 pt-5 border-t border-gray-100 mt-4">
+            <div className="px-5 pt-4 border-t border-gray-100">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {comments.map((c, i) => {
                   const commenter = getUserById(c.userId);
                   return (
                     <div key={i} className="flex items-start gap-2.5">
                       <img src={commenter.avatar} alt={commenter.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" style={{ objectPosition: commenter.avatarPosition ?? 'top' }} />
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl px-3 py-2.5">
                         <div className="flex items-baseline gap-1.5">
                           <p className="text-xs font-semibold text-gray-900">{commenter.name.split(' ')[0]}</p>
-                          <p className="text-xs text-gray-400">{c.time}</p>
+                          <p className="text-[10px] text-gray-400">{c.time}</p>
                         </div>
                         <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
                       </div>
@@ -1654,15 +1741,20 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </div>
             </div>
           )}
-          <div className="px-4 pt-4 pb-4">
-            <div className="flex items-center gap-3 border border-gray-200 rounded-2xl px-4 py-3">
+
+          {/* Comment input */}
+          <div className="px-5 pt-4">
+            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3">
+              <img src={postUser.avatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
               <input
                 value={commentText}
                 onChange={e => setCommentText(e.target.value)}
-                placeholder="Write a comment..."
+                placeholder="Add a comment…"
                 className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
               />
-              <button onClick={() => setCommentText('')} className="text-xs font-semibold text-gray-400">Post</button>
+              {commentText.trim() && (
+                <button onClick={() => setCommentText('')} className="text-xs font-bold text-gray-900">Post</button>
+              )}
             </div>
           </div>
         </div>
@@ -2309,7 +2401,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
             { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts', action: null },
-            { value: isNewUser ? realPosts.reduce((n, p) => n + p.places.length, 0) : actualPlacesCount, label: 'Places', action: null },
+            { value: isNewUser ? (() => { const seen = new Set<string>(); return realPosts.flatMap(p => p.places).filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).length; })() : actualPlacesCount, label: 'Places', action: null },
             { value: isNewUser ? realFollowerCount : displayUser.followersCount, label: 'Followers', action: () => {
               if (isNewUser && appUser) {
                 setLoadingFollowList(true);
@@ -2407,35 +2499,119 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
       {/* Map Tab */}
       {activeTab === 'Map' && (() => {
-        const mapPlaces = isNewUser
-          ? realPosts.flatMap(post => post.places.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country })))
-          : visitedPlaces;
-        const mapHeight = 'calc(100vh - 460px)';
+        const rawPlaces = realPosts.flatMap(p => p.places);
+        // Deduplicate by name — keep first occurrence
+        const seenNames = new Set<string>();
+        const allPlaces = rawPlaces.filter(pl => {
+          const key = pl.name.trim().toLowerCase();
+          if (seenNames.has(key)) return false;
+          seenNames.add(key);
+          return true;
+        }).map(pl => {
+          // Fix US state abbreviations in city
+          const city = (pl.city ?? '').trim();
+          if (/^[A-Z]{2}$/.test(city) && US_STATES[city]) return { ...pl, city: US_STATES[city] };
+          return pl;
+        });
+        const mapPlaces = allPlaces.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
+        const countriesCount = isNewUser ? new Set(allPlaces.map(pl => pl.country).filter(Boolean)).size : actualCountriesCount;
+        const placesCount = isNewUser ? allPlaces.length : actualPlacesCount;
+        const postsCount = isNewUser ? realPosts.length : myPosts.length;
+        const q = mapSearch.trim().toLowerCase();
+        const filteredPlaces = q
+          ? allPlaces.filter(pl => pl.name.toLowerCase().includes(q) || pl.city.toLowerCase().includes(q) || pl.country.toLowerCase().includes(q))
+          : allPlaces;
+        const byCountry: Record<string, typeof allPlaces> = {};
+        filteredPlaces.forEach(pl => {
+          const c = pl.country || 'Unknown';
+          if (!byCountry[c]) byCountry[c] = [];
+          byCountry[c].push(pl);
+        });
+        const catEmoji = (cat: string) => {
+          const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙', street: '📍' };
+          return m[cat?.toLowerCase()] ?? '📍';
+        };
         return (
-        <div className="flex flex-col px-4 pt-4 pb-6 gap-4">
-          <Suspense fallback={<div style={{ height: mapHeight }} className="bg-gray-100 rounded-xl animate-pulse" />}>
-            <div className="rounded-xl overflow-hidden" style={{ height: mapHeight }}>
-              <MapView places={mapPlaces} height={mapHeight} center={mapPlaces.length === 0 ? [10, 0] : undefined} />
-            </div>
-          </Suspense>
-          <div>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: isNewUser ? new Set(realPosts.flatMap(p => p.places.map(pl => pl.country))).size : actualCountriesCount, label: 'Countries' },
-                { value: isNewUser ? realPosts.reduce((n, p) => n + p.places.length, 0) : actualPlacesCount, label: 'Places' },
-                { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts' },
-              ].map(stat => (
-                <div key={stat.label} className="text-center bg-gray-50 rounded-xl py-3">
-                  <p className="text-lg font-black text-gray-900">{stat.value}</p>
-                  <p className="text-xs text-gray-400">{stat.label}</p>
+          <div className="pb-10">
+            {/* Map with stats overlay */}
+            <div className="px-4 pt-4">
+              <div className="rounded-2xl overflow-hidden relative">
+                {mapPlaces.length > 0 ? (
+                  <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
+                    <MapView places={mapPlaces} height="220px" />
+                  </Suspense>
+                ) : (
+                  <div className="h-52 bg-gray-100 flex items-center justify-center">
+                    <p className="text-xs text-gray-400">Your places will appear here as you add posts</p>
+                  </div>
+                )}
+                {/* Stats overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3">
+                  <div className="flex gap-6">
+                    <div>
+                      <p className="text-base font-black text-white">{countriesCount}</p>
+                      <p className="text-[11px] text-white/70">Countries visited</p>
+                    </div>
+                    <div>
+                      <p className="text-base font-black text-white">{placesCount}</p>
+                      <p className="text-[11px] text-white/70">Places</p>
+                    </div>
+                  </div>
                 </div>
-              ))}
+              </div>
             </div>
-            {mapPlaces.length === 0 && isNewUser && (
-              <p className="text-xs text-gray-400 text-center mt-3">Your places will appear on the map as you add posts</p>
+
+            {/* Search */}
+            {allPlaces.length > 0 && (
+              <div className="px-4 pt-3">
+                <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+                  <Search size={14} strokeWidth={2} className="text-gray-400 flex-shrink-0" />
+                  <input
+                    value={mapSearch}
+                    onChange={e => setMapSearch(e.target.value)}
+                    placeholder="Search places…"
+                    className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none"
+                  />
+                  {mapSearch && <button onClick={() => setMapSearch('')} className="text-gray-400 text-xs">✕</button>}
+                </div>
+              </div>
+            )}
+
+            {/* Places by country */}
+            {allPlaces.length > 0 && (
+              <div className="px-4 pt-4 space-y-5">
+                {Object.keys(byCountry).length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">No places match your search</p>
+                ) : Object.entries(byCountry).map(([country, cPlaces]) => (
+                  <div key={country}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{country}</p>
+                      <p className="text-xs text-gray-400">{cPlaces.length} place{cPlaces.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {cPlaces.map((pl, i) => (
+                        <div key={`${pl.id}-${i}`} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
+                          {pl.photoUrl ? (
+                            <img src={pl.photoUrl} alt={pl.name} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 text-xl">{catEmoji(pl.category)}</div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{pl.name}</p>
+                            <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                              <MapPin size={9} strokeWidth={1.5} className="flex-shrink-0" />
+                              {[pl.neighborhood, pl.city].filter(Boolean).join(', ') || country}
+                            </p>
+                            {pl.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(pl.category)} {pl.category.charAt(0).toUpperCase() + pl.category.slice(1)}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-        </div>
         );
       })()}
 
@@ -2460,7 +2636,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       setLoadingCollectionPlaces(true);
                       getCollectionPlaces(col.id).then(async places => {
                         const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY);
-                        setRealCollectionPlaces(geocoded);
+                        setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded));
                         setLoadingCollectionPlaces(false);
                       });
                       getCollectionCollaborators(col.id).then(setCollectionCollaborators);
@@ -2499,7 +2675,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       setColFilter('all');
                       setCollectionCollaborators([]);
                       setLoadingCollectionPlaces(true);
-                      getCollectionPlaces(col.id).then(async places => { const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY); setRealCollectionPlaces(geocoded); setLoadingCollectionPlaces(false); });
+                      getCollectionPlaces(col.id).then(async places => { const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY); setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded)); setLoadingCollectionPlaces(false); });
                       getCollectionCollaborators(col.id).then(setCollectionCollaborators);
                     }}>
                       <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">

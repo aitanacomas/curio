@@ -353,41 +353,283 @@ export async function getCollectionPlaces(collectionId: string): Promise<RealPos
     }));
 }
 
-/** Geocode any places missing lat/lng in parallel, update DB, return updated array */
-export async function geocodeMissingPlaces(places: RealPostPlace[], apiKey: string): Promise<RealPostPlace[]> {
-  if (!apiKey) return places;
-  const missing = places.filter(pl => pl.lat == null || pl.lng == null);
+const US_STATES: Record<string, string> = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+  DC: 'Washington DC',
+};
+
+/**
+ * Scans all post_places rows where city is a 2-letter US state code and
+ * updates them to the full state name directly in the database.
+ * Call once on app start — safe to call multiple times (no-op when already fixed).
+ */
+export async function fixCityAbbreviationsInDB(): Promise<void> {
+  // Fetch all post_places that have a 2-letter city (likely a state code)
+  const { data } = await supabase
+    .from('post_places')
+    .select('id, city')
+    .filter('city', 'neq', null);
+  if (!data) return;
+  const toFix = data.filter(row => /^[A-Z]{2}$/.test((row.city ?? '').trim()) && US_STATES[row.city.trim()]);
+  if (toFix.length === 0) return;
+  await Promise.all(
+    toFix.map(row =>
+      supabase.from('post_places').update({ city: US_STATES[row.city.trim()] }).eq('id', row.id)
+    )
+  );
+}
+
+// Module-level Nominatim rate limiter — enforces ≥1.1 s between ANY calls
+let _lastNominatimMs = 0;
+
+// Hardcoded neighborhood coords — precise areas so pins don't stack on city center
+const NEIGHBORHOOD_COORDS: Record<string, { lat: number; lng: number }> = {
+  // London areas
+  'west end': { lat: 51.5117, lng: -0.1340 }, 'west end, london': { lat: 51.5117, lng: -0.1340 },
+  'soho, london': { lat: 51.5136, lng: -0.1337 }, 'soho': { lat: 51.5136, lng: -0.1337 },
+  'south bank': { lat: 51.5055, lng: -0.1132 }, 'south bank, london': { lat: 51.5055, lng: -0.1132 },
+  'mayfair': { lat: 51.5117, lng: -0.1489 }, 'mayfair, london': { lat: 51.5117, lng: -0.1489 },
+  'covent garden': { lat: 51.5117, lng: -0.1240 },
+  'shoreditch': { lat: 51.5227, lng: -0.0793 }, 'brixton': { lat: 51.4613, lng: -0.1156 },
+  'notting hill': { lat: 51.5154, lng: -0.2015 }, 'chelsea, london': { lat: 51.4875, lng: -0.1687 },
+  'camden': { lat: 51.5390, lng: -0.1426 }, 'islington': { lat: 51.5362, lng: -0.1033 },
+  'kensington': { lat: 51.4990, lng: -0.1940 }, 'knightsbridge': { lat: 51.4988, lng: -0.1598 },
+  'canary wharf': { lat: 51.5054, lng: -0.0235 }, 'paddington': { lat: 51.5154, lng: -0.1755 },
+  'southwark': { lat: 51.5035, lng: -0.0883 }, 'waterloo, london': { lat: 51.5031, lng: -0.1132 },
+  'victoria, london': { lat: 51.4965, lng: -0.1447 }, 'hackney': { lat: 51.5450, lng: -0.0553 },
+  'greenwich, london': { lat: 51.4769, lng: 0.0031 }, 'bermondsey': { lat: 51.4983, lng: -0.0782 },
+  'fitzrovia': { lat: 51.5194, lng: -0.1378 }, 'bloomsbury': { lat: 51.5236, lng: -0.1232 },
+  'city of london': { lat: 51.5155, lng: -0.0922 }, 'tower bridge': { lat: 51.5055, lng: -0.0754 },
+  'east london': { lat: 51.5280, lng: -0.0560 }, 'north london': { lat: 51.5600, lng: -0.1200 },
+  // Mexico City areas
+  'polanco': { lat: 19.4319, lng: -99.1997 }, 'polanco iv sección': { lat: 19.4319, lng: -99.1997 },
+  'polanco iv seccion': { lat: 19.4319, lng: -99.1997 }, 'polanco, cdmx': { lat: 19.4319, lng: -99.1997 },
+  'condesa': { lat: 19.4120, lng: -99.1724 }, 'colonia condesa': { lat: 19.4120, lng: -99.1724 },
+  'condesa, cdmx': { lat: 19.4120, lng: -99.1724 },
+  'roma': { lat: 19.4160, lng: -99.1604 }, 'colonia roma': { lat: 19.4160, lng: -99.1604 },
+  'roma norte': { lat: 19.4191, lng: -99.1594 }, 'roma sur': { lat: 19.4118, lng: -99.1605 },
+  'roma, cdmx': { lat: 19.4160, lng: -99.1604 },
+  'san angel': { lat: 19.3477, lng: -99.1902 }, 'san ángel': { lat: 19.3477, lng: -99.1902 },
+  'san ángel inn': { lat: 19.3477, lng: -99.1902 }, 'san angel inn': { lat: 19.3477, lng: -99.1902 },
+  'coyoacan': { lat: 19.3431, lng: -99.1625 }, 'coyoacán': { lat: 19.3431, lng: -99.1625 },
+  'centro historico': { lat: 19.4336, lng: -99.1394 }, 'centro histórico': { lat: 19.4336, lng: -99.1394 },
+  'centro': { lat: 19.4326, lng: -99.1332 },
+  'santa fe': { lat: 19.3592, lng: -99.2612 }, 'lomas': { lat: 19.4284, lng: -99.2150 },
+  'del valle': { lat: 19.3900, lng: -99.1600 }, 'narvarte': { lat: 19.3997, lng: -99.1624 },
+  'juarez': { lat: 19.4271, lng: -99.1607 }, 'cuauhtémoc': { lat: 19.4236, lng: -99.1497 },
+  'cuauhtemoc': { lat: 19.4236, lng: -99.1497 }, 'anzures': { lat: 19.4386, lng: -99.1791 },
+  'escandón': { lat: 19.4048, lng: -99.1851 }, 'escandon': { lat: 19.4048, lng: -99.1851 },
+  'tepito': { lat: 19.4468, lng: -99.1222 }, 'xochimilco': { lat: 19.2630, lng: -99.1019 },
+  'tlalpan': { lat: 19.2975, lng: -99.1617 }, 'pedregal': { lat: 19.3347, lng: -99.1935 },
+  'interlomas': { lat: 19.4389, lng: -99.2590 }, 'santa fe, cdmx': { lat: 19.3592, lng: -99.2612 },
+  // Paris areas
+  'le marais': { lat: 48.8545, lng: 2.3576 }, 'marais': { lat: 48.8545, lng: 2.3576 },
+  'montmartre': { lat: 48.8867, lng: 2.3431 }, 'saint-germain': { lat: 48.8534, lng: 2.3325 },
+  'latin quarter': { lat: 48.8514, lng: 2.3500 }, 'bastille': { lat: 48.8533, lng: 2.3692 },
+  // New York areas
+  'manhattan': { lat: 40.7831, lng: -73.9712 }, 'brooklyn': { lat: 40.6782, lng: -73.9442 },
+  'williamsburg, new york': { lat: 40.7081, lng: -73.9571 },
+  'soho, new york': { lat: 40.7233, lng: -74.0030 },
+  'tribeca': { lat: 40.7163, lng: -74.0086 }, 'midtown': { lat: 40.7549, lng: -73.9840 },
+  'upper east side': { lat: 40.7736, lng: -73.9566 }, 'upper west side': { lat: 40.7870, lng: -73.9754 },
+  'harlem': { lat: 40.8116, lng: -73.9465 }, 'greenwich village': { lat: 40.7339, lng: -74.0022 },
+  'lower east side': { lat: 40.7157, lng: -73.9863 }, 'chelsea, new york': { lat: 40.7465, lng: -74.0014 },
+  // Barcelona areas
+  'el born': { lat: 41.3840, lng: 2.1821 }, 'eixample': { lat: 41.3927, lng: 2.1556 },
+  'gracia': { lat: 41.4033, lng: 2.1566 }, 'gràcia': { lat: 41.4033, lng: 2.1566 },
+  'raval': { lat: 41.3804, lng: 2.1685 }, 'el raval': { lat: 41.3804, lng: 2.1685 },
+};
+
+// Hardcoded city coords — instant fallback so every place always gets a pin
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  // Mexico
+  'mexico city': { lat: 19.4326, lng: -99.1332 }, 'ciudad de mexico': { lat: 19.4326, lng: -99.1332 },
+  'cdmx': { lat: 19.4326, lng: -99.1332 }, 'guadalajara': { lat: 20.6597, lng: -103.3496 },
+  'monterrey': { lat: 25.6866, lng: -100.3161 }, 'oaxaca': { lat: 17.0732, lng: -96.7266 },
+  'cancun': { lat: 21.1619, lng: -86.8515 }, 'tulum': { lat: 20.2114, lng: -87.4654 },
+  // USA
+  'new york': { lat: 40.7128, lng: -74.0060 }, 'los angeles': { lat: 34.0522, lng: -118.2437 },
+  'chicago': { lat: 41.8781, lng: -87.6298 }, 'miami': { lat: 25.7617, lng: -80.1918 },
+  'san francisco': { lat: 37.7749, lng: -122.4194 }, 'las vegas': { lat: 36.1699, lng: -115.1398 },
+  'seattle': { lat: 47.6062, lng: -122.3321 }, 'boston': { lat: 42.3601, lng: -71.0589 },
+  'arizona': { lat: 33.4484, lng: -112.0740 }, 'utah': { lat: 40.7608, lng: -111.8910 },
+  'page': { lat: 36.9147, lng: -111.4558 }, 'sedona': { lat: 34.8697, lng: -111.7609 },
+  // Europe
+  'london': { lat: 51.5074, lng: -0.1278 }, 'paris': { lat: 48.8566, lng: 2.3522 },
+  'barcelona': { lat: 41.3851, lng: 2.1734 }, 'madrid': { lat: 40.4168, lng: -3.7038 },
+  'rome': { lat: 41.9028, lng: 12.4964 }, 'milan': { lat: 45.4642, lng: 9.1900 },
+  'amsterdam': { lat: 52.3676, lng: 4.9041 }, 'berlin': { lat: 52.5200, lng: 13.4050 },
+  'lisbon': { lat: 38.7223, lng: -9.1393 }, 'athens': { lat: 37.9838, lng: 23.7275 },
+  'vienna': { lat: 48.2082, lng: 16.3738 }, 'prague': { lat: 50.0755, lng: 14.4378 },
+  // Asia
+  'tokyo': { lat: 35.6762, lng: 139.6503 }, 'osaka': { lat: 34.6937, lng: 135.5023 },
+  'seoul': { lat: 37.5665, lng: 126.9780 }, 'bangkok': { lat: 13.7563, lng: 100.5018 },
+  'singapore': { lat: 1.3521, lng: 103.8198 }, 'hong kong': { lat: 22.3193, lng: 114.1694 },
+  'bali': { lat: -8.3405, lng: 115.0920 }, 'jakarta': { lat: -6.2088, lng: 106.8456 },
+  'dubai': { lat: 25.2048, lng: 55.2708 }, 'istanbul': { lat: 41.0082, lng: 28.9784 },
+  // South America
+  'buenos aires': { lat: -34.6037, lng: -58.3816 }, 'sao paulo': { lat: -23.5505, lng: -46.6333 },
+  'rio de janeiro': { lat: -22.9068, lng: -43.1729 }, 'bogota': { lat: 4.7110, lng: -74.0721 },
+  'lima': { lat: -12.0464, lng: -77.0428 }, 'cartagena': { lat: 10.3910, lng: -75.4794 },
+  // Other
+  'sydney': { lat: -33.8688, lng: 151.2093 }, 'melbourne': { lat: -37.8136, lng: 144.9631 },
+  'toronto': { lat: 43.6532, lng: -79.3832 }, 'montreal': { lat: 45.5017, lng: -73.5673 },
+  'cape town': { lat: -33.9249, lng: 18.4241 }, 'marrakech': { lat: 31.6295, lng: -7.9811 },
+};
+
+/** Apply a small spiral jitter to a base coordinate so stacked pins separate. */
+function applyJitter(base: { lat: number; lng: number }, idx: number): { lat: number; lng: number } {
+  if (idx === 0) return base;
+  const angle = idx * 2.4; // golden-angle-ish spread
+  const radius = 0.002 * (1 + Math.floor(idx / 8)); // grow ring every 8 pins
+  return { lat: base.lat + radius * Math.sin(angle), lng: base.lng + radius * Math.cos(angle) };
+}
+
+/**
+ * Look up neighborhood-level coords first (precise), then city-level.
+ * jitterIdx spreads multiple places that fall back to the same area so they
+ * don't stack on the exact same pixel.
+ */
+function areaFallback(
+  neighborhood?: string,
+  city?: string,
+  country?: string,
+  jitterIdx = 0,
+): { lat: number; lng: number } | null {
+  const n = (neighborhood ?? '').toLowerCase().trim();
+  const c = (city ?? '').toLowerCase().trim();
+
+  // Try "neighborhood, city" compound key first (avoids Soho London vs NY ambiguity)
+  if (n && c) {
+    const compound = `${n}, ${c}`;
+    if (NEIGHBORHOOD_COORDS[compound]) return applyJitter(NEIGHBORHOOD_COORDS[compound], jitterIdx);
+  }
+
+  // Try neighborhood alone
+  if (n && NEIGHBORHOOD_COORDS[n]) return applyJitter(NEIGHBORHOOD_COORDS[n], jitterIdx);
+
+  // Try city with jitter
+  if (c && CITY_COORDS[c]) return applyJitter(CITY_COORDS[c], jitterIdx);
+
+  // Try country
+  const ckey = (country ?? '').toLowerCase().trim();
+  if (ckey && CITY_COORDS[ckey]) return applyJitter(CITY_COORDS[ckey], jitterIdx);
+
+  return null;
+}
+
+/** Geocode any places missing lat/lng. onProgress fires after each place resolves. */
+export async function geocodeMissingPlaces(
+  places: RealPostPlace[],
+  apiKey: string,
+  onProgress?: (updated: RealPostPlace[]) => void
+): Promise<RealPostPlace[]> {
+  // Detect places whose stored coords are clearly a city-center fallback.
+  // We use a TIGHT radius (0.001° ≈ 111m) so real restaurant coords that happen
+  // to be near a neighborhood center are NOT incorrectly flagged.
+  const isBadFallbackCoord = (pl: RealPostPlace) => {
+    if (pl.lat == null || pl.lng == null) return false;
+    const cityKey = (pl.city ?? '').toLowerCase().trim();
+    const cc = CITY_COORDS[cityKey];
+    return cc != null && Math.abs(pl.lat - cc.lat) < 0.001 && Math.abs(pl.lng - cc.lng) < 0.001;
+  };
+  const missing = places.filter(pl => pl.lat == null || pl.lng == null || isBadFallbackCoord(pl));
   if (missing.length === 0) return places;
 
-  const results = await Promise.all(missing.map(async pl => {
+  // Rate-limited Nominatim wrapper — enforces ≥1.1 s between any two calls globally
+  const nominatimSearch = async (q: string) => {
+    const wait = Math.max(0, 1100 - (Date.now() - _lastNominatimMs));
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    _lastNominatimMs = Date.now();
     try {
-      const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey },
-        body: JSON.stringify({ input: `${pl.name}, ${pl.city}, ${pl.country}`, languageCode: 'en' }),
-      });
-      const acData = await acRes.json();
-      const placeId = acData.suggestions?.[0]?.placePrediction?.placeId;
-      if (!placeId) return null;
-      const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-        headers: { 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': 'location' },
-      });
-      const det = await detRes.json();
-      if (det.location?.latitude != null)
-        return { id: pl.id, lat: det.location.latitude as number, lng: det.location.longitude as number };
-      return null;
-    } catch { return null; }
-  }));
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+        { headers: { 'Accept-Language': 'en', 'User-Agent': 'curio-app/1.0' } }
+      );
+      const data = await res.json();
+      if (data[0]?.lat != null) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    } catch { /* ignore */ }
+    return null;
+  };
 
-  const coords: Record<string, { lat: number; lng: number }> = {};
-  results.forEach(r => { if (r) coords[r.id] = { lat: r.lat, lng: r.lng }; });
-  if (Object.keys(coords).length === 0) return places;
+  // Track how many places fell back to each neighborhood/city key (for jitter)
+  // Key = "neighborhood,city" so two places in the same neighborhood get different offsets
+  const fallbackJitterCount: Record<string, number> = {};
 
-  // Persist to DB (best-effort, fire-and-forget)
-  Object.entries(coords).forEach(([id, c]) =>
-    supabase.from('post_places').update({ lat: c.lat, lng: c.lng }).eq('id', id)
-  );
-  return places.map(pl => coords[pl.id] ? { ...pl, ...coords[pl.id] } : pl);
+  // Returns coords + whether they came from real geocoding (save to DB) vs fallback (don't save)
+  const geocodeOne = async (pl: RealPostPlace): Promise<{ lat: number; lng: number; real: boolean }> => {
+    // 1. Google Places Text Search — same call Add.tsx uses, single request, exact coords
+    if (apiKey) {
+      try {
+        const queries = [
+          `${pl.name}, ${pl.neighborhood}, ${pl.city}, ${pl.country}`,
+          `${pl.name}, ${pl.city}, ${pl.country}`,
+          pl.name,
+        ];
+        for (const textQuery of queries) {
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': 'places.location',
+            },
+            body: JSON.stringify({ textQuery, languageCode: 'en' }),
+          });
+          const data = await res.json();
+          const loc = data.places?.[0]?.location;
+          if (loc?.latitude != null)
+            return { lat: loc.latitude as number, lng: loc.longitude as number, real: true };
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 2. Nominatim: name + neighborhood + city (most specific)
+    const nom1 = await nominatimSearch(`${pl.name}, ${pl.neighborhood}, ${pl.city}, ${pl.country}`);
+    if (nom1) return { ...nom1, real: true };
+
+    // 3. Nominatim: name + city
+    const nom2 = await nominatimSearch(`${pl.name}, ${pl.city}, ${pl.country}`);
+    if (nom2) return { ...nom2, real: true };
+
+    // 4. Nominatim: name only
+    const nom3 = await nominatimSearch(pl.name);
+    if (nom3) return { ...nom3, real: true };
+
+    // 5. Hardcoded neighborhood → city fallback with jitter (NOT saved to DB)
+    // Use "neighborhood,city" as key so two places in the same area get distinct offsets
+    const n = (pl.neighborhood ?? '').toLowerCase().trim();
+    const c = (pl.city ?? '').toLowerCase().trim();
+    const fallbackKey = n ? `${n},${c}` : c;
+    const jIdx = fallbackJitterCount[fallbackKey] ?? 0;
+    fallbackJitterCount[fallbackKey] = jIdx + 1;
+    const area = areaFallback(pl.neighborhood, pl.city, pl.country, jIdx);
+    if (area) return { ...area, real: false };
+
+    // 6. Absolute last resort
+    return { lat: 0, lng: 0, real: false };
+  };
+
+  let current = [...places];
+  for (const pl of missing) {
+    const { real, ...coords } = await geocodeOne(pl);
+    // Only persist real geocoded coords — fallbacks stay in-memory so next load retries
+    if (real) supabase.from('post_places').update({ lat: coords.lat, lng: coords.lng }).eq('id', pl.id);
+    // Clear city-center fallback coords from DB so next load retries them
+    else if (isBadFallbackCoord(pl)) supabase.from('post_places').update({ lat: null, lng: null }).eq('id', pl.id);
+    current = current.map(p => p.id === pl.id ? { ...p, ...coords } : p);
+    onProgress?.(current);
+  }
+  return current;
 }
 
 export async function addPlaceToCollection(collectionId: string, postPlaceId: string) {
@@ -1386,6 +1628,7 @@ export async function leavePlan(planId: string, userId: string): Promise<void> {
 // ── Saved Places ──────────────────────────────────────────────────────────────
 export interface SavedPlace {
   id: string;
+  postId: string;
   name: string;
   category: string;
   neighborhood: string;
@@ -1399,7 +1642,7 @@ export interface SavedPlace {
 export async function getSavedPlaces(userId: string): Promise<SavedPlace[]> {
   const { data } = await supabase
     .from('saved_places')
-    .select('post_place_id, post_places(id, name, category, neighborhood, city, country, photo_url, lat, lng)')
+    .select('post_place_id, post_places(id, post_id, name, category, neighborhood, city, country, photo_url, lat, lng)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   return (data ?? [])
@@ -1407,6 +1650,7 @@ export async function getSavedPlaces(userId: string): Promise<SavedPlace[]> {
     .filter(Boolean)
     .map((p: any) => ({
       id: p.id,
+      postId: p.post_id ?? '',
       name: p.name ?? '',
       category: p.category ?? '',
       neighborhood: p.neighborhood ?? '',
@@ -1416,6 +1660,46 @@ export async function getSavedPlaces(userId: string): Promise<SavedPlace[]> {
       lat: p.lat ?? null,
       lng: p.lng ?? null,
     }));
+}
+
+export async function getPostById(postId: string): Promise<RealPost | null> {
+  const { data: p, error } = await supabase
+    .from('posts')
+    .select(`
+      id, user_id, caption, location_label, created_at, hashtags,
+      profiles ( name, username, avatar_url ),
+      post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )
+    `)
+    .eq('id', postId)
+    .single();
+  if (error || !p) return null;
+  return {
+    id: p.id,
+    userId: p.user_id,
+    caption: p.caption ?? '',
+    locationLabel: p.location_label ?? '',
+    createdAt: p.created_at,
+    hashtags: p.hashtags ?? [],
+    profile: {
+      name: (p.profiles as any)?.name ?? 'Unknown',
+      username: (p.profiles as any)?.username ?? '',
+      avatarUrl: (p.profiles as any)?.avatar_url ?? null,
+    },
+    places: ((p.post_places ?? []) as any[])
+      .sort((a, b) => a.position - b.position)
+      .map(pl => ({
+        id: pl.id,
+        name: pl.name ?? '',
+        category: pl.category ?? '',
+        neighborhood: pl.neighborhood ?? '',
+        city: pl.city ?? '',
+        country: pl.country ?? '',
+        photoUrl: pl.photo_url ?? '',
+        position: pl.position ?? 0,
+        lat: pl.lat ?? null,
+        lng: pl.lng ?? null,
+      })),
+  };
 }
 
 export async function getSavedPlaceIds(userId: string): Promise<Set<string>> {

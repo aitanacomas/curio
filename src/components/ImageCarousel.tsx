@@ -3,11 +3,12 @@ import { useState, useRef } from 'react';
 interface Props {
   images: string[];
   labels?: string[];
+  sublabels?: string[];
   scales?: number[];
   onClick?: () => void;
 }
 
-export default function ImageCarousel({ images, labels, scales, onClick }: Props) {
+export default function ImageCarousel({ images, labels, sublabels, scales, onClick }: Props) {
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -41,16 +42,29 @@ export default function ImageCarousel({ images, labels, scales, onClick }: Props
               src={src}
               alt=""
               draggable={false}
-              className="w-full aspect-[4/5] object-cover pointer-events-none"
-              style={scales?.[i] ? { transform: `scale(${scales[i]})`, transformOrigin: 'center' } : undefined}
+              className="w-full object-cover pointer-events-none"
+              style={{ aspectRatio: '3/4', ...(scales?.[i] ? { transform: `scale(${scales[i]})`, transformOrigin: 'center' } : {}) }}
             />
           </div>
         ))}
       </div>
 
-      {/* Bottom bar: dots left, label right, same row, never overlapping */}
-      <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+      {/* Editorial gradient + place name */}
+      {labels && labels[index] && (
+        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent pointer-events-none" />
+      )}
+
+      {/* Bottom bar: place name left, dots right */}
+      <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 flex items-end justify-between gap-3">
+        {labels && labels[index] ? (
+          <div className="min-w-0">
+            <p className="text-white font-semibold text-xs leading-tight truncate">{labels[index]}</p>
+            {sublabels && sublabels[index] && (
+              <p className="text-white/70 text-[10px] mt-0.5 truncate">{sublabels[index]}</p>
+            )}
+          </div>
+        ) : <span />}
+        <div className="flex items-center gap-1.5 flex-shrink-0 pb-0.5">
           {images.length > 1 && (
             images.length <= 5 ? (
               images.map((_, i) => (
@@ -69,14 +83,6 @@ export default function ImageCarousel({ images, labels, scales, onClick }: Props
             )
           )}
         </div>
-        {labels && labels[index] && (
-          <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1 min-w-0">
-            <svg width="8" height="10" viewBox="0 0 8 10" fill="white" className="opacity-80 flex-shrink-0">
-              <path d="M4 0C2.07 0 0.5 1.57 0.5 3.5c0 2.63 3.5 6.5 3.5 6.5s3.5-3.87 3.5-6.5C7.5 1.57 5.93 0 4 0zm0 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/>
-            </svg>
-            <span className="text-white text-[11px] font-semibold leading-none truncate">{labels[index]}</span>
-          </div>
-        )}
       </div>
     </div>
   );

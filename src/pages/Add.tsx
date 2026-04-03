@@ -532,9 +532,10 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
           const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
           const types: string[] = place.types ?? [];
           const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
-          const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
-          const city = find('postal_town') || find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1');
-          const country = find('country');
+          const findLong = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || '') : ''; };
+          const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality') || find('administrative_area_level_2');
+          const city = find('postal_town') || find('locality') || findLong('administrative_area_level_1');
+          const country = findLong('country') || find('country');
           const category = googleTypesToCategory(types);
           const lat = p.lat ?? (place.location?.latitude ?? null);
           const lng = p.lng ?? (place.location?.longitude ?? null);
