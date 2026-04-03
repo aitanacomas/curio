@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import UserProfile from './UserProfile';
 import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
 import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, type RealPost, type FollowProfile, type PostComment, type RealCollection, type Conversation } from '../lib/supabase';
 
@@ -71,6 +72,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [query, setQuery] = useState('');
   const [userResults, setUserResults] = useState<FollowProfile[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<FlatPlace | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -146,6 +148,10 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     }
   };
 
+  if (viewingUserId && appUser) {
+    return <UserProfile userId={viewingUserId} currentUserId={appUser.id} onBack={() => setViewingUserId(null)} onFollowChange={() => {}} onMessage={onOpenMessages} />;
+  }
+
   return (
     <div className="bg-white min-h-screen">
       {/* Header */}
@@ -204,7 +210,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
 
       {/* User search results */}
       {query.trim() && userResults.length > 0 && (
-        <div className="px-4 pt-3 pb-1 border-b border-gray-100">
+        <div className="px-4 pt-3 pb-4 border-b border-gray-100">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">People</p>
           <div className="space-y-3">
             {userResults.map(user => {
@@ -212,14 +218,16 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               const isOwnProfile = appUser?.id === user.id;
               return (
                 <div key={user.id} className="flex items-center gap-3">
-                  {user.avatarUrl
-                    ? <img src={user.avatarUrl} alt={user.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                    : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-gray-400 text-sm font-semibold">{user.name?.[0]?.toUpperCase()}</span></div>
-                  }
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
-                    <p className="text-xs text-gray-400 truncate">@{user.username}</p>
-                  </div>
+                  <button className="flex items-center gap-3 flex-1 min-w-0 text-left" onClick={() => setViewingUserId(user.id)}>
+                    {user.avatarUrl
+                      ? <img src={user.avatarUrl} alt={user.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-gray-400 text-sm font-semibold">{user.name?.[0]?.toUpperCase()}</span></div>
+                    }
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                      <p className="text-xs text-gray-400 truncate">@{user.username}</p>
+                    </div>
+                  </button>
                   {!isOwnProfile && appUser?.id && (
                     <button
                       onClick={() => toggleFollow(user.id)}
@@ -277,6 +285,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
           onToggleFollow={() => toggleFollow(selectedPlace.post.userId)}
           onClose={() => setSelectedPlace(null)}
           userId={appUser?.id}
+          onViewUser={(uid) => { setSelectedPlace(null); setViewingUserId(uid); }}
         />
       )}
     </div>
@@ -315,13 +324,14 @@ const modalCatEmoji: Record<string, string> = {
   sports: '🎾', wellness: '💆', street: '🏙️', event: '🎟️', food: '🍕',
 };
 
-function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, userId }: {
+function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, userId, onViewUser }: {
   place: FlatPlace;
   isFollowing: boolean;
   isOwnPost: boolean;
   onToggleFollow: () => void;
   onClose: () => void;
   userId?: string;
+  onViewUser?: (userId: string) => void;
 }) {
   const { post, indexInPost } = place;
   const [currentIndex, setCurrentIndex] = useState(indexInPost);
@@ -426,13 +436,16 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
           <div className="relative overflow-hidden rounded-t-[2rem]">
 
             {/* Profile pill — top left */}
-            <div className="absolute top-4 left-3 z-20 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-full pl-1 pr-3 py-1 pointer-events-none">
+            <button
+              onClick={() => onViewUser?.(post.userId)}
+              className="absolute top-4 left-3 z-20 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-80"
+            >
               {post.profile.avatarUrl
                 ? <img src={post.profile.avatarUrl} alt={post.profile.name} className="w-6 h-6 rounded-full object-cover object-top border border-white/30 flex-shrink-0" />
                 : <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"><span className="text-white text-[9px] font-bold">{initials}</span></div>
               }
               <span className="text-white text-xs font-semibold leading-none">{post.profile.name}</span>
-            </div>
+            </button>
             {/* Close button — top right */}
             <button
               onClick={onClose}

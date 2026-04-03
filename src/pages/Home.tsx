@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Heart, MessageCircle, Send, MapPin, ArrowLeft, Bookmark, BookmarkCheck, Map, X, Link, Copy, Mail, Check, Users, Plus, Search } from 'lucide-react';
 import type { Tab } from '../types/index';
 import FindPeople from './FindPeople';
+import UserProfile from './UserProfile';
 import { feedItems, users, places, collections } from '../data/mockData';
 import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
@@ -100,6 +101,7 @@ interface Props {
 }
 
 export default function Home({ showMessages = false, messagesTargetUserId, onMessagesClose, isNewUser, appUser, onNavigate }: Props) {
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [feed, setFeed] = useState(feedItems);
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Set<string>>(new Set(['place-28', 'place-29', 'place-30', 'place-31', 'place-32']));
@@ -419,6 +421,11 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
         onOpenMessages={() => setShowInbox(true)}
       />
     );
+  }
+
+  // ── User Profile ─────────────────────────────────────────────────
+  if (viewingUserId && appUser) {
+    return <UserProfile userId={viewingUserId} currentUserId={appUser.id} onBack={() => setViewingUserId(null)} onFollowChange={() => {}} onMessage={() => setShowInbox(true)} />;
   }
 
   // ── Inbox View ───────────────────────────────────────────────────
@@ -958,10 +965,13 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                   sublabels={post.places.map(p => [p.city, p.country].filter(Boolean).join(', '))}
                 />
                 {/* Profile overlay — top left */}
-                <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/25 backdrop-blur-md rounded-full pl-1 pr-3 py-1">
+                <button
+                  onClick={() => setViewingUserId(post.userId)}
+                  className="absolute top-3 left-3 flex items-center gap-2 bg-black/25 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-75"
+                >
                   <img src={avatarSrc} alt={post.profile.name} className="w-6 h-6 rounded-full object-cover object-top border border-white/40 flex-shrink-0" />
                   <span className="text-white text-xs font-semibold leading-none">{post.profile.name}</span>
-                </div>
+                </button>
                 {/* Time — top right */}
                 <span className="absolute top-4 right-4 text-white/60 text-[10px] font-medium">{timeAgo}</span>
               </div>
