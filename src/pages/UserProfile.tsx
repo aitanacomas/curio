@@ -429,7 +429,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
 
           {/* Caption + hashtags */}
           {(selectedPost.caption || selectedPost.hashtags.length > 0) && (
-            <div className="px-5 pb-5">
+            <div className="px-5 pt-4 pb-5">
               {selectedPost.caption && <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>}
               {selectedPost.hashtags.length > 0 && (() => {
                 const seen = new Set<string>();
@@ -504,10 +504,13 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           </div>
 
           {/* Comments */}
-          {postComments.length > 0 && (
-            <div className="px-5 pt-4 border-t border-gray-100">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-              <div className="space-y-3">
+          <div className="px-5 pt-5 border-t border-gray-100">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+            {postComments.length === 0 && !loadingComments && (
+              <p className="text-sm text-gray-400 text-center py-3">Be the first one to add a comment ✨</p>
+            )}
+            {postComments.length > 0 && (
+              <div className="space-y-3 mb-4">
                 {postComments.map(c => (
                   <div key={c.id} className="flex items-start gap-2.5">
                     {c.profile.avatarUrl
@@ -526,12 +529,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Comment input */}
-          <div className="px-5 pt-4">
-            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3">
+            )}
+            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
               <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
               <input
                 ref={postCommentInputRef}
@@ -564,7 +563,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           </div>
 
           {/* Date — very end of post */}
-          <p className="text-xs text-gray-400 px-5 pb-6 pt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          <p className="text-xs text-gray-400 px-5 pb-8 pt-4">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
 
         </div>
       </div>
