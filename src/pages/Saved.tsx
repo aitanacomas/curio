@@ -770,6 +770,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [colInviteSent, setColInviteSent] = useState<string[]>([]);
   const [colInvitedPeople, setColInvitedPeople] = useState<import('../lib/supabase').FollowProfile[]>([]);
   const [colCollaborators, setColCollaborators] = useState<CollectionCollaborator[]>([]);
+  const [realColCollaborators, setRealColCollaborators] = useState<CollectionCollaborator[]>([]);
   const [itemInvites, setItemInvites] = useState<ItemInvite[]>([]);
   const [newPlanDesc, setNewPlanDesc] = useState('');
   const [newPlanLocation, setNewPlanLocation] = useState('');
@@ -3135,6 +3136,17 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
             </p>
             {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+            {realColCollaborators.length > 0 && place.addedBy && (
+              <div className="flex items-center gap-1 mt-1.5">
+                {place.addedByAvatar
+                  ? <img src={place.addedByAvatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover flex-shrink-0" />
+                  : <div className="w-3.5 h-3.5 rounded-full bg-gray-300 flex items-center justify-center text-[7px] font-bold text-white flex-shrink-0">{(place.addedByName ?? '?')[0].toUpperCase()}</div>
+                }
+                <span className="text-[10px] text-gray-400">
+                  {place.addedBy === userId ? 'You' : (place.addedByName ?? 'Someone')} added this
+                </span>
+              </div>
+            )}
           </div>
           {userId && isOwn ? (
             /* Owner: show X to remove from collection */
@@ -3189,7 +3201,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
           <button
-            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); setRealColFilter('all'); setShowRealColMap(true); }}
+            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); setRealColFilter('all'); setShowRealColMap(true); setRealColCollaborators([]); }}
             className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
           >
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
@@ -4007,7 +4019,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Mine</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
               {dbCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
                   <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
                     {col.coverImageUrl ? (
                       <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
@@ -4034,7 +4046,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Subscribed</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
               {dbSubscribedCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
                   <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
                     {col.coverImageUrl ? (
                       <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
