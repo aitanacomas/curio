@@ -2613,7 +2613,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   </div>
                 )}
                 {/* Stats overlay */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3">
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3 pointer-events-none">
                   <div className="flex gap-6">
                     <div>
                       <p className="text-base font-black text-white">{countriesCount}</p>

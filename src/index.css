@@ -28,3 +28,9 @@ body {
 .map-drift {
   animation: mapDrift 22s ease-in-out infinite;
 }
+
+/* Ensure Leaflet zoom controls always appear above stat overlays */
+.leaflet-control-container {
+  position: relative;
+  z-index: 1000 !important;
+}
