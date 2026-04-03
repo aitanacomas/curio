@@ -459,25 +459,33 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               >
                 <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
               </button>
-              {/* Avatar + name — frosted glass pill, shows collaborators too */}
+              {/* Avatar + name — frosted glass pill, collaborators tappable */}
               {(() => {
                 const collabs = selectedRealPost.collaborators ?? [];
                 return (
-                  <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[65%] overflow-hidden">
-                    {/* Stacked avatars */}
+                  <div className="flex items-center gap-1.5 bg-black/35 backdrop-blur-md rounded-full px-2 py-1.5 w-fit max-w-[65%] overflow-hidden">
+                    {/* Owner avatar (own post — no navigation) */}
                     <div className="flex items-center flex-shrink-0">
                       {(avatarPreview ?? appUser?.avatar)
                         ? <img src={avatarPreview ?? appUser!.avatar!} alt={displayUser.name} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20" />
                         : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20"><span className="text-xs font-bold text-white">{displayUser.name[0]?.toUpperCase()}</span></div>
                       }
-                      {collabs.slice(0, 2).map(c => (
-                        c.avatarUrl
-                          ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="w-7 h-7 rounded-full object-cover -ml-2 ring-1 ring-white/20" />
-                          : <div key={c.id} className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center -ml-2 ring-1 ring-white/20"><span className="text-xs font-bold text-white">{c.name[0]?.toUpperCase()}</span></div>
-                      ))}
                     </div>
+                    {/* Collaborator avatars — each tappable */}
+                    {collabs.slice(0, 2).map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => { setSelectedRealPost(null); setViewingUserId(c.id); }}
+                        className="-ml-2 flex-shrink-0 active:opacity-75"
+                      >
+                        {c.avatarUrl
+                          ? <img src={c.avatarUrl} alt={c.name} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20" />
+                          : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20"><span className="text-xs font-bold text-white">{c.name[0]?.toUpperCase()}</span></div>
+                        }
+                      </button>
+                    ))}
                     {/* Name(s) */}
-                    <p className="text-white font-semibold text-sm leading-tight truncate">
+                    <p className="text-white font-semibold text-sm leading-tight truncate ml-1">
                       {collabs.length > 0
                         ? `${displayUser.username || displayUser.name} & ${collabs.map(c => c.username || c.name).join(', ')}`
                         : displayUser.username || displayUser.name}

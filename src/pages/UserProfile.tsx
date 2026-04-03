@@ -352,43 +352,46 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
     const likeCount = postLikeCounts[selectedPost.id] ?? 0;
     const allSaved = selectedPost.places.length > 0 && selectedPost.places.every(p => allSavedIds.has(p.id));
     return (
-      <div className="bg-white min-h-screen">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
-          <button onClick={() => { setSelectedPost(null); setShowPostMap(false); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
-            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
-          </button>
-          {profile?.avatarUrl ? (
-            <img src={profile.avatarUrl} alt={profile.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
-              <span className="text-xs font-bold text-slate-400">{initials}</span>
+      <div className="bg-white min-h-screen pb-24">
+
+        {/* ── Full-bleed photo with frosted glass controls ── */}
+        <div className="relative">
+          {images.length > 0
+            ? <ImageCarousel images={images} labels={labels} sublabels={selectedPost.places.map(pl => [pl.neighborhood, pl.city].filter(Boolean).join(', ') || pl.country)} />
+            : <div className="w-full bg-gray-100" style={{ aspectRatio: '3/4' }} />
+          }
+          {/* Top overlay: back | user pill | share */}
+          <div className="absolute top-0 left-0 right-0 px-4 pt-5 pb-8 bg-gradient-to-b from-black/55 via-black/10 to-transparent">
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => { setSelectedPost(null); setShowPostMap(false); }}
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
+              >
+                <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
+              </button>
+              <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[55%] overflow-hidden">
+                {profile?.avatarUrl
+                  ? <img src={profile.avatarUrl} alt={profile.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                  : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">{initials}</span></div>
+                }
+                <p className="text-white font-semibold text-sm leading-tight truncate">{profile?.username || profile?.name}</p>
+              </div>
+              <div className="flex-1" />
+              <button
+                onClick={() => setShowSaveAllPicker(true)}
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
+              >
+                <Send size={15} strokeWidth={1.5} className="text-white" />
+              </button>
             </div>
-          )}
-          <div className="flex-1 min-w-0 mr-3">
-            <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{profile?.name}</p>
-            {selectedPost.places.length > 0 && (
-              <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
-                <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                <span className="truncate">
-                  {selectedPost.locationLabel
-                    ? selectedPost.locationLabel
-                    : selectedPost.places.length === 1
-                      ? selectedPost.places[0].city || selectedPost.places[0].name.split(',')[0].trim()
-                      : `${selectedPost.places[0].city || selectedPost.places[0].name.split(',')[0].trim()} +${selectedPost.places.length - 1}`}
-                </span>
-              </p>
-            )}
           </div>
         </div>
 
-        {/* Carousel */}
-        {images.length > 0 && <ImageCarousel images={images} labels={labels} />}
-
-        {/* Actions + caption */}
-        <div className="px-4 pt-3 pb-4 border-b border-gray-100">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-4">
+        {/* ── Content ── */}
+        <div className="bg-white">
+          {/* Actions */}
+          <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
+            <div className="flex items-center gap-5">
               <button
                 className="flex items-center gap-1.5"
                 onClick={() => {
@@ -398,20 +401,20 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                   nowLiked ? unlikePost(currentUserId, selectedPost.id) : likePost(currentUserId, selectedPost.id);
                 }}
               >
-                <Heart size={22} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-700'} />
-                <span className="text-xs text-gray-500">{likeCount}</span>
+                <Heart size={22} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
+                <span className="text-sm font-medium text-gray-500">{likeCount}</span>
               </button>
               <button className="flex items-center gap-1.5" onClick={() => { setTimeout(() => postCommentInputRef.current?.focus(), 50); }}>
-                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
-                <span className="text-xs text-gray-500">{postComments.length}</span>
+                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
+                <span className="text-sm font-medium text-gray-500">{postComments.length}</span>
               </button>
-              <Send size={22} strokeWidth={1.5} className="text-gray-700" />
+              <button onClick={() => setShowSaveAllPicker(true)}>
+                <Send size={21} strokeWidth={1.5} className="text-gray-800" />
+              </button>
             </div>
             <button
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${allSaved ? 'bg-gray-100 text-gray-600' : 'bg-white border border-gray-300 text-gray-700'}`}
               onClick={async () => {
                 if (!allSaved) {
-                  // Save all places to All Saved immediately
                   for (const p of selectedPost.places) {
                     setAllSavedIds(prev => new Set(prev).add(p.id));
                     savePlace(currentUserId, p.id);
@@ -420,17 +423,24 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                 setShowSaveAllPicker(true);
               }}
             >
-              {allSaved && <Check size={13} strokeWidth={2} />}
-              {allSaved ? 'Saved' : 'Save all'}
+              {allSaved
+                ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
+                : <Bookmark size={22} strokeWidth={1.5} className="text-gray-700" />}
             </button>
           </div>
-          <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
-          {selectedPost.hashtags.length > 0 && (() => {
-            const seen = new Set<string>();
-            const unique = selectedPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
-            return <p className="text-xs text-orange-400 mt-1">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
-          })()}
-          <p className="text-xs text-gray-400 mt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+
+          {/* Caption + hashtags + date */}
+          {(selectedPost.caption || selectedPost.hashtags.length > 0) && (
+            <div className="px-5 pt-4 pb-5">
+              {selectedPost.caption && <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>}
+              {selectedPost.hashtags.length > 0 && (() => {
+                const seen = new Set<string>();
+                const unique = selectedPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+                return <p className="text-xs text-orange-400 mt-2">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
+              })()}
+              <p className="text-xs text-gray-400 mt-2">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+            </div>
+          )}
         </div>
 
         {/* Places + map */}

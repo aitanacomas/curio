@@ -707,49 +707,39 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
               >
                 <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
               </button>
-              <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[55%] overflow-hidden">
+              <button
+                onClick={() => { setSelectedPost(null); setViewingUserId(selectedPost.userId); }}
+                className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[55%] overflow-hidden active:opacity-75"
+              >
                 <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full object-cover object-top flex-shrink-0" />
                 <p className="text-white font-semibold text-sm leading-tight truncate">{user.name}</p>
-              </div>
-              <div className="flex-1" />
-              <button
-                onClick={() => setShareTarget({ type: 'post', label: selectedPost.caption.slice(0, 50) + '…', image: selectedPost.images[0] })}
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
-              >
-                <Send size={15} strokeWidth={1.5} className="text-white" />
               </button>
             </div>
           </div>
         </div>
 
-          {/* Like / Comment / Save */}
-          <div className="flex items-center justify-between px-4 pt-3 pb-2">
-            <div className="flex items-center gap-4">
+          {/* Like / Comment / Share / Save */}
+          <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
+            <div className="flex items-center gap-5">
               <button
                 onClick={() => toggleLike(selectedPost.id)}
                 className="flex items-center gap-1.5"
               >
-                <Heart
-                  size={22}
-                  strokeWidth={1.5}
-                  className={selectedPost.liked ? 'fill-gray-900 text-gray-900' : 'text-gray-700'}
-                />
-                <span className="text-xs text-gray-500">{selectedPost.likes.toLocaleString()}</span>
+                <Heart size={22} strokeWidth={1.5} className={selectedPost.liked ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
+                <span className="text-sm font-medium text-gray-500">{selectedPost.likes.toLocaleString()}</span>
               </button>
-              <div className="flex items-center gap-1.5 text-gray-700">
-                <MessageCircle size={22} strokeWidth={1.5} />
-                <span className="text-xs text-gray-500">{selectedPost.comments}</span>
-              </div>
+              <button className="flex items-center gap-1.5">
+                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
+                <span className="text-sm font-medium text-gray-500">{selectedPost.comments}</span>
+              </button>
+              <button onClick={() => setShareTarget({ type: 'post', label: selectedPost.caption.slice(0, 50) + '…', image: selectedPost.images[0] })}>
+                <Send size={21} strokeWidth={1.5} className="text-gray-800" />
+              </button>
             </div>
-            <button
-              onClick={() => selectedPost.saved ? toggleSave(selectedPost.id) : setSaveTarget({ type: 'post', id: selectedPost.id })}
-              className={`px-5 py-1.5 rounded-full border text-sm font-semibold transition-colors ${
-                selectedPost.saved
-                  ? 'bg-gray-900 border-gray-900 text-white'
-                  : 'border-gray-900 text-gray-900 bg-white'
-              }`}
-            >
-              {selectedPost.saved ? 'Saved' : 'Save'}
+            <button onClick={() => selectedPost.saved ? toggleSave(selectedPost.id) : setSaveTarget({ type: 'post', id: selectedPost.id })}>
+              {selectedPost.saved
+                ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
+                : <Bookmark size={22} strokeWidth={1.5} className="text-gray-700" />}
             </button>
           </div>
 
