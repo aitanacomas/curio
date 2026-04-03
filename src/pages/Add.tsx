@@ -619,53 +619,46 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
     return (
       <div className="min-h-screen bg-white flex flex-col">
         <div className="flex items-center px-4 pt-5 pb-3">
-          <button onClick={() => onComplete({ visibility, placesCount: 0 })}>
-            <ArrowLeft className="w-6 h-6 text-slate-700" />
+          <button onClick={() => onComplete({ visibility, placesCount: 0 })} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
           </button>
         </div>
-        <div className="px-4 mb-6">
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight">New post</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Upload photos and tag each place</p>
+
+        <div className="px-5 mb-8">
+          <h1 className="text-3xl font-black text-gray-900 tracking-tight">New post</h1>
+          <p className="text-sm text-gray-400 mt-1">Share the places you've been</p>
         </div>
 
-        <div className="px-4 flex-1 flex flex-col">
-          <label
-            className="relative flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50 active:bg-gray-100 transition-colors min-h-80 cursor-pointer overflow-hidden"
-          >
+        <div className="px-5 flex-1 flex flex-col gap-4">
+          {/* Upload zone */}
+          <label className="relative flex flex-col items-center justify-center gap-6 rounded-3xl bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer overflow-hidden py-14">
             <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-            <div className="w-20 h-20 rounded-full bg-white shadow-sm flex items-center justify-center">
-              <Camera size={30} strokeWidth={1.5} className="text-gray-400" />
+            <div className="w-16 h-16 rounded-2xl bg-white shadow-sm flex items-center justify-center">
+              <Camera size={26} strokeWidth={1.5} className="text-gray-500" />
             </div>
             <div className="text-center px-8">
-              <p className="font-bold text-gray-700 text-base">Select your photos</p>
-              <p className="text-sm text-gray-400 mt-1.5 leading-relaxed">
-                Upload your photos, then search to tag each place
+              <p className="font-bold text-gray-900 text-base">Choose your photos</p>
+              <p className="text-sm text-gray-400 mt-1 leading-relaxed">
+                Select one or more photos from your library
               </p>
             </div>
-            <span className="text-xs font-semibold text-gray-400 bg-gray-100 px-4 py-2 rounded-full">
-              Choose photos
-            </span>
+            <div className="bg-gray-900 text-white text-sm font-semibold px-6 py-2.5 rounded-full pointer-events-none">
+              Browse library
+            </div>
           </label>
 
-          <div className="pb-12 pt-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex-1 h-px bg-gray-100" />
-              <span className="text-xs text-gray-300 font-medium">How it works</span>
-              <div className="flex-1 h-px bg-gray-100" />
-            </div>
-            <div className="space-y-3">
-              {[
-                { icon: '📸', text: 'Upload one or more photos of the places you visited' },
-                { icon: '🔍', text: 'Search to tag the place name and city' },
-                { icon: '↕️', text: 'Drag to reorder · tap photo to crop or rotate' },
-                { icon: '✏️', text: 'Write one caption for the whole post' },
-              ].map(item => (
-                <div key={item.text} className="flex items-center gap-3">
-                  <span className="text-base">{item.icon}</span>
-                  <p className="text-sm text-gray-500">{item.text}</p>
-                </div>
-              ))}
-            </div>
+          {/* Quick tips */}
+          <div className="rounded-2xl bg-gray-50 px-4 py-4 space-y-3">
+            {[
+              { dot: true, text: 'Tag the place name and city for each photo' },
+              { dot: true, text: 'Drag photos to reorder before publishing' },
+              { dot: true, text: 'Add a caption to tell the story' },
+            ].map(item => (
+              <div key={item.text} className="flex items-center gap-2.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-gray-300 flex-shrink-0" />
+                <p className="text-sm text-gray-500">{item.text}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>
