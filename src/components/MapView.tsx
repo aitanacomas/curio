@@ -30,7 +30,9 @@ interface MapPlace {
 function FitBounds({ places }: { places: MapPlace[] }) {
   const map = useMap();
   useEffect(() => {
-    if (places.length > 1) {
+    if (places.length === 1) {
+      map.setView([places[0].lat, places[0].lng], 13, { animate: false });
+    } else if (places.length > 1) {
       const bounds = L.latLngBounds(places.map(p => [p.lat, p.lng]));
       map.fitBounds(bounds, { padding: [32, 32] });
     }
