@@ -343,42 +343,48 @@ const mockTrips: Trip[] = [
 const savedPlaceIds = ['place-28', 'place-29', 'place-30', 'place-31', 'place-32', 'place-33'];
 
 const placeCategories: { id: Category | 'all'; label: string; emoji: string }[] = [
-  { id: 'all', label: 'All', emoji: '✨' },
-  { id: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
-  { id: 'cafe', label: 'Cafe', emoji: '☕' },
-  { id: 'bar', label: 'Bar', emoji: '🍸' },
-  { id: 'food', label: 'Food', emoji: '🍕' },
-  { id: 'hotel', label: 'Stay', emoji: '🏨' },
-  { id: 'attraction', label: 'Attraction', emoji: '🏛️' },
-  { id: 'nature', label: 'Nature', emoji: '🌿' },
-  { id: 'beach', label: 'Beach', emoji: '🏖️' },
-  { id: 'shop', label: 'Shop', emoji: '🛍️' },
-  { id: 'experience', label: 'Experience', emoji: '🗺️' },
-  { id: 'sports', label: 'Sports', emoji: '🎾' },
-  { id: 'wellness', label: 'Wellness', emoji: '💆' },
-  { id: 'street', label: 'Street', emoji: '🏙️' },
-  { id: 'event', label: 'Event', emoji: '🎟️' },
-  { id: 'flight', label: 'Flight', emoji: '✈️' },
-  { id: 'transport', label: 'Transport', emoji: '🚗' },
+  { id: 'all',           label: 'All',           emoji: '✨' },
+  { id: 'restaurant',    label: 'Restaurant',    emoji: '🍽️' },
+  { id: 'cafe',          label: 'Cafe',          emoji: '☕' },
+  { id: 'treats',        label: 'Treats',        emoji: '🍰' },
+  { id: 'bar',           label: 'Bar',           emoji: '🍸' },
+  { id: 'nightlife',     label: 'Nightlife',     emoji: '🎵' },
+  { id: 'food',          label: 'Food',          emoji: '🍕' },
+  { id: 'hotel',         label: 'Stay',          emoji: '🏨' },
+  { id: 'landmark',      label: 'Landmark',      emoji: '🏛️' },
+  { id: 'art',           label: 'Art',           emoji: '🎨' },
+  { id: 'nature',        label: 'Nature',        emoji: '🌿' },
+  { id: 'beach',         label: 'Beach',         emoji: '🏖️' },
+  { id: 'shop',          label: 'Shop',          emoji: '🛍️' },
+  { id: 'experience',    label: 'Experience',    emoji: '🎡' },
+  { id: 'neighbourhood', label: 'Neighbourhood', emoji: '🏘️' },
+  { id: 'sports',        label: 'Sports',        emoji: '🎾' },
+  { id: 'wellness',      label: 'Wellness',      emoji: '💆' },
+  { id: 'event',         label: 'Event',         emoji: '🎟️' },
+  { id: 'flight',        label: 'Flight',        emoji: '✈️' },
+  { id: 'transport',     label: 'Transport',     emoji: '🚗' },
 ];
 
 const categoryEmoji: Record<string, string> = {
-  restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
-  hotel: '🏨', stay: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
-  shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
-  street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
+  restaurant: '🍽️', cafe: '☕', treats: '🍰', bar: '🍸', nightlife: '🎵', food: '🍕',
+  hotel: '🏨', stay: '🏨', landmark: '🏛️', attraction: '🏛️', art: '🎨',
+  nature: '🌿', beach: '🏖️', shop: '🛍️', experience: '🎡',
+  neighbourhood: '🏘️', street: '🏙️', sports: '🎾', wellness: '💆',
+  event: '🎟️', flight: '✈️', transport: '🚗',
   // capitalised fallbacks
-  Restaurant: '🍽️', Cafe: '☕', Bar: '🍸', Food: '🍕',
-  Hotel: '🏨', Attraction: '🏛️', Nature: '🌿', Beach: '🏖️',
-  Shop: '🛍️', Experience: '🗺️', Sports: '🎾', Wellness: '💆',
-  Street: '🏙️', Event: '🎟️', Flight: '✈️', Transport: '🚗',
+  Restaurant: '🍽️', Cafe: '☕', Treats: '🍰', Bar: '🍸', Nightlife: '🎵', Food: '🍕',
+  Hotel: '🏨', Landmark: '🏛️', Attraction: '🏛️', Art: '🎨',
+  Nature: '🌿', Beach: '🏖️', Shop: '🛍️', Experience: '🎡',
+  Neighbourhood: '🏘️', Street: '🏙️', Sports: '🎾', Wellness: '💆',
+  Event: '🎟️', Flight: '✈️', Transport: '🚗',
 };
 
 const categoryDisplayName: Record<string, string> = {
-  restaurant: 'Restaurant', cafe: 'Cafe', bar: 'Bar', food: 'Food',
-  hotel: 'Stay', attraction: 'Attraction', nature: 'Nature', beach: 'Beach',
-  shop: 'Shop', experience: 'Experience', sports: 'Sports', wellness: 'Wellness',
-  street: 'Street', event: 'Event', flight: 'Flight', transport: 'Transport',
+  restaurant: 'Restaurant', cafe: 'Cafe', treats: 'Treats', bar: 'Bar', nightlife: 'Nightlife', food: 'Food',
+  hotel: 'Stay', landmark: 'Landmark', attraction: 'Landmark', art: 'Art',
+  nature: 'Nature', beach: 'Beach', shop: 'Shop', experience: 'Experience',
+  neighbourhood: 'Neighbourhood', street: 'Neighbourhood', sports: 'Sports', wellness: 'Wellness',
+  event: 'Event', flight: 'Flight', transport: 'Transport',
 };
 
 // Thumbnail with graceful fallback when image URL is broken/expired
@@ -684,6 +690,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [selectedSavedPost, setSelectedSavedPost] = useState<RealPost | null>(null);
   const [showMap, setShowMap] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<'brainstorm' | 'itinerary'>('brainstorm');
+  const [brainstormCategoryFilter, setBrainstormCategoryFilter] = useState<string>('all');
   const [mapCoords, setMapCoords] = useState<Record<string, { lat: number; lng: number }>>({});
   const [mapLoading, setMapLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -1591,13 +1598,14 @@ Email: ${bookingEmailText.slice(0, 3000)}` }] }],
     setGenerateLoading(true);
     setGenerateError('');
 
-    const placesToUse = realSavedPlaces.filter(p => generateSelectedIds.has(p.id));
+    const allTripItems = selectedTrip.days.flatMap(d => d.items);
+    const placesToUse = allTripItems.filter(p => generateSelectedIds.has(p.id));
     const numDays = countDaysFromDates(selectedTrip.dates) || 3;
 
     const prompt = `You are a travel itinerary planner. Create a day-by-day itinerary for a trip to ${selectedTrip.destination || selectedTrip.country} (${selectedTrip.dates || `${numDays} days`}).
 
 The user has saved these places they want to visit:
-${placesToUse.map((p, i) => `${i + 1}. ${p.name} — ${p.category} — ${[p.neighborhood, p.city].filter(Boolean).join(', ')}`).join('\n')}
+${placesToUse.map((p, i) => `${i + 1}. ${p.name} — ${p.category} — ${[p.neighborhood, p.location].filter(Boolean).join(', ')}`).join('\n')}
 
 Rules:
 - Distribute places across ${numDays} day(s) as evenly as possible
@@ -1639,8 +1647,8 @@ Return ONLY valid JSON, no markdown, no explanation:
       if (!jsonMatch) throw new Error('No JSON in response');
       const parsed = JSON.parse(jsonMatch[0]) as { days: { label: string; places: { name: string; timeLabel: string; notes: string }[] }[] };
 
-      // Build a lookup from name → saved place
-      const placeByName: Record<string, typeof realSavedPlaces[0]> = {};
+      // Build a lookup from name → trip item
+      const placeByName: Record<string, TripItem> = {};
       for (const p of placesToUse) placeByName[p.name.toLowerCase()] = p;
 
       // Create plan days + items, build local Trip update in parallel
@@ -1656,13 +1664,13 @@ Return ONLY valid JSON, no markdown, no explanation:
           const dbItem = await createPlanItem(selectedTrip.id, newDay.id, {
             name: p.name,
             category: saved?.category ?? 'experience',
-            image_url: saved?.photoUrl ?? '',
+            image_url: saved?.image ?? '',
             time_label: p.timeLabel,
             time_end: '',
             notes: p.notes,
-            address: '',
+            address: saved?.address ?? '',
             neighborhood: saved?.neighborhood ?? '',
-            location: saved?.city ?? '',
+            location: saved?.location ?? '',
             status: 'none',
             check_in: '',
             check_out: '',
@@ -2124,6 +2132,9 @@ Return ONLY valid JSON, no markdown, no explanation:
     }));
     const allItems = sortedDays.flatMap(d => d.items);
     const allItemsWithDayId = sortedDays.flatMap(d => d.items.map(i => ({ ...i, _dayId: d.id ?? null })));
+    const filteredItemsWithDayId = brainstormCategoryFilter === 'all'
+      ? allItemsWithDayId
+      : allItemsWithDayId.filter(i => i.category === brainstormCategoryFilter);
     const hasDates = !!selectedTrip.dates && selectedTrip.dates.trim().length > 0;
     const isBrainstorm = planViewMode === 'brainstorm';
     const statusConfig: Record<Trip['status'], { label: string; color: string }> = {
@@ -2300,7 +2311,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               </button>
               <p className="text-xs font-bold text-gray-900 flex items-center gap-1.5">🗓 Your itinerary</p>
               <button
-                onClick={() => { setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id))); setShowGenerateSheet(true); }}
+                onClick={() => { setGenerateSelectedIds(new Set(selectedTrip.days.flatMap(d => d.items).map(i => i.id))); setShowGenerateSheet(true); }}
                 className="text-xs text-gray-400 font-medium"
               >
                 Regenerate
@@ -2431,8 +2442,25 @@ Return ONLY valid JSON, no markdown, no explanation:
                 </div>
               )}
 
+              {/* Category filter */}
+              {allItemsWithDayId.length > 0 && (
+                <div className="flex gap-1.5 overflow-x-auto pb-1 mb-3" style={{ scrollbarWidth: 'none' }}>
+                  {placeCategories.filter(c => c.id === 'all' || allItemsWithDayId.some(i => i.category === c.id)).map(cat => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setBrainstormCategoryFilter(cat.id)}
+                      className={`flex-shrink-0 flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                        brainstormCategoryFilter === cat.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      <span>{cat.emoji}</span><span>{cat.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Flat idea list */}
-              {allItemsWithDayId.length === 0 ? (
+              {filteredItemsWithDayId.length === 0 && allItemsWithDayId.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <p className="text-4xl mb-3">✨</p>
                   <p className="text-base font-bold text-gray-900 mb-1">Start dreaming</p>
@@ -2446,7 +2474,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {allItemsWithDayId.map(item => {
+                  {filteredItemsWithDayId.map(item => {
                     const isBooked = item.status === 'booked' || item.booked;
                     const isPending = item.status === 'pending';
                     const isWishlist = !isBooked && !isPending;
@@ -2470,6 +2498,19 @@ Return ONLY valid JSON, no markdown, no explanation:
                             {isBooked && <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">✓ Booked</span>}
                             {isPending && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
                             {isWishlist && <span className="text-[10px] text-gray-300 font-medium">Wishlist</span>}
+                            <button
+                              onClick={async e => {
+                                e.stopPropagation();
+                                if (userId) await deletePlanItem(item.id);
+                                const updatedDays = selectedTrip.days.map(d => ({ ...d, items: d.items.filter(i => i.id !== item.id) }));
+                                const updated = { ...selectedTrip, days: updatedDays };
+                                setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+                                setSelectedTrip(updated);
+                              }}
+                              className="text-gray-200 hover:text-red-400 transition-colors mt-0.5"
+                            >
+                              <Trash2 size={13} strokeWidth={1.5} />
+                            </button>
                           </div>
                         </div>
                         {(selectedTrip.collaborators?.length ?? 0) > 0 && item.addedBy && (
@@ -2495,7 +2536,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                     </button>
                     {!aiGeneratedPlanIds.has(selectedTrip.id) && (
                       <button
-                        onClick={() => { setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id))); setShowGenerateSheet(true); }}
+                        onClick={() => { setGenerateSelectedIds(new Set(selectedTrip.days.flatMap(d => d.items).map(i => i.id))); setShowGenerateSheet(true); }}
                         className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-gray-900 text-white text-xs font-semibold"
                       >
                         🗓 Generate your {countDaysFromDates(selectedTrip.dates) > 0 ? `${countDaysFromDates(selectedTrip.dates)}-day ` : ''}itinerary
@@ -2552,10 +2593,10 @@ Return ONLY valid JSON, no markdown, no explanation:
                   <p className="text-4xl mb-3">🗓</p>
                   <p className="text-base font-bold text-gray-900 mb-1">Nothing added yet</p>
                   <p className="text-xs text-gray-400 mb-6">Set up your days or let AI build your itinerary</p>
-                  {realSavedPlaces.length > 0 && (
+                  {selectedTrip.days.some(d => d.items.length > 0) && (
                     <button
                       onClick={() => {
-                        setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id)));
+                        setGenerateSelectedIds(new Set(selectedTrip.days.flatMap(d => d.items).map(i => i.id)));
                         setShowGenerateSheet(true);
                       }}
                       className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-xs font-semibold mb-2"
@@ -3036,55 +3077,64 @@ Return ONLY valid JSON, no markdown, no explanation:
                 </div>
 
                 {/* Select all toggle */}
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-bold text-gray-500">{generateSelectedIds.size} of {realSavedPlaces.length} selected</p>
-                  <button
-                    onClick={() => {
-                      if (generateSelectedIds.size === realSavedPlaces.length) {
-                        setGenerateSelectedIds(new Set());
-                      } else {
-                        setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id)));
-                      }
-                    }}
-                    className="text-xs font-semibold text-gray-900"
-                  >
-                    {generateSelectedIds.size === realSavedPlaces.length ? 'Deselect all' : 'Select all'}
-                  </button>
-                </div>
+                {(() => {
+                  const allTripItems = selectedTrip?.days.flatMap(d => d.items) ?? [];
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-xs font-bold text-gray-500">{generateSelectedIds.size} of {allTripItems.length} selected</p>
+                        <button
+                          onClick={() => {
+                            if (generateSelectedIds.size === allTripItems.length) {
+                              setGenerateSelectedIds(new Set());
+                            } else {
+                              setGenerateSelectedIds(new Set(allTripItems.map(p => p.id)));
+                            }
+                          }}
+                          className="text-xs font-semibold text-gray-900"
+                        >
+                          {generateSelectedIds.size === allTripItems.length ? 'Deselect all' : 'Select all'}
+                        </button>
+                      </div>
 
-                {/* Place list */}
-                <div className="space-y-2 mb-5">
-                  {realSavedPlaces.map(place => {
-                    const selected = generateSelectedIds.has(place.id);
-                    return (
-                      <button
-                        key={place.id}
-                        onClick={() => {
-                          setGenerateSelectedIds(prev => {
-                            const next = new Set(prev);
-                            if (next.has(place.id)) next.delete(place.id); else next.add(place.id);
-                            return next;
-                          });
-                        }}
-                        className={`w-full flex items-center gap-3 p-3 rounded-2xl border transition-colors text-left ${selected ? 'border-gray-900 bg-gray-50' : 'border-gray-100 bg-white'}`}
-                      >
-                        <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100">
-                          {place.photoUrl
-                            ? <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
-                            : <div className="w-full h-full flex items-center justify-center text-lg">{categoryEmoji[place.category] ?? '📍'}</div>
-                          }
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-                          <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(' · ')}</p>
-                        </div>
-                        <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${selected ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
-                          {selected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                      {/* Place list */}
+                      <div className="space-y-2 mb-5">
+                        {allTripItems.length === 0 ? (
+                          <p className="text-xs text-gray-400 text-center py-4">Add places to your brainstorm first</p>
+                        ) : allTripItems.map(place => {
+                          const selected = generateSelectedIds.has(place.id);
+                          return (
+                            <button
+                              key={place.id}
+                              onClick={() => {
+                                setGenerateSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(place.id)) next.delete(place.id); else next.add(place.id);
+                                  return next;
+                                });
+                              }}
+                              className={`w-full flex items-center gap-3 p-3 rounded-2xl border transition-colors text-left ${selected ? 'border-gray-900 bg-gray-50' : 'border-gray-100 bg-white'}`}
+                            >
+                              <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100">
+                                {place.image
+                                  ? <img src={place.image} alt={place.name} className="w-full h-full object-cover" />
+                                  : <div className="w-full h-full flex items-center justify-center text-lg">{categoryEmoji[place.category] ?? '📍'}</div>
+                                }
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                                <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.location].filter(Boolean).join(' · ')}</p>
+                              </div>
+                              <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${selected ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                                {selected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {generateError && (
                   <p className="text-xs text-red-500 text-center mb-3">{generateError}</p>
@@ -3668,29 +3718,12 @@ Return ONLY valid JSON, no markdown, no explanation:
                     Type <span className="font-normal">(optional)</span>
                   </p>
                   <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-                    {[
-                      { key: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
-                      { key: 'cafe', label: 'Cafe', emoji: '☕' },
-                      { key: 'bar', label: 'Bar', emoji: '🍸' },
-                      { key: 'food', label: 'Food', emoji: '🍕' },
-                      { key: 'hotel', label: 'Stay', emoji: '🏨' },
-                      { key: 'attraction', label: 'Attraction', emoji: '🏛️' },
-                      { key: 'nature', label: 'Nature', emoji: '🌿' },
-                      { key: 'beach', label: 'Beach', emoji: '🏖️' },
-                      { key: 'shop', label: 'Shop', emoji: '🛍️' },
-                      { key: 'experience', label: 'Experience', emoji: '🗺️' },
-                      { key: 'sports', label: 'Sports', emoji: '🎾' },
-                      { key: 'wellness', label: 'Wellness', emoji: '💆' },
-                      { key: 'street', label: 'Street', emoji: '🏙️' },
-                      { key: 'event', label: 'Event', emoji: '🎟️' },
-                      { key: 'flight', label: 'Flight', emoji: '✈️' },
-                      { key: 'transport', label: 'Transport', emoji: '🚗' },
-                    ].map(cat => (
+                    {placeCategories.filter(c => c.id !== 'all').map(cat => (
                       <button
-                        key={cat.key}
-                        onClick={() => setAddPlaceCategory(prev => prev === cat.key ? '' : cat.key)}
+                        key={cat.id}
+                        onClick={() => setAddPlaceCategory(prev => prev === cat.id ? '' : cat.id)}
                         className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                          addPlaceCategory === cat.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
+                          addPlaceCategory === cat.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
                         }`}
                       >
                         <span>{cat.emoji}</span><span>{cat.label}</span>
