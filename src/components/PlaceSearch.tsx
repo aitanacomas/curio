@@ -14,6 +14,9 @@ export interface PlaceResult {
   country: string;
   lat?: number;
   lng?: number;
+  address?: string;
+  photo?: string;
+  placeId?: string;
 }
 
 interface Props {
@@ -55,19 +58,25 @@ export default function PlaceSearch({ onSelect, placeholder = 'Search for this p
     setQuery(text.split(',')[0].trim());
     setSuggestions([]);
     try {
-      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+      // Use searchText POST (works from browser in all environments) instead of places/{id} GET
+      // which is blocked by HTTP referrer restrictions on the API key
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-          'X-Goog-FieldMask': 'displayName,types,addressComponents,location',
-          'X-Goog-LanguageCode': 'en',
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.types,places.addressComponents,places.location,places.formattedAddress',
         },
+        body: JSON.stringify({ textQuery: text, languageCode: 'en' }),
       });
-      const place = await res.json();
+      const data = await res.json();
+      // Prefer the place matching our placeId, fall back to first result
+      const place = data.places?.find((p: any) => p.id === placeId) ?? data.places?.[0];
+      if (!place) throw new Error('no result');
       const name = shortName(place.displayName?.text ?? text);
       const types: string[] = place.types ?? [];
       const category = googleTypesToCategory(types);
       const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
-      // longText is preferred; fall back to shortText if longText is missing
       const val = (comp: typeof comps[0]) => comp.longText || comp.shortText || '';
       const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? val(c) : ''; };
       const neighborhood =
@@ -75,7 +84,6 @@ export default function PlaceSearch({ onSelect, placeholder = 'Search for this p
         find('sublocality_level_2') ||
         find('neighborhood') ||
         find('sublocality');
-      // For cities like Mexico City that have no 'locality', fall back through levels
       const city =
         find('postal_town') ||
         find('locality') ||
@@ -84,7 +92,8 @@ export default function PlaceSearch({ onSelect, placeholder = 'Search for this p
       const country = find('country');
       const lat: number | undefined = place.location?.latitude;
       const lng: number | undefined = place.location?.longitude;
-      onSelect({ name, category, neighborhood, city, country, lat, lng });
+      const address: string | undefined = place.formattedAddress;
+      onSelect({ name, category, neighborhood, city, country, lat, lng, address, placeId: place.id ?? placeId });
     } catch {
       const parts = text.split(',').map((s: string) => s.trim()).filter(Boolean);
       onSelect({

@@ -2,9 +2,10 @@ import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal } from 'lucide-react';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles } from 'lucide-react';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY as string;
 
 function LocationSearch({ value, onChange, onCoverImage }: { value: string; onChange: (val: string) => void; onCoverImage?: (url: string) => void }) {
   const [suggestions, setSuggestions] = useState<{ placeId: string; text: string }[]>([]);
@@ -168,9 +169,10 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
-import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite } from '../lib/supabase';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
 import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, type RealPostPlace, type RealPost, type CollectionCollaborator } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
+import PlaceSearch from '../components/PlaceSearch';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -191,6 +193,8 @@ interface TripItem {
   checkIn?: string;
   checkOut?: string;
   booked?: boolean;
+  lat?: number | null;
+  lng?: number | null;
   addedBy?: string | null;
   addedByName?: string | null;
   addedByAvatar?: string | null;
@@ -341,7 +345,7 @@ const savedPlaceIds = ['place-28', 'place-29', 'place-30', 'place-31', 'place-32
 const placeCategories: { id: Category | 'all'; label: string; emoji: string }[] = [
   { id: 'all', label: 'All', emoji: '✨' },
   { id: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
-  { id: 'cafe', label: 'Café', emoji: '☕' },
+  { id: 'cafe', label: 'Cafe', emoji: '☕' },
   { id: 'bar', label: 'Bar', emoji: '🍸' },
   { id: 'food', label: 'Food', emoji: '🍕' },
   { id: 'hotel', label: 'Stay', emoji: '🏨' },
@@ -371,7 +375,7 @@ const categoryEmoji: Record<string, string> = {
 };
 
 const categoryDisplayName: Record<string, string> = {
-  restaurant: 'Restaurant', cafe: 'Café', bar: 'Bar', food: 'Food',
+  restaurant: 'Restaurant', cafe: 'Cafe', bar: 'Bar', food: 'Food',
   hotel: 'Stay', attraction: 'Attraction', nature: 'Nature', beach: 'Beach',
   shop: 'Shop', experience: 'Experience', sports: 'Sports', wellness: 'Wellness',
   street: 'Street', event: 'Event', flight: 'Flight', transport: 'Transport',
@@ -729,6 +733,10 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [addPlaceAddress, setAddPlaceAddress] = useState('');
   const [addPlaceMapsNote, setAddPlaceMapsNote] = useState('');
   const [addPlaceNeighborhood, setAddPlaceNeighborhood] = useState('');
+  const [addPlaceCity, setAddPlaceCity] = useState('');
+  const [addPlaceCountry, setAddPlaceCountry] = useState('');
+  const [addPlaceLat, setAddPlaceLat] = useState<number | null>(null);
+  const [addPlaceLng, setAddPlaceLng] = useState<number | null>(null);
   const addPlaceImageRef = useRef<HTMLInputElement>(null);
   const editItemImageRef = useRef<HTMLInputElement>(null);
   const [showItemDetail, setShowItemDetail] = useState(false);
@@ -737,8 +745,36 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [showEditItem, setShowEditItem] = useState(false);
   const [editItemUploading, setEditItemUploading] = useState(false);
   const [addPlaceUploading, setAddPlaceUploading] = useState(false);
-  const [addPlaceSource, setAddPlaceSource] = useState<'google' | 'saved'>('google');
+  const [addPlaceSource, setAddPlaceSource] = useState<'google' | 'saved' | 'booking'>('google');
   const [addPlaceSavedSearch, setAddPlaceSavedSearch] = useState('');
+  const [addPlaceSavedCountry, setAddPlaceSavedCountry] = useState('');
+  const [addPlaceSavedCategory, setAddPlaceSavedCategory] = useState('');
+  // Bookings
+  const [planBookings, setPlanBookings] = useState<PlanBooking[]>([]);
+  const [showAddBooking, setShowAddBooking] = useState(false);
+  const [bookingType, setBookingType] = useState<BookingType>('flight');
+  const [bookingImportMode, setBookingImportMode] = useState(false);
+  const [bookingEmailText, setBookingEmailText] = useState('');
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingForm, setBookingForm] = useState<Partial<PlanBooking>>({});
+  const [showReturnFlight, setShowReturnFlight] = useState(false);
+  const [returnFlightForm, setReturnFlightForm] = useState<{ flightNumber: string; departureTime: string; arrivalTime: string }>({ flightNumber: '', departureTime: '', arrivalTime: '' });
+  const [bookingsExpanded, setBookingsExpanded] = useState(true);
+  // AI itinerary generation
+  const [showGenerateSheet, setShowGenerateSheet] = useState(false);
+  const [generateSelectedIds, setGenerateSelectedIds] = useState<Set<string>>(new Set());
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState('');
+  // Track which plans have had AI itineraries generated this session
+  const [aiGeneratedPlanIds, setAiGeneratedPlanIds] = useState<Set<string>>(new Set());
+  // AI Ask for ideas
+  const [showAskAISheet, setShowAskAISheet] = useState(false);
+  const [askAIPrompt, setAskAIPrompt] = useState('');
+  const [askAILoading, setAskAILoading] = useState(false);
+  const [askAISuggestions, setAskAISuggestions] = useState<{ name: string; category: string; neighborhood: string; reason: string }[]>([]);
+  const [askAIError, setAskAIError] = useState('');
+  const [addedAISuggestions, setAddedAISuggestions] = useState<Set<number>>(new Set());
+  const [addingAISuggestion, setAddingAISuggestion] = useState<number | null>(null);
   const [editItem, setEditItem] = useState<TripItem | null>(null);
   const [showDuplicatePicker, setShowDuplicatePicker] = useState(false);
   const [moveToDay, setMoveToDay] = useState<string | null>(null); // target day id when moving item
@@ -1033,14 +1069,20 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     setAddPlaceTimeEnd('');
     setAddPlaceAddress('');
     setAddPlaceNeighborhood('');
+    setAddPlaceCity('');
+    setAddPlaceCountry('');
     setAddPlaceMapsNote('');
+    setAddPlaceLat(null);
+    setAddPlaceLng(null);
     setAddPlaceFetchingDetails(false);
     setAddPlaceSource('google');
     setAddPlaceSavedSearch('');
+    setAddPlaceSavedCountry('');
+    setAddPlaceSavedCategory('');
     setShowAddPlace(true);
   };
 
-  const handleSelectPlace = async (placeId: string, text: string, timeLabel: string, timeEnd: string, notes: string, categoryOverride: string, locationStr = '', neighborhoodHint = '') => {
+  const handleSelectPlace = async (placeId: string, text: string, timeLabel: string, timeEnd: string, notes: string, categoryOverride: string, locationStr = '', neighborhoodHint = '', knownLat: number | null = null, knownLng: number | null = null) => {
     if (!selectedTrip) return;
     setAddPlaceSaving(true);
     try {
@@ -1050,10 +1092,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       let imageUrl = (addPlaceCustomImage && !addPlaceCustomImage.startsWith('blob:')) ? addPlaceCustomImage : '';
       let address = locationStr;
       let neighborhood = neighborhoodHint;
-      console.log('[handleSelectPlace] in:', { placeId, text, locationStr, neighborhoodHint });
 
-      // If we have a placeId, fetch details directly; otherwise do a text search by name
+      // Use pre-fetched coordinates when available (e.g. from PlaceSearch) — avoids a redundant API call
+      let lat: number | null = knownLat;
+      let lng: number | null = knownLng;
+
+      // If we have a placeId, fetch full details (name, photo, category, address) — skip if we already have coords
       let resolvedPlaceId = placeId;
+
+      // No placeId — do a text search to resolve one and get all details
       if (!resolvedPlaceId && name) {
         try {
           const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
@@ -1061,7 +1108,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             headers: {
               'Content-Type': 'application/json',
               'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'places.id,places.photos,places.types,places.displayName,places.formattedAddress,places.addressComponents',
+              'X-Goog-FieldMask': 'places.id,places.photos,places.types,places.displayName,places.formattedAddress,places.addressComponents,places.location',
             },
             body: JSON.stringify({ textQuery: address ? `${name} ${address}` : name }),
           });
@@ -1075,6 +1122,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             if (found.formattedAddress && !address) address = found.formattedAddress;
             const area = extractNeighborhood(found.addressComponents ?? [], found.formattedAddress ?? '');
             if (area && !neighborhood) neighborhood = area;
+            if (lat == null && found.location?.latitude != null) { lat = found.location.latitude; lng = found.location.longitude; }
           }
         } catch { /* silent */ }
       }
@@ -1084,7 +1132,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           const res = await fetch(`https://places.googleapis.com/v1/places/${resolvedPlaceId}`, {
             headers: {
               'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'displayName,types,photos,formattedAddress,addressComponents',
+              'X-Goog-FieldMask': 'displayName,types,photos,formattedAddress,addressComponents,location',
               'X-Goog-LanguageCode': 'en',
             },
           });
@@ -1096,6 +1144,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           if (place.formattedAddress && !address) address = place.formattedAddress;
           const area = extractNeighborhood(place.addressComponents ?? [], place.formattedAddress);
           if (area && !neighborhood) neighborhood = area;
+          if (lat == null && place.location?.latitude != null) { lat = place.location.latitude; lng = place.location.longitude; }
         } catch { /* use fallback name/category already set */ }
       }
 
@@ -1134,11 +1183,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           check_in: addPlaceCheckIn || undefined,
           check_out: addPlaceCheckOut || undefined,
           position, added_by: userId || undefined,
+          lat: lat ?? undefined, lng: lng ?? undefined,
         });
         if (!dbItem) return;
-        newItem = { id: dbItem.id, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined };
+        newItem = { id: dbItem.id, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined, lat, lng };
       } else {
-        newItem = { id: `item-${Date.now()}`, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined };
+        newItem = { id: `item-${Date.now()}`, name, category, image: finalImage, address: address || undefined, neighborhood: neighborhood || undefined, time: timeLabel || undefined, timeEnd: timeEnd || undefined, notes: notes || undefined, status: addPlaceStatus, checkIn: addPlaceCheckIn || undefined, checkOut: addPlaceCheckOut || undefined, lat, lng };
       }
 
       updatedDays[dayIndex] = { ...day, items: [...day.items, newItem] };
@@ -1180,6 +1230,547 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     if (isNaN(d.getTime())) return null;
     if (status === 'past' && d > new Date()) d.setFullYear(year - 1);
     return d;
+  };
+
+  // ── Booking email parser (smart) ─────────────────────────────────────────
+  const parseBookingEmail = (raw: string, type: BookingType): Partial<PlanBooking> => {
+    // Normalise: strip HTML tags, decode entities, collapse whitespace
+    const text = raw
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+      .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    const first = (patterns: RegExp[]): string => {
+      for (const p of patterns) { const m = text.match(p); if (m?.[1]?.trim()) return m[1].trim(); }
+      return '';
+    };
+    const firstNoGroup = (patterns: RegExp[]): string => {
+      for (const p of patterns) { const m = text.match(p); if (m?.[0]?.trim()) return m[0].trim(); }
+      return '';
+    };
+
+    // ── Confirmation number ────────────────────────────────────────────────
+    const confirmationNumber = first([
+      /(?:confirmation(?:\s+code)?|booking\s+(?:code|ref|reference)|record\s+locator|PNR|reservation(?:\s+code)?|itinerary|ref(?:erence)?|conf)[:\s#]+([A-Z0-9]{4,15})/i,
+      /RECLOC=([A-Z0-9]{4,8})/i,
+      /\b([A-Z]{6})\b(?=\s*\n)/,  // 6-char uppercase code on its own line
+    ]).toUpperCase();
+
+    // ── Title / name ───────────────────────────────────────────────────────
+    // Airlines by IATA code
+    const AIRLINE_CODES: Record<string,string> = {
+      AA:'American Airlines', DL:'Delta Air Lines', UA:'United Airlines', WN:'Southwest Airlines',
+      B6:'JetBlue', AS:'Alaska Airlines', NK:'Spirit Airlines', F9:'Frontier Airlines',
+      BA:'British Airways', VS:'Virgin Atlantic', LH:'Lufthansa', AF:'Air France',
+      KL:'KLM', IB:'Iberia', AZ:'ITA Airways', EI:'Aer Lingus', FR:'Ryanair', U2:'easyJet',
+      EK:'Emirates', QR:'Qatar Airways', EY:'Etihad', SQ:'Singapore Airlines',
+      CX:'Cathay Pacific', JL:'Japan Airlines', NH:'ANA', KE:'Korean Air',
+      TK:'Turkish Airlines', LA:'LATAM', AM:'Aeromexico', CM:'Copa Airlines',
+      AC:'Air Canada', QF:'Qantas', NZ:'Air New Zealand', MX:'Mexicana',
+    };
+    const AIRPORTS = new Set(['JFK','LAX','LHR','CDG','DXB','SFO','ORD','ATL','SEA','MIA','BOS','DEN','LAS','PHX','MCO','EWR','MSP','DTW','FCO','BCN','AMS','FRA','MAD','MEX','GRU','NRT','HND','ICN','SIN','HKG','SYD','MEL','YYZ','YVR','DFW','IAH','CLT','PHL','SLC','PDX','MSY','BNA','RDU','TPA','SAN','SMF','DOH','AUH','RUH','CAI','IST','VIE','ZRH','BRU','LIS','ATH','PRG','WAW','BUD','CPH','ARN','OSL','HEL','DUB','MAN','EDI','MXP','LIN','MUC','BER','HAM','DUS','CGN','STR','FCO','VCE','NAP','PMO','BLQ','PSA','GOA','GVA','BSL','GRU','EZE','BOG','LIM','SCL','CUN','CZM','PVR','SJO','PTY','SDQ','MBJ','AUA','BGI','NAS','MBJ','HAV','VRA','BDA','ABV','ACC','NBO','JRO','CPT','JNB','CAI','CMN','TUN','ALG','LOS','ADD']);
+    const BOOKING_PROVIDERS: Record<string,string> = {
+      'booking.com':'Booking.com','airbnb':'Airbnb','vrbo':'VRBO','hotels.com':'Hotels.com',
+      'expedia':'Expedia','marriott':'Marriott','hilton':'Hilton','hyatt':'Hyatt',
+      'ihg':'IHG','wyndham':'Wyndham','accorhotels':'Accor','melia':'Meliá',
+      'opentable':'OpenTable','resy':'Resy','yelp':'Yelp Reservations','sevenrooms':'SevenRooms',
+      'tock':'Tock','exploretock':'Tock','dishcovery':'Dishcovery',
+      'viator':'Viator','getyourguide':'GetYourGuide','klook':'Klook',
+      'eventbrite':'Eventbrite','ticketmaster':'Ticketmaster','stubhub':'StubHub',
+    };
+
+    // Detect provider from text
+    let detectedProvider = '';
+    for (const [key, val] of Object.entries(BOOKING_PROVIDERS)) {
+      if (text.toLowerCase().includes(key)) { detectedProvider = val; break; }
+    }
+
+    // ── DATE helpers ───────────────────────────────────────────────────────
+    const DATE_PATTERNS = [
+      /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[,.]?\s+\d{1,2}[,.]?\s+\d{4}/gi,
+      /\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[,.]?\s+\d{4}/gi,
+      /\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/g,
+      /\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}/g,
+    ];
+    const allDates: string[] = [];
+    for (const p of DATE_PATTERNS) { const matches = [...text.matchAll(p)]; matches.forEach(m => allDates.push(m[0].trim())); }
+    const uniqueDates = [...new Set(allDates)];
+
+    const TIME_PATTERN = /\b(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?)\b/g;
+    const allTimes = [...text.matchAll(TIME_PATTERN)].map(m => m[1].trim());
+
+    // ── FLIGHT ─────────────────────────────────────────────────────────────
+    if (type === 'flight') {
+      // Parse all flight blocks: "Flight: Alaska 1489" or "Flight: AS1489"
+      const flightBlocks = [...text.matchAll(/Flight:\s*([^\n]+)\nOperated By[^\n]+\n[^\n]+\nDeparts:\s*([^(]+)\(([A-Z]{3})\)[^\n]+at\s+([\d:]+\s*[apm]+)\nArrives:\s*([^(]+)\(([A-Z]{3})\)[^\n]+at\s+([\d:]+\s*[apm]+)/gi)];
+
+      // Fallback: simpler patterns
+      const flightNumMatches = [...text.matchAll(/(?:Flight|Flight number)[:\s]+(?:Alaska\s+|[A-Z]{2}\s*)?(\d{3,4})/gi)];
+      const airlineNameMatch = text.match(/(?:Alaska Airlines|American Airlines|Delta Air Lines|United Airlines|Southwest|JetBlue|Spirit|Frontier|British Airways|Lufthansa|Air France|KLM|Emirates|Qatar Airways|Etihad|Singapore Airlines)/i);
+      const airlineName = airlineNameMatch?.[0] ?? first([/(?:Check in with|Operated by)\s+([A-Za-z ]+(?:Airlines?|Airways?))/i, /(?:airline|carrier)[:\s]+([^\n]{2,40})/i]);
+
+      // Outbound flight
+      let flightNumber = '', depAirport = '', arrAirport = '', depTime = '', arrTime = '';
+      // Return flight fields reused
+      let retFlightNumber = '', retDepTime = '', retArrTime = '';
+
+      if (flightBlocks.length >= 1) {
+        const b = flightBlocks[0];
+        const fnRaw = b[1].trim(); // e.g. "Alaska 1489"
+        flightNumber = fnRaw.replace(/^[A-Za-z ]+\s+/, ''); // keep just number portion
+        // Try to get IATA code
+        const iataMatch = fnRaw.match(/\b([A-Z]{2})(\d{3,4})\b/);
+        if (iataMatch) flightNumber = iataMatch[1] + iataMatch[2];
+        else flightNumber = 'AS' + flightNumber.replace(/\D/g, '');
+        depAirport = b[3]; arrAirport = b[6];
+        depTime = `${b[2].trim()} at ${b[4]}`; arrTime = `${b[5].trim()} at ${b[7]}`;
+      } else {
+        // Simpler fallback
+        const fn = flightNumMatches[0]?.[1] ?? '';
+        flightNumber = fn ? `AS${fn}` : '';
+        const departsMatch = text.match(/Departs?:\s*([^(]+)\(([A-Z]{3})\)[^\n]+at\s+([\d:]+\s*[apm]+)/i);
+        const arrivesMatch = text.match(/Arrives?:\s*([^(]+)\(([A-Z]{3})\)[^\n]+at\s+([\d:]+\s*[apm]+)/i);
+        depAirport = departsMatch?.[2] ?? '';
+        arrAirport = arrivesMatch?.[2] ?? '';
+        depTime = departsMatch ? `${departsMatch[1].trim()} at ${departsMatch[3]}` : '';
+        arrTime = arrivesMatch ? `${arrivesMatch[1].trim()} at ${arrivesMatch[3]}` : '';
+      }
+
+      // Return flight
+      if (flightBlocks.length >= 2) {
+        const b2 = flightBlocks[1];
+        const fnRaw2 = b2[1].trim();
+        const iataMatch2 = fnRaw2.match(/\b([A-Z]{2})(\d{3,4})\b/);
+        retFlightNumber = iataMatch2 ? iataMatch2[1] + iataMatch2[2] : `AS${fnRaw2.replace(/\D/g, '')}`;
+        retDepTime = `${b2[2].trim()} at ${b2[4]}`;
+        retArrTime = `${b2[5].trim()} at ${b2[7]}`;
+      } else if (flightNumMatches.length >= 2) {
+        retFlightNumber = `AS${flightNumMatches[1][1]}`;
+        const allDeparts = [...text.matchAll(/Departs?:\s*([^(]+)\(([A-Z]{3})\)[^\n]+at\s+([\d:]+\s*[apm]+)/gi)];
+        const allArrives = [...text.matchAll(/Arrives?:\s*([^(]+)\(([A-Z]{3})\)[^\n]+at\s+([\d:]+\s*[apm]+)/gi)];
+        if (allDeparts[1]) retDepTime = `${allDeparts[1][1].trim()} at ${allDeparts[1][3]}`;
+        if (allArrives[1]) retArrTime = `${allArrives[1][1].trim()} at ${allArrives[1][3]}`;
+      }
+
+      const title = airlineName || detectedProvider || 'Flight';
+      return { confirmationNumber, title, flightNumber, airline: airlineName, departureAirport: depAirport, arrivalAirport: arrAirport, departureTime: depTime, arrivalTime: arrTime, checkInDate: retFlightNumber, checkOutDate: retDepTime, address: retArrTime };
+    }
+
+    // ── STAY ───────────────────────────────────────────────────────────────
+    if (type === 'stay') {
+      const hotelName = first([
+        /(?:property|hotel|resort|hostel|villa|apartment|accommodation)[:\s]+([^\n]{2,60})/i,
+        /(?:you're staying at|your stay at|reserved at)[:\s]+([^\n]{2,60})/i,
+        /^(.{3,50})\n.*(?:check[-\s]?in|reservation)/im,
+      ]) || detectedProvider;
+      const checkIn = first([/(?:check[-\s]?in|arrival|from|start\s+date)[:\s]+([^\n]{3,40})/i]) || uniqueDates[0] || '';
+      const checkOut = first([/(?:check[-\s]?out|departure|until|end\s+date|to)[:\s]+([^\n]{3,40})/i]) || uniqueDates[1] || '';
+      const address = first([/(?:address|located at|property\s+address|find\s+us\s+at)[:\s]+([^\n]{5,100})/i]);
+      return { confirmationNumber, title: hotelName, checkInDate: checkIn, checkOutDate: checkOut, address };
+    }
+
+    // ── RESTAURANT ─────────────────────────────────────────────────────────
+    if (type === 'restaurant') {
+      const restaurantName = first([
+        /(?:restaurant|dining|table\s+at|reservation\s+at|you're\s+confirmed\s+at)[:\s]+([^\n]{2,60})/i,
+        /^(.{3,50})\n.*(?:reservation|party|guests?)/im,
+      ]) || detectedProvider;
+      const resDate = first([/(?:date|dining\s+date|reservation\s+date)[:\s]+([^\n]{3,30})/i]) || firstNoGroup(DATE_PATTERNS) || uniqueDates[0] || '';
+      const resTime = first([/(?:time|dining\s+time|arrival\s+time)[:\s]+([^\n]{3,20})/i]) || allTimes[0] || '';
+      const party = first([/(?:party\s+of|covers?|guests?|pax|people|diners?)[:\s]+(\d+)/i, /(?:table\s+for|for\s+a\s+party\s+of)\s+(\d+)/i]);
+      return { confirmationNumber, title: restaurantName, reservationDate: resDate, reservationTime: resTime, partySize: party ? parseInt(party) : null };
+    }
+
+    // ── ACTIVITY ───────────────────────────────────────────────────────────
+    if (type === 'activity') {
+      const activityName = first([
+        /(?:activity|tour|experience|ticket|event|museum|attraction|show|concert|performance)[:\s]+([^\n]{2,80})/i,
+        /(?:you(?:'re| are)\s+(?:booked|confirmed)\s+for)[:\s]+([^\n]{2,80})/i,
+        /^(.{3,60})\n.*(?:ticket|booking|confirmed)/im,
+      ]) || detectedProvider;
+      const actDate = first([/(?:date|event\s+date|tour\s+date|visit\s+date)[:\s]+([^\n]{3,30})/i]) || firstNoGroup(DATE_PATTERNS) || uniqueDates[0] || '';
+      const actTime = first([/(?:time|start\s+time|meeting\s+point\s+time)[:\s]+([^\n]{3,20})/i]) || allTimes[0] || '';
+      const pax = first([/(?:guests?|participants?|people|pax|tickets?)[:\s]+(\d+)/i, /(\d+)\s+(?:guests?|participants?|people|tickets?)/i]);
+      return { confirmationNumber, title: activityName, reservationDate: actDate, reservationTime: actTime, partySize: pax ? parseInt(pax) : null };
+    }
+
+    return { confirmationNumber };
+  };
+
+  // ── Flight email regex parser (no AI needed — format is always structured) ──
+  const parseFlightsFromEmail = (text: string): Partial<PlanBooking>[] => {
+    const AIRLINE_IATA: Record<string, string> = {
+      alaska: 'AS', american: 'AA', delta: 'DL', united: 'UA',
+      southwest: 'WN', jetblue: 'B6', spirit: 'NK', frontier: 'F9',
+      hawaiian: 'HA', 'sun country': 'SY', allegiant: 'G4',
+      british: 'BA', lufthansa: 'LH', 'air france': 'AF', klm: 'KL',
+      emirates: 'EK', qatar: 'QR', singapore: 'SQ', iberia: 'IB',
+      ryanair: 'FR', easyjet: 'U2', 'air canada': 'AC', westjet: 'WS',
+      'virgin atlantic': 'VS', 'turkish airlines': 'TK', 'swiss': 'LX',
+    };
+    const getIATA = (name: string) => {
+      const lower = name.toLowerCase();
+      for (const [k, v] of Object.entries(AIRLINE_IATA)) {
+        if (lower.includes(k)) return v;
+      }
+      const m = name.match(/\b([A-Z]{2})\b/);
+      return m ? m[1] : name.slice(0, 2).toUpperCase();
+    };
+
+    // Confirmation code
+    const confMatch = text.match(/(?:confirmation\s+(?:code|number)|record\s+locator|PNR|booking\s+(?:ref|code))[:\s#]+([A-Z0-9]{4,10})/i);
+    const confirmationNumber = confMatch?.[1]?.toUpperCase() ?? '';
+
+    // Split into individual flight blocks at each "Flight:" line
+    const blocks = text.split(/(?=^Flight:)/im).filter(b => /^Flight:/im.test(b));
+    if (blocks.length === 0) return [];
+
+    return blocks.map(block => {
+      // "Flight: Alaska 1489" → title + IATA flight number
+      const flightMatch = block.match(/^Flight:\s*([A-Za-z][A-Za-z\s]+?)\s+(\d{1,4})\b/im);
+      let flightNumber = '', title = 'Flight';
+      if (flightMatch) {
+        const airlineName = flightMatch[1].trim();
+        title = airlineName.replace(/\s*(air\s*lines?)\s*/i, ' Airlines').trim();
+        flightNumber = getIATA(airlineName) + flightMatch[2];
+      }
+
+      // "Departs: San Francisco (SFO) on Wed, Apr 15 at 9:59 am"
+      const depMatch = block.match(/Departs?:\s*[^(]+\(([A-Z]{3})\)\s+on\s+\w+,?\s+(\w+\s+\d+)\s+at\s+([\d:]+\s*[apm]+)/i);
+      const depAirport = depMatch?.[1] ?? '';
+      const departureTime = depMatch ? `${depMatch[2]} at ${depMatch[3]}` : '';
+
+      // "Arrives: Seattle (SEA) on Wed, Apr 15 at 12:16 pm"
+      const arrMatch = block.match(/Arrives?:\s*[^(]+\(([A-Z]{3})\)\s+on\s+\w+,?\s+(\w+\s+\d+)\s+at\s+([\d:]+\s*[apm]+)/i);
+      const arrAirport = arrMatch?.[1] ?? '';
+      const arrivalTime = arrMatch ? `${arrMatch[2]} at ${arrMatch[3]}` : '';
+
+      return { title, confirmationNumber, flightNumber, departureAirport: depAirport, arrivalAirport: arrAirport, departureTime, arrivalTime };
+    });
+  };
+
+  const handleBookingImport = async () => {
+    if (!bookingEmailText.trim()) return;
+    setBookingLoading(true);
+    try {
+      if (bookingType === 'flight') {
+        const flights = parseFlightsFromEmail(bookingEmailText);
+
+        if (flights.length >= 2 && selectedTrip && userId) {
+          // Round trip — save both as separate cards
+          const created = await Promise.all(
+            flights.map(f => createPlanBooking(selectedTrip.id, userId, {
+              type: 'flight',
+              title: f.title ?? 'Flight',
+              confirmationNumber: f.confirmationNumber ?? '',
+              notes: '',
+              flightNumber: f.flightNumber ?? '',
+              airline: f.airline ?? '',
+              departureAirport: f.departureAirport ?? '',
+              arrivalAirport: f.arrivalAirport ?? '',
+              departureTime: f.departureTime ?? '',
+              arrivalTime: f.arrivalTime ?? '',
+              checkInDate: '', checkOutDate: '', address: '',
+              reservationDate: '', reservationTime: '', partySize: null,
+            }))
+          );
+          const valid = created.filter(Boolean) as PlanBooking[];
+          if (valid.length) {
+            setPlanBookings(prev => [...prev, ...valid]);
+            setShowAddBooking(false);
+            setShowAddPlace(false);
+            setAddPlaceSource('google');
+            setBookingEmailText('');
+            setBookingForm({});
+            setShowReturnFlight(false);
+            setReturnFlightForm({ flightNumber: '', departureTime: '', arrivalTime: '' });
+          }
+        } else if (flights.length === 1) {
+          // Single flight — fill form for review
+          setBookingForm(prev => ({ ...prev, ...flights[0] }));
+          setBookingImportMode(false);
+        } else {
+          // Nothing parsed — fall back to old regex
+          const fallback = parseBookingEmail(bookingEmailText, bookingType);
+          setBookingForm(prev => ({ ...prev, ...fallback }));
+          setBookingImportMode(false);
+        }
+      } else {
+        // Non-flight: use Gemini
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text:
+              `Extract booking info from this ${bookingType} confirmation email. Return ONLY a JSON object, no markdown.
+Stay: {"title":"Hotel name","confirmationNumber":"CODE","checkInDate":"Apr 15","checkOutDate":"Apr 18","address":"Full address"}
+Restaurant: {"title":"Restaurant name","confirmationNumber":"CODE","reservationDate":"Apr 15","reservationTime":"8:00 pm","partySize":2}
+Activity: {"title":"Activity name","confirmationNumber":"CODE","reservationDate":"Apr 15","reservationTime":"10:00 am","partySize":1}
+Email: ${bookingEmailText.slice(0, 3000)}` }] }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 400 } }) }
+        );
+        const d = await res.json();
+        const raw = d.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) { setBookingForm(prev => ({ ...prev, ...JSON.parse(m[0]) })); setBookingImportMode(false); }
+        else { setBookingImportMode(false); }
+      }
+    } catch {
+      const parsed = parseBookingEmail(bookingEmailText, bookingType);
+      setBookingForm(prev => ({ ...prev, ...parsed }));
+      setBookingImportMode(false);
+    } finally {
+      setBookingLoading(false);
+    }
+  };
+
+  const handleSaveBooking = async () => {
+    if (!selectedTrip || !userId) return;
+    setBookingLoading(true);
+    const base: Omit<PlanBooking, 'id' | 'planId' | 'addedBy' | 'createdAt'> = {
+      type: bookingType,
+      title: bookingForm.title ?? '',
+      confirmationNumber: bookingForm.confirmationNumber ?? '',
+      notes: bookingForm.notes ?? '',
+      flightNumber: bookingForm.flightNumber ?? '',
+      airline: bookingForm.airline ?? '',
+      departureAirport: bookingForm.departureAirport ?? '',
+      arrivalAirport: bookingForm.arrivalAirport ?? '',
+      departureTime: bookingForm.departureTime ?? '',
+      arrivalTime: bookingForm.arrivalTime ?? '',
+      checkInDate: bookingForm.checkInDate ?? '',
+      checkOutDate: bookingForm.checkOutDate ?? '',
+      address: bookingForm.address ?? '',
+      reservationDate: bookingForm.reservationDate ?? '',
+      reservationTime: bookingForm.reservationTime ?? '',
+      partySize: bookingForm.partySize ?? null,
+    };
+    if (bookingForm.id) {
+      // Edit existing
+      await updatePlanBooking(bookingForm.id, base);
+      setPlanBookings(prev => prev.map(b => b.id === bookingForm.id ? { ...b, ...base } : b));
+    } else {
+      // Create outbound
+      const created = await createPlanBooking(selectedTrip.id, userId, base);
+      if (created) setPlanBookings(prev => [...prev, created]);
+
+      // Create return flight if filled in
+      if (bookingType === 'flight' && showReturnFlight && returnFlightForm.flightNumber.trim()) {
+        const returnBase: Omit<PlanBooking, 'id' | 'planId' | 'addedBy' | 'createdAt'> = {
+          ...base,
+          flightNumber: returnFlightForm.flightNumber,
+          departureAirport: bookingForm.arrivalAirport ?? '',
+          arrivalAirport: bookingForm.departureAirport ?? '',
+          departureTime: returnFlightForm.departureTime,
+          arrivalTime: returnFlightForm.arrivalTime,
+        };
+        const returnCreated = await createPlanBooking(selectedTrip.id, userId, returnBase);
+        if (returnCreated) setPlanBookings(prev => [...prev, returnCreated]);
+      }
+    }
+    setBookingLoading(false);
+    setShowAddBooking(false);
+    setBookingForm({});
+    setBookingEmailText('');
+    setBookingImportMode(false);
+    setShowReturnFlight(false);
+    setReturnFlightForm({ flightNumber: '', departureTime: '', arrivalTime: '' });
+  };
+
+  const handleDeleteBooking = async (id: string) => {
+    await deletePlanBooking(id);
+    setPlanBookings(prev => prev.filter(b => b.id !== id));
+  };
+
+  // ── AI Itinerary Generator ────────────────────────────────────────────────
+  const handleGenerateItinerary = async () => {
+    if (!selectedTrip || !userId) return;
+    setGenerateLoading(true);
+    setGenerateError('');
+
+    const placesToUse = realSavedPlaces.filter(p => generateSelectedIds.has(p.id));
+    const numDays = countDaysFromDates(selectedTrip.dates) || 3;
+
+    const prompt = `You are a travel itinerary planner. Create a day-by-day itinerary for a trip to ${selectedTrip.destination || selectedTrip.country} (${selectedTrip.dates || `${numDays} days`}).
+
+The user has saved these places they want to visit:
+${placesToUse.map((p, i) => `${i + 1}. ${p.name} — ${p.category} — ${[p.neighborhood, p.city].filter(Boolean).join(', ')}`).join('\n')}
+
+Rules:
+- Distribute places across ${numDays} day(s) as evenly as possible
+- Group places that are in the same neighborhood/area on the same day to minimise travel
+- For restaurants/cafes: suggest morning ones earlier, dinner ones later in the day
+- Assign a realistic timeLabel (e.g. "9:00 AM", "1:00 PM", "7:30 PM") to each place
+- Add a short, useful one-line note for each place (what to order, what to see, tip)
+- If there are more places than fit comfortably, prioritise variety across categories
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "days": [
+    {
+      "label": "Day 1",
+      "places": [
+        { "name": "Place Name", "timeLabel": "10:00 AM", "notes": "Short tip here" }
+      ]
+    }
+  ]
+}`;
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.4, maxOutputTokens: 2000 },
+          }),
+        }
+      );
+
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON in response');
+      const parsed = JSON.parse(jsonMatch[0]) as { days: { label: string; places: { name: string; timeLabel: string; notes: string }[] }[] };
+
+      // Build a lookup from name → saved place
+      const placeByName: Record<string, typeof realSavedPlaces[0]> = {};
+      for (const p of placesToUse) placeByName[p.name.toLowerCase()] = p;
+
+      // Create plan days + items, build local Trip update in parallel
+      const newDays: TripDay[] = [];
+      for (let di = 0; di < parsed.days.length; di++) {
+        const dayData = parsed.days[di];
+        const newDay = await createPlanDay(selectedTrip.id, dayData.label, di);
+        if (!newDay) continue;
+        const items: TripItem[] = [];
+        for (let pi = 0; pi < dayData.places.length; pi++) {
+          const p = dayData.places[pi];
+          const saved = placeByName[p.name.toLowerCase()];
+          const dbItem = await createPlanItem(selectedTrip.id, newDay.id, {
+            name: p.name,
+            category: saved?.category ?? 'experience',
+            image_url: saved?.photoUrl ?? '',
+            time_label: p.timeLabel,
+            time_end: '',
+            notes: p.notes,
+            address: '',
+            neighborhood: saved?.neighborhood ?? '',
+            location: saved?.city ?? '',
+            status: 'none',
+            check_in: '',
+            check_out: '',
+            position: pi,
+          });
+          if (dbItem) items.push(dbItem);
+        }
+        newDays.push({ id: newDay.id, label: dayData.label, items });
+      }
+
+      const updatedTrip: Trip = { ...selectedTrip, days: newDays };
+      setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updatedTrip : p));
+      setSelectedTrip(updatedTrip);
+      setAiGeneratedPlanIds(prev => new Set([...prev, selectedTrip.id]));
+      setPlanViewMode('itinerary');
+      setShowGenerateSheet(false);
+    } catch (e: any) {
+      setGenerateError(e.message ?? 'Something went wrong. Try again.');
+    } finally {
+      setGenerateLoading(false);
+    }
+  };
+
+  // ── Ask AI for ideas ─────────────────────────────────────────────────────
+  const handleAskAIIdeas = async () => {
+    if (!selectedTrip || !askAIPrompt.trim()) return;
+    setAskAILoading(true);
+    setAskAIError('');
+    setAskAISuggestions([]);
+    const numDays = countDaysFromDates(selectedTrip.dates) || 3;
+    const prompt = `You are a travel expert. Suggest 8 specific, real places to visit in ${selectedTrip.destination || selectedTrip.country} for someone who: ${askAIPrompt}
+
+Trip context: ${numDays} days in ${selectedTrip.destination || selectedTrip.country}${selectedTrip.dates ? ` (${selectedTrip.dates})` : ''}
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "suggestions": [
+    {
+      "name": "Exact Real Place Name",
+      "category": "restaurant|cafe|bar|landmark|experience|nature|shop|art",
+      "neighborhood": "Neighborhood or area name",
+      "reason": "One sentence explaining why this fits"
+    }
+  ]
+}`;
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 1500 } }) }
+      );
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON in response');
+      const parsed = JSON.parse(jsonMatch[0]) as { suggestions: { name: string; category: string; neighborhood: string; reason: string }[] };
+      setAskAISuggestions(parsed.suggestions ?? []);
+    } catch (e: any) {
+      setAskAIError(e.message ?? 'Something went wrong. Try again.');
+    } finally {
+      setAskAILoading(false);
+    }
+  };
+
+  const openAskAI = () => {
+    setAskAIPrompt('');
+    setAskAISuggestions([]);
+    setAddedAISuggestions(new Set());
+    setAskAIError('');
+    setShowAskAISheet(true);
+  };
+
+  const handleAddAISuggestion = async (suggestion: { name: string; category: string; neighborhood: string; reason: string }, index: number) => {
+    if (!selectedTrip || !userId) return;
+    setAddingAISuggestion(index);
+    let updatedDays = [...selectedTrip.days];
+    let targetDayId: string | null = null;
+    if (updatedDays.length === 0) {
+      const label = getTripDayLabel(selectedTrip, 0);
+      const newDay = await createPlanDay(selectedTrip.id, label, 0);
+      if (newDay) { updatedDays = [{ id: newDay.id, label, items: [] }]; targetDayId = newDay.id; }
+    } else {
+      targetDayId = updatedDays[0].id ?? null;
+    }
+    const day = updatedDays[0];
+    if (day?.id) {
+      const dbItem = await createPlanItem(selectedTrip.id, day.id, {
+        name: suggestion.name, category: suggestion.category, image_url: '',
+        time_label: '', notes: suggestion.reason, neighborhood: suggestion.neighborhood,
+        position: day.items.length, added_by: userId,
+      });
+      if (dbItem) {
+        const newItem: TripItem = { id: dbItem.id, name: suggestion.name, category: suggestion.category, image: '', neighborhood: suggestion.neighborhood, notes: suggestion.reason, status: 'none' };
+        updatedDays[0] = { ...day, items: [...day.items, newItem] };
+        const updated: Trip = { ...selectedTrip, days: updatedDays };
+        setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
+        setSelectedTrip(updated);
+        setAddedAISuggestions(prev => new Set([...prev, index]));
+      }
+    }
+    setAddingAISuggestion(null);
+  };
+
+  const BOOKING_META: Record<BookingType, { icon: React.ReactNode; label: string; color: string }> = {
+    flight:     { icon: <Plane size={14} strokeWidth={2} />,            label: 'Flight',      color: 'bg-gray-100 text-gray-600' },
+    stay:       { icon: <Hotel size={14} strokeWidth={2} />,            label: 'Stay',        color: 'bg-gray-100 text-gray-600' },
+    restaurant: { icon: <UtensilsCrossed size={14} strokeWidth={2} />,  label: 'Restaurant',  color: 'bg-gray-100 text-gray-600' },
+    activity:   { icon: <Ticket size={14} strokeWidth={2} />,           label: 'Activity',    color: 'bg-gray-100 text-gray-600' },
   };
 
   const countDaysFromDates = (dates: string): number => {
@@ -1420,16 +2011,36 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   // Reset view mode when opening a different plan
   useEffect(() => {
     if (!selectedTrip) return;
-    // Default: itinerary if days already set up, brainstorm otherwise
-    setPlanViewMode(selectedTrip.days.length > 0 ? 'itinerary' : 'brainstorm');
+    // Always start in brainstorm — itinerary is reached via AI generate
+    setPlanViewMode('brainstorm');
     setShowMap(false);
+    setMapCoords({}); // clear cached coords so geocoding re-runs for the new trip
   }, [selectedTrip?.id]);
+
+  // Fetch bookings when plan changes
+  useEffect(() => {
+    if (!selectedTrip) { setPlanBookings([]); return; }
+    getPlanBookings(selectedTrip.id).then(setPlanBookings);
+  }, [selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!showMap || !selectedTrip || !GOOGLE_PLACES_KEY) return;
     const allItems = selectedTrip.days.flatMap(d => d.items);
-    const toGeocode = allItems.filter(item => !mapCoords[item.id]);
-    if (toGeocode.length === 0) return;
+
+    // Seed mapCoords with any stored lat/lng (items added after the migration)
+    const storedCoords: Record<string, { lat: number; lng: number }> = {};
+    for (const item of allItems) {
+      if (item.lat != null && item.lng != null) {
+        storedCoords[item.id] = { lat: item.lat, lng: item.lng };
+      }
+    }
+    if (Object.keys(storedCoords).length > 0) {
+      setMapCoords(prev => ({ ...prev, ...storedCoords }));
+    }
+
+    // Only geocode items that have no stored coords and haven't been geocoded yet
+    const toGeocode = allItems.filter(item => item.lat == null && !mapCoords[item.id] && !storedCoords[item.id]);
+    if (toGeocode.length === 0) { setMapLoading(false); return; }
     let cancelled = false;
     setMapLoading(true);
     (async () => {
@@ -1437,19 +2048,16 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       for (const item of toGeocode) {
         if (cancelled) break;
         try {
-          const q = item.address ? `${item.name} ${item.address}` : `${item.name} ${selectedTrip.country}`;
-          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'places.location,places.displayName',
-            },
-            body: JSON.stringify({ textQuery: q, languageCode: 'en' }),
-          });
+          const q = [
+            item.name,
+            item.address || item.neighborhood || '',
+            selectedTrip.destination,
+            selectedTrip.country,
+          ].filter(Boolean).join(', ');
+          // Use server-side proxy to avoid browser Referer/CORS issues
+          const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
           const data = await res.json();
-          const loc = data.places?.[0]?.location;
-          if (loc) newCoords[item.id] = { lat: loc.latitude, lng: loc.longitude };
+          if (data.lat && data.lng) newCoords[item.id] = { lat: data.lat, lng: data.lng };
           await new Promise(r => setTimeout(r, 120));
         } catch { /* silent */ }
       }
@@ -1459,7 +2067,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       }
     })();
     return () => { cancelled = true; };
-  }, [showMap, selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMap, selectedTrip?.id, selectedTrip?.days.flatMap(d => d.items).map(i => i.id).join(',')]);
 
   const savedPlaces = isNewUser
     ? places.filter(p => savedPlaceSet.has(p.id))
@@ -1537,7 +2146,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </button>
           <div className="absolute top-4 right-4 flex gap-2">
             <button onClick={() => { openEditPlan(selectedTrip); }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
-              <SlidersHorizontal size={14} strokeWidth={1.5} className="text-gray-700" />
+              <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
             <button onClick={() => {
               const text = `${selectedTrip.destination} trip — ${selectedTrip.dates}`;
@@ -1556,17 +2165,22 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
             {/* Date + location + collaborators in one row */}
             <div className="flex items-center justify-between mt-2 gap-3">
               <div className="min-w-0">
-                {selectedTrip.dates ? (
-                  <p className="text-white/70 text-xs flex items-center gap-1">
-                    <CalendarDays size={10} strokeWidth={1.5} />{selectedTrip.dates}
-                    {selectedTrip.country ? <span className="text-white/40"> · </span> : null}
-                    {selectedTrip.country ? <span>{selectedTrip.country}</span> : null}
-                  </p>
-                ) : (
-                  <button onClick={() => openEditPlan(selectedTrip)} className="flex items-center gap-1 text-white/50 text-xs">
-                    <CalendarDays size={10} strokeWidth={1.5} />Add dates
-                  </button>
-                )}
+                <div className="flex flex-col gap-0.5">
+                  {selectedTrip.dates ? (
+                    <p className="text-white/70 text-xs flex items-center gap-1">
+                      <CalendarDays size={10} strokeWidth={1.5} />{selectedTrip.dates}
+                    </p>
+                  ) : (
+                    <button onClick={() => openEditPlan(selectedTrip)} className="flex items-center gap-1 text-white/50 text-xs">
+                      <CalendarDays size={10} strokeWidth={1.5} />Add dates
+                    </button>
+                  )}
+                  {selectedTrip.country && (
+                    <p className="text-white/60 text-xs flex items-center gap-1">
+                      <MapPin size={10} strokeWidth={1.5} />{selectedTrip.country}
+                    </p>
+                  )}
+                </div>
               </div>
               {/* Collaborator avatars + invite */}
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -1635,18 +2249,18 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
         {/* Stats row */}
         <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
-          {[
-            isBrainstorm
-              ? { value: allItems.length, label: 'Ideas' }
-              : { value: countDaysFromDates(selectedTrip.dates) || sortedDays.length, label: 'Days' },
-            { value: totalItems, label: 'Places' },
-            { value: bookedCount, label: 'Booked' },
-          ].map(s => (
-            <div key={s.label} className="flex-1 py-3 text-center">
-              <p className="text-base font-black text-gray-900">{s.value}</p>
-              <p className="text-xs text-gray-400">{s.label}</p>
-            </div>
-          ))}
+          <div className="flex-1 py-3 text-center">
+            <p className="text-base font-black text-gray-900">{planViewMode === 'itinerary' && selectedTrip.days.length > 0 ? (countDaysFromDates(selectedTrip.dates) || sortedDays.length) : allItems.length}</p>
+            <p className="text-xs text-gray-400">{planViewMode === 'itinerary' && selectedTrip.days.length > 0 ? 'Days' : 'Ideas'}</p>
+          </div>
+          <div className="flex-1 py-3 text-center">
+            <p className="text-base font-black text-gray-900">{totalItems}</p>
+            <p className="text-xs text-gray-400">Places</p>
+          </div>
+          <div className="flex-1 py-3 text-center">
+            <p className="text-base font-black text-gray-900">{planBookings.length}</p>
+            <p className="text-xs text-gray-400">Reserved</p>
+          </div>
         </div>
 
 
@@ -1655,35 +2269,122 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         {/* Place list — TRIP only (events returned early above) */}
         <div className="px-4 pt-4 pb-28">
 
-          {/* Brainstorm / Itinerary toggle */}
-          <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5 mb-5 w-fit">
-            {(['brainstorm', 'itinerary'] as const).map(mode => (
+          {/* Mode indicator — only show when AI itinerary exists */}
+          {planViewMode === 'itinerary' && aiGeneratedPlanIds.has(selectedTrip.id) && (
+            <div className="flex items-center justify-between mb-5">
               <button
-                key={mode}
-                onClick={() => {
-                  if (mode === 'itinerary' && !hasDates && selectedTrip.days.length === 0) {
-                    openEditPlan(selectedTrip);
-                  } else {
-                    setPlanViewMode(mode);
-                  }
-                }}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors capitalize ${planViewMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                onClick={() => setPlanViewMode('brainstorm')}
+                className="text-xs text-gray-400 font-medium flex items-center gap-1"
               >
-                {mode === 'brainstorm' ? '✨ Brainstorm' : '🗓 Itinerary'}
+                ← Brainstorm
               </button>
-            ))}
-          </div>
+              <p className="text-xs font-bold text-gray-900 flex items-center gap-1.5">🗓 Your itinerary</p>
+              <button
+                onClick={() => { setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id))); setShowGenerateSheet(true); }}
+                className="text-xs text-gray-400 font-medium"
+              >
+                Regenerate
+              </button>
+            </div>
+          )}
+
+          {/* ── Bookings section — only shown when there are bookings ── */}
+          {planBookings.length > 0 && (
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  onClick={() => setBookingsExpanded(e => !e)}
+                  className="flex items-center gap-1.5 text-xs font-bold text-gray-700"
+                >
+                  {bookingsExpanded ? <ChevronUp size={13} strokeWidth={2.5} /> : <ChevronDown size={13} strokeWidth={2.5} />}
+                  Reservations <span className="text-gray-400 font-normal">· {planBookings.length}</span>
+                </button>
+                <button
+                  onClick={() => { setShowAddBooking(true); setBookingForm({}); setBookingEmailText(''); setBookingImportMode(false); }}
+                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 bg-gray-100 rounded-full px-3 py-1"
+                >
+                  <Plus size={11} strokeWidth={2.5} /> Add
+                </button>
+              </div>
+
+              {bookingsExpanded && (
+                <div className="space-y-2">
+                  {planBookings.map(b => {
+                    const meta = BOOKING_META[b.type];
+                    return (
+                      <div
+                        key={b.id}
+                        className="bg-gray-50 rounded-2xl px-4 py-3 flex items-start gap-3 cursor-pointer"
+                        onClick={() => {
+                          setBookingType(b.type);
+                          setBookingForm(b);
+                          setBookingImportMode(false);
+                          setBookingEmailText('');
+                          setShowAddBooking(true);
+                        }}
+                      >
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.color}`}>
+                          {meta.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{b.title || meta.label}</p>
+                          {b.type === 'flight' && (
+                            <p className="text-xs text-gray-500 mt-0.5 truncate">
+                              {[b.flightNumber, b.departureAirport && b.arrivalAirport ? `${b.departureAirport} → ${b.arrivalAirport}` : '', b.departureTime].filter(Boolean).join(' · ')}
+                            </p>
+                          )}
+                          {b.type === 'stay' && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {b.checkInDate && b.checkOutDate ? `${b.checkInDate} – ${b.checkOutDate}` : b.checkInDate}
+                              {b.address && ` · ${b.address}`}
+                            </p>
+                          )}
+                          {(b.type === 'restaurant' || b.type === 'activity') && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {[b.reservationDate, b.reservationTime, b.partySize ? `${b.partySize} people` : ''].filter(Boolean).join(' · ')}
+                            </p>
+                          )}
+                          {b.confirmationNumber && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 font-mono">#{b.confirmationNumber}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+                          <ChevronRight size={13} strokeWidth={2} className="text-gray-300" />
+                          <button onClick={e => { e.stopPropagation(); handleDeleteBooking(b.id); }} className="text-gray-300 hover:text-red-400">
+                            <Trash2 size={13} strokeWidth={2} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          {/* ── /Bookings section ────────────────────────────────── */}
+
 
           {isBrainstorm ? (
             /* ══════════════════════════════════════
                BRAINSTORM MODE — flat idea list
                ══════════════════════════════════════ */
             <>
+              {/* Itinerary ready banner */}
+              {aiGeneratedPlanIds.has(selectedTrip.id) && (
+                <button
+                  onClick={() => setPlanViewMode('itinerary')}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 rounded-2xl mb-4 border border-gray-100"
+                >
+                  <p className="text-xs font-semibold text-gray-700">🗓 Your itinerary is ready</p>
+                  <p className="text-xs text-gray-400 font-medium">View →</p>
+                </button>
+              )}
+
               {/* Map toggle */}
               {allItems.length > 0 && (
                 <div className="flex justify-end mb-3">
                   <button onClick={() => setShowMap(m => !m)} className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">
-                    <MapPin size={12} strokeWidth={2} />{showMap ? 'Hide map' : 'Map'}
+                    <MapPin size={12} strokeWidth={2} />{showMap ? 'Hide map' : 'Show map'}
                   </button>
                 </div>
               )}
@@ -1715,9 +2416,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <p className="text-4xl mb-3">✨</p>
                   <p className="text-base font-bold text-gray-900 mb-1">Start dreaming</p>
-                  <p className="text-sm text-gray-400 mb-6">Add places you want to visit — restaurants, stays, experiences, anything</p>
-                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold">
-                    <Plus size={14} strokeWidth={2} /> Add a place
+                  <p className="text-xs text-gray-400 mb-6">Add places you want to visit — restaurants, stays, experiences, anything</p>
+                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-xs font-semibold mb-2">
+                    <Plus size={13} strokeWidth={2} /> Add anything — flights, reservations, places…
+                  </button>
+                  <button onClick={openAskAI} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-gray-50 text-xs text-gray-500 font-medium">
+                    ✨ Need help? Ask AI what to do on your trip
                   </button>
                 </div>
               ) : (
@@ -1761,32 +2465,26 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     );
                   })}
 
-                  {/* Add place button */}
-                  <button onClick={() => openAddPlace(null)} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
-                    <Plus size={12} strokeWidth={2} /> Add a place
-                  </button>
+                  {/* Bottom actions */}
+                  <div className="flex flex-col items-center gap-2 pt-1">
+                    <button onClick={() => openAddPlace(null)} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                      <Plus size={12} strokeWidth={2} /> Add anything — flights, reservations, places…
+                    </button>
+                    <button onClick={openAskAI} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                      <Sparkles size={12} strokeWidth={2} /> Need help? Ask AI what to do on your trip
+                    </button>
+                    {!aiGeneratedPlanIds.has(selectedTrip.id) && (
+                      <button
+                        onClick={() => { setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id))); setShowGenerateSheet(true); }}
+                        className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-gray-900 text-white text-xs font-semibold"
+                      >
+                        🗓 Generate your {countDaysFromDates(selectedTrip.dates) > 0 ? `${countDaysFromDates(selectedTrip.dates)}-day ` : ''}itinerary
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
-              {/* Switch to itinerary CTA */}
-              <div className="mt-6 bg-orange-50 rounded-2xl px-4 py-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-bold text-gray-900">Ready to organize?</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{hasDates ? 'Switch to day-by-day view' : 'Add dates to go day by day'}</p>
-                </div>
-                <button
-                  onClick={() => {
-                    if (hasDates) {
-                      setPlanViewMode('itinerary');
-                    } else {
-                      openEditPlan(selectedTrip);
-                    }
-                  }}
-                  className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-full text-xs font-bold"
-                >
-                  <CalendarDays size={12} strokeWidth={2} /> {hasDates ? 'Itinerary' : 'Add dates'}
-                </button>
-              </div>
             </>
           ) : (
             /* ══════════════════════════════════════
@@ -1831,16 +2529,27 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
               {selectedTrip.days.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <p className="text-3xl mb-3">🗓</p>
+                  <p className="text-4xl mb-3">🗓</p>
                   <p className="text-base font-bold text-gray-900 mb-1">Nothing added yet</p>
-                  <p className="text-sm text-gray-400 mb-6">Set up your days or start adding places</p>
-                  {countDaysFromDates(selectedTrip.dates) > 0 && (
-                    <button onClick={handleInitDays} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold mb-3">
-                      <CalendarDays size={14} strokeWidth={2} /> Set up {countDaysFromDates(selectedTrip.dates)} days
+                  <p className="text-xs text-gray-400 mb-6">Set up your days or let AI build your itinerary</p>
+                  {realSavedPlaces.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id)));
+                        setShowGenerateSheet(true);
+                      }}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-xs font-semibold mb-2"
+                    >
+                      ✨ Generate itinerary with AI
                     </button>
                   )}
-                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-600 rounded-full text-sm font-semibold">
-                    <Plus size={14} strokeWidth={2} /> Add a place
+                  {countDaysFromDates(selectedTrip.dates) > 0 && (
+                    <button onClick={handleInitDays} className="flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-500 rounded-full text-xs font-semibold mb-1.5">
+                      <CalendarDays size={13} strokeWidth={2} /> Set up {countDaysFromDates(selectedTrip.dates)} days manually
+                    </button>
+                  )}
+                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-4 py-2 text-gray-400 rounded-full text-xs font-medium">
+                    <Plus size={13} strokeWidth={2} /> Add a place
                   </button>
                 </div>
               ) : (
@@ -2282,6 +2991,342 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           />
         )}
 
+        {/* ── Generate Itinerary Sheet ─────────────────────────────────────── */}
+        {showGenerateSheet && selectedTrip && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => !generateLoading && setShowGenerateSheet(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '85vh' }}>
+              {/* Handle + header */}
+              <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
+                <div className="w-8" />
+                <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Generate Itinerary</p>
+                <button onClick={() => setShowGenerateSheet(false)} disabled={generateLoading} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                  <X size={14} strokeWidth={2} className="text-gray-600" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 pt-4 pb-8">
+                {/* Intro */}
+                <div className="bg-gray-50 rounded-2xl px-4 py-3 mb-4">
+                  <p className="text-sm font-semibold text-gray-900 mb-0.5">
+                    ✨ AI will build your {countDaysFromDates(selectedTrip.dates) || '?'}-day itinerary
+                  </p>
+                  <p className="text-xs text-gray-400">Select the saved places you want to include. AI will group them by area and suggest timings.</p>
+                </div>
+
+                {/* Select all toggle */}
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-bold text-gray-500">{generateSelectedIds.size} of {realSavedPlaces.length} selected</p>
+                  <button
+                    onClick={() => {
+                      if (generateSelectedIds.size === realSavedPlaces.length) {
+                        setGenerateSelectedIds(new Set());
+                      } else {
+                        setGenerateSelectedIds(new Set(realSavedPlaces.map(p => p.id)));
+                      }
+                    }}
+                    className="text-xs font-semibold text-gray-900"
+                  >
+                    {generateSelectedIds.size === realSavedPlaces.length ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+
+                {/* Place list */}
+                <div className="space-y-2 mb-5">
+                  {realSavedPlaces.map(place => {
+                    const selected = generateSelectedIds.has(place.id);
+                    return (
+                      <button
+                        key={place.id}
+                        onClick={() => {
+                          setGenerateSelectedIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(place.id)) next.delete(place.id); else next.add(place.id);
+                            return next;
+                          });
+                        }}
+                        className={`w-full flex items-center gap-3 p-3 rounded-2xl border transition-colors text-left ${selected ? 'border-gray-900 bg-gray-50' : 'border-gray-100 bg-white'}`}
+                      >
+                        <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100">
+                          {place.photoUrl
+                            ? <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center text-lg">{categoryEmoji[place.category] ?? '📍'}</div>
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                          <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(' · ')}</p>
+                        </div>
+                        <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${selected ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                          {selected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {generateError && (
+                  <p className="text-xs text-red-500 text-center mb-3">{generateError}</p>
+                )}
+
+                <button
+                  onClick={handleGenerateItinerary}
+                  disabled={generateLoading || generateSelectedIds.size === 0}
+                  className="w-full py-4 bg-gray-900 text-white text-sm font-bold rounded-2xl disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {generateLoading ? (
+                    <>
+                      <Loader2 size={16} strokeWidth={2} className="animate-spin" />
+                      Building your itinerary…
+                    </>
+                  ) : (
+                    <>✨ Generate {generateSelectedIds.size > 0 ? `with ${generateSelectedIds.size} places` : ''}</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Ask AI for Ideas Sheet ───────────────────────────────────────── */}
+        {showAskAISheet && selectedTrip && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => !askAILoading && setShowAskAISheet(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
+              {/* Handle + header */}
+              <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
+                <div className="w-8" />
+                <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Ask AI for ideas</p>
+                <button onClick={() => setShowAskAISheet(false)} disabled={askAILoading} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                  <X size={14} strokeWidth={2} className="text-gray-600" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 pt-4 pb-8">
+                {askAISuggestions.length === 0 ? (
+                  <>
+                    <div className="bg-gray-50 rounded-2xl px-4 py-3 mb-4">
+                      <p className="text-sm font-semibold text-gray-900 mb-0.5">What's your vibe?</p>
+                      <p className="text-xs text-gray-400">Tell AI what you're into and it'll suggest the best places in {selectedTrip.destination}.</p>
+                    </div>
+                    <textarea
+                      value={askAIPrompt}
+                      onChange={e => setAskAIPrompt(e.target.value)}
+                      placeholder={`e.g. I love street food, hidden gems and local markets. Not too touristy.`}
+                      className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm text-gray-900 placeholder-gray-300 resize-none focus:outline-none focus:border-gray-400 mb-4"
+                      rows={3}
+                    />
+                    {askAIError && <p className="text-xs text-red-500 mb-3">{askAIError}</p>}
+                    <button
+                      onClick={handleAskAIIdeas}
+                      disabled={askAILoading || !askAIPrompt.trim()}
+                      className="w-full py-4 bg-gray-900 text-white text-sm font-bold rounded-2xl disabled:opacity-40 flex items-center justify-center gap-2"
+                    >
+                      {askAILoading ? (
+                        <><Loader2 size={16} strokeWidth={2} className="animate-spin" /> Finding places…</>
+                      ) : (
+                        <>✨ Get suggestions</>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="text-sm font-bold text-gray-900">Places for you</p>
+                      <button onClick={() => { setAskAISuggestions([]); setAddedAISuggestions(new Set()); }} className="text-xs text-gray-400 font-medium">Try again</button>
+                    </div>
+                    <div className="space-y-2.5 mb-5">
+                      {askAISuggestions.map((s, i) => {
+                        const added = addedAISuggestions.has(i);
+                        const adding = addingAISuggestion === i;
+                        return (
+                          <div key={i} className={`flex items-start gap-3 p-3 rounded-2xl border transition-colors ${added ? 'border-green-200 bg-green-50' : 'border-gray-100 bg-white'}`}>
+                            <div className="w-9 h-9 rounded-xl bg-gray-100 flex-shrink-0 flex items-center justify-center text-base">
+                              {categoryEmoji[s.category] ?? '📍'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 leading-snug">{s.name}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">{s.neighborhood}</p>
+                              <p className="text-xs text-gray-400 mt-1 italic leading-snug">{s.reason}</p>
+                            </div>
+                            <button
+                              onClick={() => !added && handleAddAISuggestion(s, i)}
+                              disabled={added || adding}
+                              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${added ? 'bg-green-100' : 'bg-gray-900'}`}
+                            >
+                              {adding ? (
+                                <Loader2 size={14} strokeWidth={2} className="animate-spin text-white" />
+                              ) : added ? (
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#16a34a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                              ) : (
+                                <Plus size={14} strokeWidth={2} className="text-white" />
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {addedAISuggestions.size > 0 && (
+                      <button
+                        onClick={() => setShowAskAISheet(false)}
+                        className="w-full py-3.5 bg-gray-900 text-white text-sm font-bold rounded-2xl"
+                      >
+                        Done — {addedAISuggestions.size} place{addedAISuggestions.size !== 1 ? 's' : ''} added
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Add Booking Sheet ────────────────────────────────────────────── */}
+        {showAddBooking && (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddBooking(false)} />
+            <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
+              {/* Handle + header */}
+              <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
+                <div className="w-8 h-8" />
+                <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{bookingForm.id ? 'Edit Reservation' : 'Add Reservation'}</p>
+                <button onClick={() => setShowAddBooking(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                  <X size={14} strokeWidth={2} className="text-gray-600" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 pb-8 pt-4">
+                {/* Type selector — only when adding new */}
+                {!bookingForm.id && (<>
+                  <div className="grid grid-cols-4 gap-2 mb-5">
+                    {(['flight', 'stay', 'restaurant', 'activity'] as BookingType[]).map(t => {
+                      const m = BOOKING_META[t];
+                      const active = bookingType === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => { setBookingType(t); setBookingForm({}); setBookingEmailText(''); setBookingImportMode(false); setShowReturnFlight(false); setReturnFlightForm({ flightNumber: '', departureTime: '', arrivalTime: '' }); }}
+                          className={`flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-colors ${active ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-500'}`}
+                        >
+                          <span className={active ? 'text-white' : ''}>{m.icon}</span>
+                          <span className="text-[10px] font-semibold">{m.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Import from email toggle — only when adding new */}
+                  <button
+                    onClick={() => setBookingImportMode(m => !m)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 mb-4 rounded-2xl border border-dashed border-gray-300 text-xs font-semibold text-gray-500"
+                  >
+                    <ClipboardPaste size={13} strokeWidth={2} />
+                    {bookingImportMode ? 'Fill in manually instead' : 'Paste confirmation email'}
+                  </button>
+                </>)}
+
+                {bookingImportMode ? (
+                  <div className="space-y-3">
+                    <textarea
+                      value={bookingEmailText}
+                      onChange={e => setBookingEmailText(e.target.value)}
+                      placeholder="Paste your confirmation email text here…"
+                      className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none resize-none"
+                      rows={7}
+                    />
+                    <button
+                      onClick={handleBookingImport}
+                      disabled={!bookingEmailText.trim()}
+                      className="w-full py-3 bg-gray-900 text-white text-sm font-bold rounded-2xl disabled:opacity-40"
+                    >
+                      Extract details
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Common fields */}
+                    <input
+                      value={bookingForm.title ?? ''}
+                      onChange={e => setBookingForm(p => ({ ...p, title: e.target.value }))}
+                      placeholder={bookingType === 'flight' ? 'Airline' : bookingType === 'stay' ? 'Hotel / property name' : bookingType === 'restaurant' ? 'Restaurant name' : 'Activity / venue name'}
+                      className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none"
+                    />
+                    <input
+                      value={bookingForm.confirmationNumber ?? ''}
+                      onChange={e => setBookingForm(p => ({ ...p, confirmationNumber: e.target.value }))}
+                      placeholder="Confirmation code (optional)"
+                      className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none font-mono"
+                    />
+
+                    {/* Flight-specific */}
+                    {bookingType === 'flight' && (<>
+                      <input value={bookingForm.flightNumber ?? ''} onChange={e => setBookingForm(p => ({ ...p, flightNumber: e.target.value }))} placeholder="Flight number (e.g. AS123)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={bookingForm.departureAirport ?? ''} onChange={e => setBookingForm(p => ({ ...p, departureAirport: e.target.value }))} placeholder="From (SFO)" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        <input value={bookingForm.arrivalAirport ?? ''} onChange={e => setBookingForm(p => ({ ...p, arrivalAirport: e.target.value }))} placeholder="To (SEA)" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={bookingForm.departureTime ?? ''} onChange={e => setBookingForm(p => ({ ...p, departureTime: e.target.value }))} placeholder="Date & departure time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        <input value={bookingForm.arrivalTime ?? ''} onChange={e => setBookingForm(p => ({ ...p, arrivalTime: e.target.value }))} placeholder="Arrival time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      </div>
+                      {!bookingForm.id && (
+                        <button onClick={() => setShowReturnFlight(v => !v)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-dashed border-gray-200 text-xs font-semibold text-gray-400">
+                          {showReturnFlight ? '− Remove return flight' : '+ Add return flight'}
+                        </button>
+                      )}
+                      {showReturnFlight && !bookingForm.id && (<>
+                        <p className="text-xs font-semibold text-gray-400 pt-1">Return flight — {bookingForm.arrivalAirport || '?'} → {bookingForm.departureAirport || '?'}</p>
+                        <input value={returnFlightForm.flightNumber} onChange={e => setReturnFlightForm(p => ({ ...p, flightNumber: e.target.value }))} placeholder="Flight number (e.g. AS383)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input value={returnFlightForm.departureTime} onChange={e => setReturnFlightForm(p => ({ ...p, departureTime: e.target.value }))} placeholder="Date & departure time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          <input value={returnFlightForm.arrivalTime} onChange={e => setReturnFlightForm(p => ({ ...p, arrivalTime: e.target.value }))} placeholder="Arrival time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        </div>
+                      </>)}
+                    </>)}
+
+                    {/* Stay-specific */}
+                    {bookingType === 'stay' && (<>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={bookingForm.checkInDate ?? ''} onChange={e => setBookingForm(p => ({ ...p, checkInDate: e.target.value }))} placeholder="Check-in date" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        <input value={bookingForm.checkOutDate ?? ''} onChange={e => setBookingForm(p => ({ ...p, checkOutDate: e.target.value }))} placeholder="Check-out date" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      </div>
+                      <input value={bookingForm.address ?? ''} onChange={e => setBookingForm(p => ({ ...p, address: e.target.value }))} placeholder="Address (optional)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                    </>)}
+
+                    {/* Restaurant / Activity-specific */}
+                    {(bookingType === 'restaurant' || bookingType === 'activity') && (<>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={bookingForm.reservationDate ?? ''} onChange={e => setBookingForm(p => ({ ...p, reservationDate: e.target.value }))} placeholder="Date" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        <input value={bookingForm.reservationTime ?? ''} onChange={e => setBookingForm(p => ({ ...p, reservationTime: e.target.value }))} placeholder="Time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      </div>
+                      <input value={bookingForm.partySize?.toString() ?? ''} onChange={e => setBookingForm(p => ({ ...p, partySize: e.target.value ? parseInt(e.target.value) : null }))} type="number" placeholder={bookingType === 'restaurant' ? 'Party size' : 'Number of people'} className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                    </>)}
+
+                    <textarea
+                      value={bookingForm.notes ?? ''}
+                      onChange={e => setBookingForm(p => ({ ...p, notes: e.target.value }))}
+                      placeholder="Notes (optional)"
+                      className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none resize-none"
+                      rows={2}
+                    />
+
+                    <button
+                      onClick={handleSaveBooking}
+                      disabled={bookingLoading || !bookingForm.title?.trim()}
+                      className="w-full py-3.5 bg-gray-900 text-white text-sm font-bold rounded-2xl disabled:opacity-40"
+                    >
+                      {bookingLoading ? 'Saving…' : 'Save reservation'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Add Place Sheet */}
         {showAddPlace && (
           <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
@@ -2293,7 +3338,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               </div>
               {/* header */}
               <div className="flex items-center px-5 pt-2 pb-3 flex-shrink-0">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Add a place</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Add anything</p>
                 <button onClick={() => setShowAddPlace(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                   <X size={15} strokeWidth={2} className="text-gray-500" />
                 </button>
@@ -2305,34 +3350,51 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   onClick={() => setAddPlaceSource('google')}
                   className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${addPlaceSource === 'google' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
                 >
-                  🔍 Search
+                  Search
                 </button>
                 <button
                   onClick={() => setAddPlaceSource('saved')}
                   className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${addPlaceSource === 'saved' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
                 >
-                  🔖 From saved
+                  Saved
+                </button>
+                <button
+                  onClick={() => { setAddPlaceSource('booking'); setBookingForm({}); setBookingEmailText(''); setBookingImportMode(false); }}
+                  className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${addPlaceSource === 'booking' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                >
+                  Reservation
                 </button>
               </div>
 
               {/* Saved places picker */}
               {addPlaceSource === 'saved' && (
                 <div className="flex flex-col flex-1 overflow-hidden px-5 pb-8">
+                  {/* Search bar — matches name, city, country, category */}
                   <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-2.5 mb-3 flex-shrink-0">
                     <Search size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
                     <input
                       autoFocus
                       value={addPlaceSavedSearch}
                       onChange={e => setAddPlaceSavedSearch(e.target.value)}
-                      placeholder="Search your saved places…"
+                      placeholder="Search by name, city, country or type…"
                       className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                     />
+                    {addPlaceSavedSearch && (
+                      <button onClick={() => setAddPlaceSavedSearch('')} className="text-gray-400"><X size={12} /></button>
+                    )}
                   </div>
                   {(() => {
                     const q = addPlaceSavedSearch.toLowerCase();
-                    const filtered = realSavedPlaces.filter(p =>
-                      !q || p.name.toLowerCase().includes(q) || p.city?.toLowerCase().includes(q) || p.neighborhood?.toLowerCase().includes(q)
-                    );
+                    const filtered = realSavedPlaces.filter(p => {
+                      if (!q) return true;
+                      return (
+                        p.name.toLowerCase().includes(q) ||
+                        p.city?.toLowerCase().includes(q) ||
+                        p.country?.toLowerCase().includes(q) ||
+                        p.neighborhood?.toLowerCase().includes(q) ||
+                        (categoryDisplayName[p.category] ?? p.category)?.toLowerCase().includes(q)
+                      );
+                    });
                     if (filtered.length === 0) return (
                       <p className="text-sm text-gray-400 text-center py-10">No saved places found</p>
                     );
@@ -2374,11 +3436,99 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 </div>
               )}
 
+              {/* Booking tab — inline booking form inside add sheet */}
+              {addPlaceSource === 'booking' && (
+                <div className="flex-1 overflow-y-auto px-5 pb-8">
+                  {/* Type selector */}
+                  <div className="grid grid-cols-4 gap-2 mb-4">
+                    {(['flight', 'stay', 'restaurant', 'activity'] as BookingType[]).map(t => {
+                      const m = BOOKING_META[t];
+                      const active = bookingType === t;
+                      return (
+                        <button key={t} onClick={() => { setBookingType(t); setBookingForm({}); setBookingEmailText(''); setBookingImportMode(false); setShowReturnFlight(false); setReturnFlightForm({ flightNumber: '', departureTime: '', arrivalTime: '' }); }}
+                          className={`flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-colors ${active ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-500'}`}>
+                          <span>{m.icon}</span>
+                          <span className="text-[10px] font-semibold">{m.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => setBookingImportMode(m => !m)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 mb-4 rounded-2xl border border-dashed border-gray-300 text-xs font-semibold text-gray-500">
+                    <ClipboardPaste size={13} strokeWidth={2} />
+                    {bookingImportMode ? 'Fill in manually instead' : 'Paste confirmation email'}
+                  </button>
+                  {bookingImportMode ? (
+                    <div className="space-y-3">
+                      <textarea value={bookingEmailText} onChange={e => setBookingEmailText(e.target.value)}
+                        placeholder="Paste your confirmation email text here…"
+                        className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none resize-none" rows={7} />
+                      <button onClick={handleBookingImport} disabled={!bookingEmailText.trim()}
+                        className="w-full py-3 bg-gray-900 text-white text-sm font-bold rounded-2xl disabled:opacity-40">
+                        Extract details
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <input value={bookingForm.title ?? ''} onChange={e => setBookingForm(p => ({ ...p, title: e.target.value }))}
+                        placeholder={bookingType === 'flight' ? 'Airline' : bookingType === 'stay' ? 'Hotel / property name' : bookingType === 'restaurant' ? 'Restaurant name' : 'Activity / venue name'}
+                        className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      <input value={bookingForm.confirmationNumber ?? ''} onChange={e => setBookingForm(p => ({ ...p, confirmationNumber: e.target.value }))}
+                        placeholder="Confirmation code (optional)"
+                        className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none font-mono" />
+                      {bookingType === 'flight' && (<>
+                        <input value={bookingForm.flightNumber ?? ''} onChange={e => setBookingForm(p => ({ ...p, flightNumber: e.target.value }))} placeholder="Flight number (e.g. AS123)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input value={bookingForm.departureAirport ?? ''} onChange={e => setBookingForm(p => ({ ...p, departureAirport: e.target.value }))} placeholder="From (SFO)" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          <input value={bookingForm.arrivalAirport ?? ''} onChange={e => setBookingForm(p => ({ ...p, arrivalAirport: e.target.value }))} placeholder="To (SEA)" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input value={bookingForm.departureTime ?? ''} onChange={e => setBookingForm(p => ({ ...p, departureTime: e.target.value }))} placeholder="Date & departure time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          <input value={bookingForm.arrivalTime ?? ''} onChange={e => setBookingForm(p => ({ ...p, arrivalTime: e.target.value }))} placeholder="Arrival time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        </div>
+                        <button onClick={() => setShowReturnFlight(v => !v)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-dashed border-gray-200 text-xs font-semibold text-gray-400">
+                          {showReturnFlight ? '− Remove return flight' : '+ Add return flight'}
+                        </button>
+                        {showReturnFlight && (<>
+                          <p className="text-xs font-semibold text-gray-400 pt-1">Return flight — {bookingForm.arrivalAirport || '?'} → {bookingForm.departureAirport || '?'}</p>
+                          <input value={returnFlightForm.flightNumber} onChange={e => setReturnFlightForm(p => ({ ...p, flightNumber: e.target.value }))} placeholder="Flight number (e.g. AS383)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input value={returnFlightForm.departureTime} onChange={e => setReturnFlightForm(p => ({ ...p, departureTime: e.target.value }))} placeholder="Date & departure time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                            <input value={returnFlightForm.arrivalTime} onChange={e => setReturnFlightForm(p => ({ ...p, arrivalTime: e.target.value }))} placeholder="Arrival time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          </div>
+                        </>)}
+                      </>)}
+                      {bookingType === 'stay' && (<>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input value={bookingForm.checkInDate ?? ''} onChange={e => setBookingForm(p => ({ ...p, checkInDate: e.target.value }))} placeholder="Check-in" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          <input value={bookingForm.checkOutDate ?? ''} onChange={e => setBookingForm(p => ({ ...p, checkOutDate: e.target.value }))} placeholder="Check-out" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        </div>
+                        <input value={bookingForm.address ?? ''} onChange={e => setBookingForm(p => ({ ...p, address: e.target.value }))} placeholder="Address (optional)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      </>)}
+                      {(bookingType === 'restaurant' || bookingType === 'activity') && (<>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input value={bookingForm.reservationDate ?? ''} onChange={e => setBookingForm(p => ({ ...p, reservationDate: e.target.value }))} placeholder="Date" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                          <input value={bookingForm.reservationTime ?? ''} onChange={e => setBookingForm(p => ({ ...p, reservationTime: e.target.value }))} placeholder="Time" className="bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                        </div>
+                        <input value={bookingForm.partySize?.toString() ?? ''} onChange={e => setBookingForm(p => ({ ...p, partySize: e.target.value ? parseInt(e.target.value) : null }))}
+                          type="number" placeholder={bookingType === 'restaurant' ? 'Party size' : 'Number of people'} className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none" />
+                      </>)}
+                      <textarea value={bookingForm.notes ?? ''} onChange={e => setBookingForm(p => ({ ...p, notes: e.target.value }))}
+                        placeholder="Notes (optional)" className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none resize-none" rows={2} />
+                      <button onClick={handleSaveBooking} disabled={bookingLoading || !bookingForm.title?.trim()}
+                        className="w-full py-3.5 bg-gray-900 text-white text-sm font-bold rounded-2xl disabled:opacity-40">
+                        {bookingLoading ? 'Saving…' : 'Save reservation'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* scrollable body */}
               {addPlaceSource === 'google' && (
               <div ref={addPlaceScrollRef} className="flex-1 overflow-y-auto px-5 pb-8">
-                {/* Day selector */}
-                {selectedTrip && selectedTrip.days.length > 0 && (
+                {/* Day selector — only show in itinerary mode */}
+                {selectedTrip && selectedTrip.days.length > 0 && planViewMode === 'itinerary' && (
                   <div className="mb-5">
                     <p className="text-xs font-semibold text-gray-400 mb-2">Which day?</p>
                     <div className="flex gap-2 flex-wrap">
@@ -2399,146 +3549,58 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   </div>
                 )}
 
-                {/* Title */}
-                <div className="mb-4">
-                  <p className="text-xs font-semibold text-gray-400 mb-2">Title</p>
-                  <input
-                    value={addPlaceSelectedName}
-                    onChange={e => setAddPlaceSelectedName(e.target.value)}
-                    placeholder="e.g. Dinner at Carbone"
-                    className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                {/* Place search — Google Places autocomplete, same as Add Post */}
+                <div className="mb-5">
+                  <PlaceSearch
+                    placeholder="Search restaurant, stay, activity…"
+                    onSelect={result => {
+                      if (result.name) { setAddPlaceSelectedName(result.name); setAddPlaceSearch(result.name); }
+                      if (result.category) setAddPlaceCategory(result.category);
+                      if (result.neighborhood) setAddPlaceNeighborhood(result.neighborhood);
+                      if (result.city) setAddPlaceCity(result.city);
+                      if (result.country) setAddPlaceCountry(result.country);
+                      if (result.address) setAddPlaceAddress(result.address);
+                      if (result.photo && !addPlaceCustomImage) setAddPlaceCustomImage(result.photo);
+                      if (result.placeId) setAddPlaceSelectedId(result.placeId);
+                      setAddPlaceLat(result.lat ?? null);
+                      setAddPlaceLng(result.lng ?? null);
+                    }}
                   />
-                </div>
-
-                {/* Address search */}
-                <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-400 mb-2">Address</p>
-                    <div>
-                      <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
-                        <Search size={14} className="text-gray-400 flex-shrink-0" />
-                        <input
-                          value={addPlaceSearch}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setAddPlaceSearch(val);
-                            if (addPlaceTimerRef.current) clearTimeout(addPlaceTimerRef.current);
-                            if (!val.trim()) { setAddPlaceSuggestions([]); setAddPlaceMapsNote(''); return; }
-                            // Detect Google Maps URLs and handle separately
-                            if (/maps\.app\.goo\.gl|google\.com\/maps|maps\.google\.com/.test(val)) {
-                              handleMapsUrl(val);
-                              return;
-                            }
-                            addPlaceTimerRef.current = setTimeout(async () => {
-                              setAddPlaceSearching(true);
-                              try {
-                                const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-                                  body: JSON.stringify({ input: val, languageCode: 'en' }),
-                                });
-                                const data = await res.json();
-                                setAddPlaceSuggestions(
-                                  (data.suggestions ?? [])
-                                    .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
-                                    .filter((s: any) => s.placeId)
-                                    .slice(0, 6)
-                                );
-                              } catch { setAddPlaceSuggestions([]); }
-                              setAddPlaceSearching(false);
-                            }, 400);
-                          }}
-                          placeholder="Search restaurant, stay, activity…"
-                          className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                        />
-                        {addPlaceSearching && <Loader2 size={14} className="text-gray-400 animate-spin flex-shrink-0" />}
+                  {/* Selected place card — shown after picking from autocomplete */}
+                  {addPlaceSelectedName && (
+                    <div className="mt-2 bg-gray-50 rounded-xl px-4 py-3">
+                      <input
+                        value={addPlaceSelectedName}
+                        onChange={e => setAddPlaceSelectedName(e.target.value)}
+                        className="font-bold text-gray-900 text-sm w-full outline-none bg-transparent border-b border-dashed border-gray-300 focus:border-gray-500 pb-0.5 mb-2 transition-colors"
+                        placeholder="Place name"
+                      />
+                      <div className="flex items-center" style={{ gap: '4px' }}>
+                        <MapPin size={10} className="text-gray-400 flex-shrink-0" />
+                        <span className="text-xs text-gray-400 flex items-center flex-wrap" style={{ gap: 0 }}>
+                          <input
+                            value={addPlaceNeighborhood}
+                            onChange={e => setAddPlaceNeighborhood(e.target.value)}
+                            className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                            style={{ width: `${Math.max(52, (addPlaceNeighborhood || 'Neighbourhood').length * 7.2)}px`, padding: 0, margin: 0 }}
+                            placeholder="Neighbourhood"
+                          /><span>,&nbsp;</span><input
+                            value={addPlaceCity}
+                            onChange={e => setAddPlaceCity(e.target.value)}
+                            className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                            style={{ width: `${Math.max(28, (addPlaceCity || 'City').length * 7.2)}px`, padding: 0, margin: 0 }}
+                            placeholder="City"
+                          /><span>,&nbsp;</span><input
+                            value={addPlaceCountry}
+                            onChange={e => setAddPlaceCountry(e.target.value)}
+                            className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                            style={{ width: `${Math.max(40, (addPlaceCountry || 'Country').length * 7.2)}px`, padding: 0, margin: 0 }}
+                            placeholder="Country"
+                          />
+                        </span>
                       </div>
-                      {addPlaceMapsNote && (
-                        <p className={`text-xs mt-1.5 px-1 ${addPlaceMapsNote.startsWith('✓') ? 'text-green-600' : 'text-amber-600'}`}>
-                          {addPlaceMapsNote}
-                        </p>
-                      )}
-                      {addPlaceSuggestions.length > 0 && (
-                        <div
-                          ref={el => {
-                            addPlaceSuggestionsRef.current = el;
-                            if (el && addPlaceScrollRef.current) {
-                              setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-                            }
-                          }}
-                          className="mt-1 bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden"
-                        >
-                          {addPlaceSuggestions.map(s => (
-                            <button
-                              key={s.placeId}
-                              onMouseDown={e => e.preventDefault()}
-                              onClick={async () => {
-                                setAddPlaceSelectedId(s.placeId);
-                                setAddPlaceSuggestions([]);
-                                setAddPlaceSearch(s.text);
-                                setAddPlaceAddress(s.text); // immediate fallback — overridden by formattedAddress below
-                                setAddPlaceFetchingDetails(true);
-                                try {
-                                  const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
-                                    headers: {
-                                      'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                                      'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents,photos',
-                                      'X-Goog-LanguageCode': 'en',
-                                    },
-                                  });
-                                  const data = await res.json();
-                                  if (data.displayName?.text) {
-                                    setAddPlaceSelectedName(prev => {
-                                      const prevClean = prev.trim();
-                                      if (!prevClean || prevClean === s.text) return data.displayName.text;
-                                      return prev;
-                                    });
-                                  } else if (!addPlaceSelectedName.trim()) {
-                                    setAddPlaceSelectedName(s.text);
-                                  }
-                                  if (data.formattedAddress) setAddPlaceAddress(data.formattedAddress);
-                                  const area = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
-                                  if (area) setAddPlaceNeighborhood(area);
-                                  const photoName = data.photos?.[0]?.name;
-                                  if (photoName && !addPlaceCustomImage) {
-                                    setAddPlaceCustomImage(
-                                      `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`
-                                    );
-                                  }
-                                } catch {
-                                  if (!addPlaceSelectedName.trim()) setAddPlaceSelectedName(s.text);
-                                } finally {
-                                  setAddPlaceFetchingDetails(false);
-                                }
-                              }}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 text-left"
-                            >
-                              <MapPin size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                              <span className="text-sm text-gray-800">{s.text}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                    {/* Confirmed address field — auto-filled by autocomplete, editable */}
-                    {addPlaceAddress && (
-                      <div className="mt-2 flex items-start gap-2 bg-green-50 rounded-xl px-3 py-2.5">
-                        <MapPin size={13} strokeWidth={1.5} className="text-green-500 flex-shrink-0 mt-0.5" />
-                        <input
-                          value={addPlaceAddress}
-                          onChange={e => setAddPlaceAddress(e.target.value)}
-                          className="flex-1 bg-transparent text-xs text-green-800 outline-none"
-                        />
-                      </div>
-                    )}
-                </div>
-
-                {/* Neighborhood */}
-                <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-400 mb-2">Neighborhood <span className="font-normal">(optional)</span></p>
-                  <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
-                    <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                    <input value={addPlaceNeighborhood} onChange={e => setAddPlaceNeighborhood(e.target.value)} placeholder="Auto-filled from search" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
-                  </div>
+                  )}
                 </div>
 
                 {/* Custom image */}
@@ -2582,7 +3644,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   <div className="flex gap-2 flex-wrap">
                     {[
                       { key: 'restaurant', label: '🍽️ Restaurant' },
-                      { key: 'cafe', label: '☕ Café' },
+                      { key: 'cafe', label: '☕ Cafe' },
                       { key: 'bar', label: '🍸 Bar' },
                       { key: 'food', label: '🍕 Food' },
                       { key: 'hotel', label: '🏨 Stay' },
@@ -2674,15 +3736,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   onClick={() => {
                     const id = addPlaceSelectedId;
                     const name = addPlaceSelectedName || addPlaceSearch.trim();
-                    // Use addPlaceAddress first, fall back to addPlaceSearch (which is always set when autocomplete is used)
                     const addressToSave = addPlaceAddress || addPlaceSearch.trim() || addPlaceLocation;
-                    console.log('[Save btn] name:', name, '| addPlaceAddress:', addPlaceAddress, '| addressToSave:', addressToSave);
-                    if (name) handleSelectPlace(id, name, addPlaceTime, addPlaceTimeEnd, addPlaceNotes, addPlaceCategory, addressToSave, addPlaceNeighborhood);
+                    if (name) handleSelectPlace(id, name, addPlaceTime, addPlaceTimeEnd, addPlaceNotes, addPlaceCategory, addressToSave, addPlaceNeighborhood, addPlaceLat, addPlaceLng);
                   }}
-                  disabled={(!addPlaceSelectedId && !addPlaceSearch.trim()) || !( addPlaceAddress || addPlaceSearch.trim()) || addPlaceSaving || addPlaceUploading || addPlaceFetchingDetails}
+                  disabled={!addPlaceSelectedName.trim() || addPlaceSaving || addPlaceUploading}
                   className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
                 >
-                  {addPlaceUploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : addPlaceFetchingDetails ? <><Loader2 size={14} className="animate-spin" /> Loading details…</> : 'Add to plan'}
+                  {addPlaceUploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : 'Add to plan'}
                 </button>
               </div>
               )}
@@ -3031,7 +4091,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 <div className="mb-4">
                   <p className="text-xs font-semibold text-gray-400 mb-2">Type</p>
                   <div className="flex gap-2 flex-wrap">
-                    {[{ key: 'restaurant', label: '🍽 Restaurant' },{ key: 'hotel', label: '🏨 Stay' },{ key: 'cafe', label: '☕ Café' },{ key: 'bar', label: '🍸 Bar' },{ key: 'attraction', label: '🏛️ Attraction' },{ key: 'nature', label: '🌿 Nature' },{ key: 'shop', label: '🛍 Shop' },{ key: 'experience', label: '🗺️ Experience' },{ key: 'sports', label: '🎾 Sports' },{ key: 'flight', label: '✈️ Flight' },{ key: 'transport', label: '🚗 Transport' },{ key: 'event', label: '🎟️ Event' },{ key: 'beach', label: '🏖️ Beach' },{ key: 'food', label: '🍕 Food' },{ key: 'wellness', label: '💆 Wellness' }].map(cat => (
+                    {[{ key: 'restaurant', label: '🍽 Restaurant' },{ key: 'hotel', label: '🏨 Stay' },{ key: 'cafe', label: '☕ Cafe' },{ key: 'bar', label: '🍸 Bar' },{ key: 'attraction', label: '🏛️ Attraction' },{ key: 'nature', label: '🌿 Nature' },{ key: 'shop', label: '🛍 Shop' },{ key: 'experience', label: '🗺️ Experience' },{ key: 'sports', label: '🎾 Sports' },{ key: 'flight', label: '✈️ Flight' },{ key: 'transport', label: '🚗 Transport' },{ key: 'event', label: '🎟️ Event' },{ key: 'beach', label: '🏖️ Beach' },{ key: 'food', label: '🍕 Food' },{ key: 'wellness', label: '💆 Wellness' }].map(cat => (
                       <button key={cat.key} onClick={() => setEditItem(prev => prev ? { ...prev, category: cat.key } : prev)}
                         className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${editItem.category === cat.key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>
                         {cat.label}
@@ -4857,7 +5917,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   <p className="text-xs font-semibold text-gray-500 mb-2">Type <span className="font-normal text-gray-400">(optional)</span></p>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { key: 'restaurant', label: '🍽 Restaurant' }, { key: 'hotel', label: '🏨 Stay' }, { key: 'cafe', label: '☕ Café' },
+                      { key: 'restaurant', label: '🍽 Restaurant' }, { key: 'hotel', label: '🏨 Stay' }, { key: 'cafe', label: '☕ Cafe' },
                       { key: 'bar', label: '🍸 Bar' }, { key: 'attraction', label: '🏛️ Attraction' }, { key: 'nature', label: '🌿 Nature' },
                       { key: 'shop', label: '🛍 Shop' }, { key: 'experience', label: '🗺️ Experience' }, { key: 'sports', label: '🎾 Sports' },
                       { key: 'flight', label: '✈️ Flight' }, { key: 'transport', label: '🚗 Transport' }, { key: 'event', label: '🎟️ Event' },

@@ -1095,6 +1095,8 @@ export interface PlanItem {
   checkOut: string;
   booked: boolean;
   position: number;
+  lat?: number | null;
+  lng?: number | null;
   addedBy?: string | null;
   addedByName?: string | null;
   addedByAvatar?: string | null;
@@ -1121,6 +1123,34 @@ export interface Plan {
   createdAt: string;
   days: PlanDay[];
   collaborators: PlanCollaboratorProfile[];
+}
+
+export type BookingType = 'flight' | 'stay' | 'restaurant' | 'activity';
+
+export interface PlanBooking {
+  id: string;
+  planId: string;
+  type: BookingType;
+  title: string;
+  confirmationNumber: string;
+  notes: string;
+  // Flight
+  flightNumber: string;
+  airline: string;
+  departureAirport: string;
+  arrivalAirport: string;
+  departureTime: string;
+  arrivalTime: string;
+  // Stay
+  checkInDate: string;
+  checkOutDate: string;
+  address: string;
+  // Restaurant / Activity
+  reservationDate: string;
+  reservationTime: string;
+  partySize: number | null;
+  addedBy: string | null;
+  createdAt: string;
 }
 
 export async function getPlans(userId: string): Promise<Plan[]> {
@@ -1187,6 +1217,8 @@ export async function getPlans(userId: string): Promise<Plan[]> {
             checkOut: i.check_out ?? '',
             booked: i.booked ?? false,
             position: i.position ?? 0,
+            lat: i.lat ?? null,
+            lng: i.lng ?? null,
             addedBy: i.added_by ?? null,
             addedByName: (i.profiles as any)?.name ?? null,
             addedByAvatar: (i.profiles as any)?.avatar_url ?? null,
@@ -1332,7 +1364,7 @@ export async function createPlanDay(planId: string, label: string, position: num
 export async function createPlanItem(
   planId: string,
   planDayId: string,
-  data: { name: string; category: string; image_url: string; time_label: string; time_end?: string; notes?: string; address?: string; neighborhood?: string; status?: string; check_in?: string; check_out?: string; location?: string; position: number; added_by?: string }
+  data: { name: string; category: string; image_url: string; time_label: string; time_end?: string; notes?: string; address?: string; neighborhood?: string; status?: string; check_in?: string; check_out?: string; location?: string; position: number; added_by?: string; lat?: number | null; lng?: number | null }
 ): Promise<PlanItem | null> {
   const payload = { plan_id: planId, plan_day_id: planDayId, ...data };
   console.log('[createPlanItem] inserting:', { name: data.name, address: data.address, image_url: data.image_url?.slice(0, 60) });
@@ -1360,6 +1392,7 @@ export async function createPlanItem(
     location: item.location ?? '', status: item.status ?? 'none',
     checkIn: item.check_in ?? '', checkOut: item.check_out ?? '',
     booked: item.booked ?? false, position: item.position ?? 0,
+    lat: item.lat ?? null, lng: item.lng ?? null,
   };
 }
 
@@ -1948,4 +1981,106 @@ export async function sendMessage(conversationId: string, senderId: string, text
     .single();
   if (error || !data) { console.error('[sendMessage]', error?.message); return null; }
   return { id: data.id, conversationId: data.conversation_id, senderId: data.sender_id, text: data.text, createdAt: data.created_at };
+}
+
+// ── Plan Bookings ─────────────────────────────────────────────────────────────
+function rowToBooking(r: any): PlanBooking {
+  return {
+    id: r.id,
+    planId: r.plan_id,
+    type: r.type ?? 'activity',
+    title: r.title ?? '',
+    confirmationNumber: r.confirmation_number ?? '',
+    notes: r.notes ?? '',
+    flightNumber: r.flight_number ?? '',
+    airline: r.airline ?? '',
+    departureAirport: r.departure_airport ?? '',
+    arrivalAirport: r.arrival_airport ?? '',
+    departureTime: r.departure_time ?? '',
+    arrivalTime: r.arrival_time ?? '',
+    checkInDate: r.check_in_date ?? '',
+    checkOutDate: r.check_out_date ?? '',
+    address: r.address ?? '',
+    reservationDate: r.reservation_date ?? '',
+    reservationTime: r.reservation_time ?? '',
+    partySize: r.party_size ?? null,
+    addedBy: r.added_by ?? null,
+    createdAt: r.created_at ?? '',
+  };
+}
+
+export async function getPlanBookings(planId: string): Promise<PlanBooking[]> {
+  const { data, error } = await supabase
+    .from('plan_bookings')
+    .select('*')
+    .eq('plan_id', planId)
+    .order('created_at', { ascending: true });
+  if (error) { console.error('[getPlanBookings]', error.message); return []; }
+  return (data ?? []).map(rowToBooking);
+}
+
+export async function createPlanBooking(
+  planId: string,
+  addedBy: string,
+  booking: Omit<PlanBooking, 'id' | 'planId' | 'addedBy' | 'createdAt'>
+): Promise<PlanBooking | null> {
+  const { data, error } = await supabase
+    .from('plan_bookings')
+    .insert({
+      plan_id: planId,
+      added_by: addedBy,
+      type: booking.type,
+      title: booking.title,
+      confirmation_number: booking.confirmationNumber,
+      notes: booking.notes,
+      flight_number: booking.flightNumber,
+      airline: booking.airline,
+      departure_airport: booking.departureAirport,
+      arrival_airport: booking.arrivalAirport,
+      departure_time: booking.departureTime,
+      arrival_time: booking.arrivalTime,
+      check_in_date: booking.checkInDate,
+      check_out_date: booking.checkOutDate,
+      address: booking.address,
+      reservation_date: booking.reservationDate,
+      reservation_time: booking.reservationTime,
+      party_size: booking.partySize,
+    })
+    .select()
+    .single();
+  if (error || !data) { console.error('[createPlanBooking]', error?.message); return null; }
+  return rowToBooking(data);
+}
+
+export async function updatePlanBooking(
+  id: string,
+  booking: Partial<Omit<PlanBooking, 'id' | 'planId' | 'addedBy' | 'createdAt'>>
+): Promise<void> {
+  const { error } = await supabase
+    .from('plan_bookings')
+    .update({
+      ...(booking.type !== undefined && { type: booking.type }),
+      ...(booking.title !== undefined && { title: booking.title }),
+      ...(booking.confirmationNumber !== undefined && { confirmation_number: booking.confirmationNumber }),
+      ...(booking.notes !== undefined && { notes: booking.notes }),
+      ...(booking.flightNumber !== undefined && { flight_number: booking.flightNumber }),
+      ...(booking.airline !== undefined && { airline: booking.airline }),
+      ...(booking.departureAirport !== undefined && { departure_airport: booking.departureAirport }),
+      ...(booking.arrivalAirport !== undefined && { arrival_airport: booking.arrivalAirport }),
+      ...(booking.departureTime !== undefined && { departure_time: booking.departureTime }),
+      ...(booking.arrivalTime !== undefined && { arrival_time: booking.arrivalTime }),
+      ...(booking.checkInDate !== undefined && { check_in_date: booking.checkInDate }),
+      ...(booking.checkOutDate !== undefined && { check_out_date: booking.checkOutDate }),
+      ...(booking.address !== undefined && { address: booking.address }),
+      ...(booking.reservationDate !== undefined && { reservation_date: booking.reservationDate }),
+      ...(booking.reservationTime !== undefined && { reservation_time: booking.reservationTime }),
+      ...(booking.partySize !== undefined && { party_size: booking.partySize }),
+    })
+    .eq('id', id);
+  if (error) console.error('[updatePlanBooking]', error.message);
+}
+
+export async function deletePlanBooking(id: string): Promise<void> {
+  const { error } = await supabase.from('plan_bookings').delete().eq('id', id);
+  if (error) console.error('[deletePlanBooking]', error.message);
 }
