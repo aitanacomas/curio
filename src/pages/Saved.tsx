@@ -904,6 +904,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         notes: item.notes ?? '', address: item.address ?? '', neighborhood: item.neighborhood ?? '',
         status: item.status ?? 'none', check_in: item.checkIn, check_out: item.checkOut,
         position: day.items.length, added_by: userId || undefined,
+        lat: item.lat ?? undefined, lng: item.lng ?? undefined,
       });
       if (dbItem) {
         const newItem: TripItem = {
@@ -1666,6 +1667,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             check_in: '',
             check_out: '',
             position: pi,
+            lat: saved?.lat ?? undefined, lng: saved?.lng ?? undefined,
           });
           if (dbItem) items.push(dbItem);
         }
@@ -1753,6 +1755,7 @@ Return ONLY valid JSON, no markdown, no explanation:
         name: suggestion.name, category: suggestion.category, image_url: '',
         time_label: '', notes: suggestion.reason, neighborhood: suggestion.neighborhood,
         position: day.items.length, added_by: userId,
+        lat: suggestion.lat ?? undefined, lng: suggestion.lng ?? undefined,
       });
       if (dbItem) {
         const newItem: TripItem = { id: dbItem.id, name: suggestion.name, category: suggestion.category, image: '', neighborhood: suggestion.neighborhood, notes: suggestion.reason, status: 'none' };
@@ -3427,7 +3430,11 @@ Return ONLY valid JSON, no markdown, no explanation:
                               setAddPlaceCategory(place.category);
                               setAddPlaceCustomImage(place.photoUrl ?? '');
                               setAddPlaceNeighborhood(place.neighborhood ?? '');
+                              setAddPlaceCity(place.city ?? '');
+                              setAddPlaceCountry(place.country ?? '');
                               setAddPlaceLocation(place.city ?? '');
+                              setAddPlaceLat(place.lat ?? null);
+                              setAddPlaceLng(place.lng ?? null);
                               setAddPlaceSource('google'); // switch to form view
                             }}
                             className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left"
@@ -3873,6 +3880,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                                 notes: detailItem.notes ?? '', address: detailItem.address ?? '', neighborhood: detailItem.neighborhood ?? '',
                                 status: detailItem.status ?? 'none', check_in: detailItem.checkIn, check_out: detailItem.checkOut,
                                 position: day.items.length, added_by: userId || undefined,
+                                lat: detailItem.lat ?? undefined, lng: detailItem.lng ?? undefined,
                               });
                               if (dbItem) {
                                 const newItem: TripItem = {
