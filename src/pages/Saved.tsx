@@ -1640,7 +1640,7 @@ Return ONLY valid JSON, no markdown, no explanation:
         }
       );
 
-      if (!res.ok) throw new Error(`API error ${res.status}`);
+      if (!res.ok) throw new Error(res.status === 429 ? 'Too many requests — wait a moment and try again.' : `API error ${res.status}`);
       const data = await res.json();
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -1723,7 +1723,7 @@ Return ONLY valid JSON, no markdown, no explanation:
         { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 1500 } }) }
       );
-      if (!res.ok) throw new Error(`API error ${res.status}`);
+      if (!res.ok) throw new Error(res.status === 429 ? 'Too many requests — wait a moment and try again.' : `API error ${res.status}`);
       const data = await res.json();
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
