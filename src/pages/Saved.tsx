@@ -4685,22 +4685,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                     <input value={newPlanDesc} onChange={e => setNewPlanDesc(e.target.value)} placeholder="Description (optional)" className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
                   </div>
                   <LocationSearch value={newPlanLocation} onChange={setNewPlanLocation} onCoverImage={setNewPlanCoverImage} />
-                  <div className="flex items-start gap-3 bg-gray-50 rounded-xl px-4 py-3">
-                    <Users size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      {newPlanCollabs.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mb-2">
-                          {newPlanCollabs.map(c => (
-                            <span key={c} className="flex items-center gap-1 bg-white border border-gray-200 text-xs text-gray-600 font-medium px-2 py-1 rounded-full">
-                              @{c}<button onClick={() => setNewPlanCollabs(prev => prev.filter(x => x !== c))}><X size={10} strokeWidth={2} className="text-gray-400" /></button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <input value={newPlanCollabInput} onChange={e => setNewPlanCollabInput(e.target.value)}
-                        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ',') && newPlanCollabInput.trim()) { e.preventDefault(); const val = newPlanCollabInput.trim().replace(/^@/, ''); if (val && !newPlanCollabs.includes(val)) setNewPlanCollabs(prev => [...prev, val]); setNewPlanCollabInput(''); } }}
-                        placeholder="Add collaborators (optional)" className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
-                    </div>
+                  <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 text-gray-400">
+                    <Users size={14} strokeWidth={1.5} className="flex-shrink-0" />
+                    <p className="text-sm">Invite people after creating the plan</p>
                   </div>
                 </div>
               </>
