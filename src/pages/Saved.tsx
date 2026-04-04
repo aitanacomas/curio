@@ -679,6 +679,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [realSavedPlaceIds, setRealSavedPlaceIds] = useState<Set<string>>(new Set());
   const [selectedSavedPost, setSelectedSavedPost] = useState<RealPost | null>(null);
   const [showMap, setShowMap] = useState(false);
+  const [planViewMode, setPlanViewMode] = useState<'brainstorm' | 'itinerary'>('brainstorm');
   const [mapCoords, setMapCoords] = useState<Record<string, { lat: number; lng: number }>>({});
   const [mapLoading, setMapLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -1412,6 +1413,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   }, [selectedTrip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Geocode items for map view ──────────────────────────────────────────
+  // Reset view mode when opening a different plan
+  useEffect(() => {
+    if (!selectedTrip) return;
+    // Default: itinerary if days already set up, brainstorm otherwise
+    setPlanViewMode(selectedTrip.days.length > 0 ? 'itinerary' : 'brainstorm');
+    setShowMap(false);
+  }, [selectedTrip?.id]);
+
   useEffect(() => {
     if (!showMap || !selectedTrip || !GOOGLE_PLACES_KEY) return;
     const allItems = selectedTrip.days.flatMap(d => d.items);
@@ -1483,6 +1492,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     const allItems = sortedDays.flatMap(d => d.items);
     const allItemsWithDayId = sortedDays.flatMap(d => d.items.map(i => ({ ...i, _dayId: d.id ?? null })));
     const hasDates = !!selectedTrip.dates && selectedTrip.dates.trim().length > 0;
+    const isBrainstorm = planViewMode === 'brainstorm';
     const statusConfig: Record<Trip['status'], { label: string; color: string }> = {
       dreaming: { label: '✨ Want to do / see', color: 'bg-purple-100 text-purple-700' },
       planning: { label: '📋 Planning it', color: 'bg-amber-100 text-amber-700' },
@@ -1562,9 +1572,9 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         {/* Stats row */}
         <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
           {[
-            hasDates
-              ? { value: countDaysFromDates(selectedTrip.dates), label: 'Days' }
-              : { value: allItems.length, label: 'Ideas' },
+            isBrainstorm
+              ? { value: allItems.length, label: 'Ideas' }
+              : { value: countDaysFromDates(selectedTrip.dates) || sortedDays.length, label: 'Days' },
             { value: totalItems, label: 'Places' },
             { value: bookedCount, label: 'Booked' },
           ].map(s => (
@@ -1706,7 +1716,26 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         {/* Place list — TRIP only (events returned early above) */}
         <div className="px-4 pt-4 pb-28">
 
-          {!hasDates ? (
+          {/* Brainstorm / Itinerary toggle */}
+          <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5 mb-5 w-fit">
+            {(['brainstorm', 'itinerary'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => {
+                  if (mode === 'itinerary' && !hasDates && selectedTrip.days.length === 0) {
+                    openEditPlan(selectedTrip);
+                  } else {
+                    setPlanViewMode(mode);
+                  }
+                }}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors capitalize ${planViewMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+              >
+                {mode === 'brainstorm' ? '✨ Brainstorm' : '🗓 Itinerary'}
+              </button>
+            ))}
+          </div>
+
+          {isBrainstorm ? (
             /* ══════════════════════════════════════
                BRAINSTORM MODE — flat idea list
                ══════════════════════════════════════ */
@@ -1808,17 +1837,23 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 </div>
               )}
 
-              {/* "Add dates & start organizing" CTA */}
+              {/* Switch to itinerary CTA */}
               <div className="mt-6 bg-orange-50 rounded-2xl px-4 py-4 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-bold text-gray-900">Ready to plan it out?</p>
-                  <p className="text-xs text-gray-500 mt-0.5">Add dates to organize day by day</p>
+                  <p className="text-sm font-bold text-gray-900">Ready to organize?</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{hasDates ? 'Switch to day-by-day view' : 'Add dates to go day by day'}</p>
                 </div>
                 <button
-                  onClick={() => openEditPlan(selectedTrip)}
+                  onClick={() => {
+                    if (hasDates) {
+                      setPlanViewMode('itinerary');
+                    } else {
+                      openEditPlan(selectedTrip);
+                    }
+                  }}
                   className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-full text-xs font-bold"
                 >
-                  <CalendarDays size={12} strokeWidth={2} /> Add dates
+                  <CalendarDays size={12} strokeWidth={2} /> {hasDates ? 'Itinerary' : 'Add dates'}
                 </button>
               </div>
             </>
