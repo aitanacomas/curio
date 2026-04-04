@@ -144,7 +144,9 @@
       "Bash(python3 -c \"import sys; [print\\(f''''{i+660}: {repr\\(line.rstrip\\(\\)\\)}''''\\) for i, line in enumerate\\(sys.stdin\\)]\")",
       "Bash(node scripts/geocode-all-places.mjs)",
       "Bash(find '/Users/aitanacomas/Desktop/Social Media App' -name *.env* -o -name .env*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(grep -n \"addPlaceSource === ''google''\" src/pages/Saved.tsx)",
+      "Bash(awk 'NR>=2451 && NR<=2763 {open+=gsub\\(/<div/,\"\"\"\"\\); close+=gsub\\(/<\\\\/div>/,\"\"\"\"\\)} END {print \"\"opens:\"\", open, \"\"closes:\"\", close}' src/pages/Saved.tsx)"
     ]
   }
 }

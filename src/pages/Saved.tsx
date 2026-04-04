@@ -737,6 +737,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [showEditItem, setShowEditItem] = useState(false);
   const [editItemUploading, setEditItemUploading] = useState(false);
   const [addPlaceUploading, setAddPlaceUploading] = useState(false);
+  const [addPlaceSource, setAddPlaceSource] = useState<'google' | 'saved'>('google');
+  const [addPlaceSavedSearch, setAddPlaceSavedSearch] = useState('');
   const [editItem, setEditItem] = useState<TripItem | null>(null);
   const [showDuplicatePicker, setShowDuplicatePicker] = useState(false);
   const [moveToDay, setMoveToDay] = useState<string | null>(null); // target day id when moving item
@@ -1033,6 +1035,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
     setAddPlaceNeighborhood('');
     setAddPlaceMapsNote('');
     setAddPlaceFetchingDetails(false);
+    setAddPlaceSource('google');
+    setAddPlaceSavedSearch('');
     setShowAddPlace(true);
   };
 
@@ -2368,7 +2372,83 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                 </button>
               </div>
 
+              {/* Source toggle */}
+              <div className="flex bg-gray-100 rounded-full p-0.5 gap-0.5 mx-5 mb-3 flex-shrink-0">
+                <button
+                  onClick={() => setAddPlaceSource('google')}
+                  className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${addPlaceSource === 'google' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                >
+                  🔍 Search
+                </button>
+                <button
+                  onClick={() => setAddPlaceSource('saved')}
+                  className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-colors ${addPlaceSource === 'saved' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                >
+                  🔖 From saved
+                </button>
+              </div>
+
+              {/* Saved places picker */}
+              {addPlaceSource === 'saved' && (
+                <div className="flex flex-col flex-1 overflow-hidden px-5 pb-8">
+                  <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-2.5 mb-3 flex-shrink-0">
+                    <Search size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                    <input
+                      autoFocus
+                      value={addPlaceSavedSearch}
+                      onChange={e => setAddPlaceSavedSearch(e.target.value)}
+                      placeholder="Search your saved places…"
+                      className="flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                    />
+                  </div>
+                  {(() => {
+                    const q = addPlaceSavedSearch.toLowerCase();
+                    const filtered = realSavedPlaces.filter(p =>
+                      !q || p.name.toLowerCase().includes(q) || p.city?.toLowerCase().includes(q) || p.neighborhood?.toLowerCase().includes(q)
+                    );
+                    if (filtered.length === 0) return (
+                      <p className="text-sm text-gray-400 text-center py-10">No saved places found</p>
+                    );
+                    return (
+                      <div className="overflow-y-auto flex-1 space-y-2">
+                        {filtered.map(place => (
+                          <button
+                            key={place.id}
+                            onClick={() => {
+                              setAddPlaceSelectedName(place.name);
+                              setAddPlaceSearch(`${place.name}, ${place.city}`);
+                              setAddPlaceAddress(`${place.name}${place.neighborhood ? `, ${place.neighborhood}` : ''}, ${place.city}, ${place.country}`);
+                              setAddPlaceCategory(place.category);
+                              setAddPlaceCustomImage(place.photoUrl ?? '');
+                              setAddPlaceNeighborhood(place.neighborhood ?? '');
+                              setAddPlaceLocation(place.city ?? '');
+                              setAddPlaceSource('google'); // switch to form view
+                            }}
+                            className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl p-3 text-left"
+                          >
+                            <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-gray-200">
+                              {place.photoUrl
+                                ? <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
+                                : <div className="w-full h-full flex items-center justify-center text-xl">{categoryEmoji[place.category] ?? '📍'}</div>
+                              }
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+                              <p className="text-xs text-gray-400 mt-0.5 truncate">
+                                {categoryEmoji[place.category] ?? '📍'} {categoryDisplayName[place.category] ?? place.category}
+                                {place.neighborhood ? ` · ${place.neighborhood}` : place.city ? ` · ${place.city}` : ''}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               {/* scrollable body */}
+              {addPlaceSource === 'google' && (
               <div ref={addPlaceScrollRef} className="flex-1 overflow-y-auto px-5 pb-8">
                 {/* Day selector */}
                 {selectedTrip && selectedTrip.days.length > 0 && (
@@ -2678,6 +2758,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                   {addPlaceUploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : addPlaceSaving ? <><Loader2 size={14} className="animate-spin" /> Adding…</> : addPlaceFetchingDetails ? <><Loader2 size={14} className="animate-spin" /> Loading details…</> : 'Add to plan'}
                 </button>
               </div>
+              )}
             </div>
           </div>
         )}
