@@ -73,6 +73,27 @@ export async function getFeedPosts(): Promise<RealPost[]> {
 
   if (error || !posts) return [];
 
+  // Fetch accepted collaborators for all feed posts
+  const allPostIds = posts.map((p: any) => p.id);
+  const { data: collabs } = allPostIds.length > 0 ? await supabase
+    .from('post_collaborators')
+    .select('post_id, user_id, profiles!user_id(name, username, avatar_url)')
+    .in('post_id', allPostIds)
+    .eq('status', 'accepted') : { data: [] };
+
+  const collabsByPost: Record<string, { id: string; name: string; username: string; avatarUrl: string | null }[]> = {};
+  for (const c of (collabs ?? [])) {
+    const pid = (c as any).post_id;
+    const cUserId = (c as any).user_id;
+    if (!collabsByPost[pid]) collabsByPost[pid] = [];
+    collabsByPost[pid].push({
+      id: cUserId,
+      name: (c as any).profiles?.name ?? '',
+      username: (c as any).profiles?.username ?? '',
+      avatarUrl: (c as any).profiles?.avatar_url ?? null,
+    });
+  }
+
   return posts.map((p: any) => ({
     id: p.id,
     userId: p.user_id,
@@ -85,6 +106,7 @@ export async function getFeedPosts(): Promise<RealPost[]> {
       username: p.profiles?.username ?? '',
       avatarUrl: p.profiles?.avatar_url ?? null,
     },
+    collaborators: collabsByPost[p.id] ?? [],
     places: (p.post_places ?? [])
       .sort((a: any, b: any) => a.position - b.position)
       .map((pl: any) => ({
@@ -221,10 +243,10 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
     post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )
   `;
 
-  // Own posts + posts where user is an accepted collaborator
+  // Own posts + posts where user is a collaborator (any status — no acceptance flow exists yet)
   const [{ data: ownedPosts }, { data: collabRows }] = await Promise.all([
     supabase.from('posts').select(selectFields).eq('user_id', userId).order('position', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false }),
-    supabase.from('post_collaborators').select('post_id').eq('user_id', userId).eq('status', 'accepted'),
+    supabase.from('post_collaborators').select('post_id').eq('user_id', userId).in('status', ['accepted', 'pending']),
   ]);
 
   const collabPostIds = (collabRows ?? []).map((r: any) => r.post_id);
@@ -243,13 +265,15 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
     .from('post_collaborators')
     .select('post_id, user_id, profiles!user_id(name, username, avatar_url)')
     .in('post_id', allPostIds)
-    .eq('status', 'accepted');
+    .in('status', ['accepted', 'pending']);
+
+  const ownPostIds = new Set((ownedPosts ?? []).map((p: any) => p.id));
 
   const collabsByPost: Record<string, { id: string; name: string; username: string; avatarUrl: string | null }[]> = {};
   for (const c of (collabs ?? [])) {
     const pid = (c as any).post_id;
     const cUserId = (c as any).user_id;
-    // Don't show the viewing user as a collaborator on their own grid
+    // Skip the current user — they appear as the primary avatar in the pill
     if (cUserId === userId) continue;
     if (!collabsByPost[pid]) collabsByPost[pid] = [];
     collabsByPost[pid].push({
@@ -689,6 +713,62 @@ export async function getPlaceCollectionIds(postPlaceId: string): Promise<Set<st
   return new Set((data ?? []).map((r: any) => r.collection_id));
 }
 
+// ── Taste Profile ─────────────────────────────────────────────────────────────
+export interface TasteProfile {
+  categoryWeights: Record<string, number>; // normalised 0-1
+  topCategories: string[];                 // sorted by weight, max 5
+  topCities: string[];                     // sorted by frequency, max 5
+  totalSignals: number;                    // total saved places used as input
+}
+
+export async function buildTasteProfile(userId: string): Promise<TasteProfile> {
+  // Fetch saved places (weight 2) and liked-post places (weight 1) in parallel
+  const [savedPlaces, likedData] = await Promise.all([
+    getSavedPlaces(userId),
+    supabase
+      .from('post_likes')
+      .select('post_id, posts!post_id(post_places(category, city))')
+      .eq('user_id', userId)
+      .limit(100),
+  ]);
+
+  const categoryCounts: Record<string, number> = {};
+  const cityCounts: Record<string, number> = {};
+
+  for (const place of savedPlaces) {
+    const cat = (place.category ?? '').toLowerCase();
+    if (cat) categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 2;
+    if (place.city) cityCounts[place.city] = (cityCounts[place.city] ?? 0) + 2;
+  }
+
+  for (const row of ((likedData.data ?? []) as any[])) {
+    const places: any[] = row.posts?.post_places ?? [];
+    for (const pl of places) {
+      const cat = (pl.category ?? '').toLowerCase();
+      if (cat) categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
+      if (pl.city) cityCounts[pl.city] = (cityCounts[pl.city] ?? 0) + 1;
+    }
+  }
+
+  const total = Object.values(categoryCounts).reduce((a, b) => a + b, 0);
+  const categoryWeights: Record<string, number> = {};
+  for (const [cat, count] of Object.entries(categoryCounts)) {
+    categoryWeights[cat] = total > 0 ? count / total : 0;
+  }
+
+  const topCategories = Object.entries(categoryWeights)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([cat]) => cat);
+
+  const topCities = Object.entries(cityCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([city]) => city);
+
+  return { categoryWeights, topCategories, topCities, totalSignals: savedPlaces.length };
+}
+
 // ── Likes ─────────────────────────────────────────────────────────────────────
 export async function getLikedPosts(userId: string): Promise<Set<string>> {
   const { data } = await supabase.from('post_likes').select('post_id').eq('user_id', userId);
@@ -936,7 +1016,7 @@ export async function getPostCollaborators(postId: string): Promise<PostCollabor
 export async function addPostCollaborator(postId: string, userId: string, invitedBy: string): Promise<string | null> {
   const { error } = await supabase
     .from('post_collaborators')
-    .insert({ post_id: postId, user_id: userId, invited_by: invitedBy, status: 'pending' });
+    .insert({ post_id: postId, user_id: userId, invited_by: invitedBy, status: 'accepted' });
   return error?.message ?? null;
 }
 

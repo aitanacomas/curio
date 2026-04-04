@@ -1,0 +1,103 @@
+/**
+ * Re-categorisation script
+ * Fetches all post_places, re-queries Google Places by name+city,
+ * applies the updated category mapping, and updates the DB.
+ *
+ * Run: node scripts/recategorise.mjs
+ */
+
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL    = 'https://leooulgankktjapregei.supabase.co';
+const SUPABASE_KEY    = 'sb_publishable_byPxk92XCaVuWKbmOObd2w_lG304vRd';
+const GOOGLE_KEY      = 'AIzaSyAj0eDf6_qT-suH_6wiJlvb9AJ_4zd8KyM';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── Same mapping as placeUtils.ts (updated) ───────────────────────────────────
+function googleTypesToCategory(types) {
+  const has = (...t) => types.some(x => t.includes(x));
+  if (has('lodging','hotel','motel','resort_hotel','hostel','bed_and_breakfast','extended_stay_hotel','guest_house','inn')) return 'hotel';
+  if (has('restaurant','american_restaurant','barbecue_restaurant','brazilian_restaurant','breakfast_restaurant','brunch_restaurant','buffet_restaurant','chinese_restaurant','french_restaurant','greek_restaurant','indian_restaurant','indonesian_restaurant','italian_restaurant','japanese_restaurant','korean_restaurant','lebanese_restaurant','mediterranean_restaurant','mexican_restaurant','middle_eastern_restaurant','pizza_restaurant','ramen_restaurant','seafood_restaurant','spanish_restaurant','steak_house','sushi_restaurant','thai_restaurant','turkish_restaurant','vegan_restaurant','vegetarian_restaurant','vietnamese_restaurant')) return 'restaurant';
+  if (has('bakery','patisserie','dessert_shop','ice_cream_shop','bagel_shop')) return 'treats';
+  if (has('cafe','coffee_shop','tea_house')) return 'cafe';
+  if (has('bar','night_club','wine_bar','cocktail_bar','sports_bar','pub','brewery','winery','distillery','karaoke')) return 'bar';
+  if (has('food_court','fast_food_restaurant','meal_takeaway','meal_delivery','sandwich_shop','hamburger_restaurant','supermarket','grocery_store','convenience_store','deli','food_delivery')) return 'food';
+  if (has('airport','train_station','bus_station','subway_station','transit_station','light_rail_station','ferry_terminal','taxi_stand','car_rental','bus_stop','airport_terminal')) return 'transport';
+  if (has('beach','marina','diving_center','water_park')) return 'beach';
+  if (has('park','national_park','natural_feature','campground','hiking_area','rv_park','forest','nature_reserve','botanical_garden','wildlife_sanctuary')) return 'nature';
+  if (has('stadium','sports_complex','gym','fitness_center','bowling_alley','golf_course','tennis_court','swimming_pool','ski_resort','rock_climbing_gym','cycling_studio','sports_club','athletic_field','race_track')) return 'sports';
+  if (has('spa','beauty_salon','hair_salon','hair_care','nail_salon','physiotherapist','massage','yoga_studio','sauna','wellness_center','massage_therapist')) return 'wellness';
+  if (has('store','shopping_mall','clothing_store','book_store','department_store','bicycle_store','electronics_store','furniture_store','home_goods_store','jewelry_store','shoe_store','pet_store','florist','gift_shop','market','liquor_store','toy_store','sporting_goods_store','pharmacy')) return 'shop';
+  if (has('route','street_address','intersection')) return 'street';
+  if (has('event_venue','banquet_hall','convention_center','conference_center','wedding_venue')) return 'event';
+  if (has('airline')) return 'flight';
+  // NEW: split attraction into landmark / art / experience
+  if (has('art_gallery','museum')) return 'art';
+  if (has('tourist_attraction','landmark','historical_landmark','cultural_landmark','monument','castle','ruins','church','mosque','synagogue','hindu_temple','place_of_worship','embassy','city_hall','university','library')) return 'landmark';
+  if (has('amusement_park','zoo','aquarium','movie_theater','performing_arts_theater','concert_hall')) return 'experience';
+  return 'experience';
+}
+
+async function lookupCategory(name, city, country) {
+  const query = [name, city, country].filter(Boolean).join(', ');
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_KEY,
+        'X-Goog-FieldMask': 'places.types',
+        'Referer': 'https://curio-travel-app.vercel.app',
+      },
+      body: JSON.stringify({ textQuery: query, languageCode: 'en' }),
+    });
+    const data = await res.json();
+    const types = data.places?.[0]?.types ?? [];
+    if (!types.length) return null;
+    return googleTypesToCategory(types);
+  } catch {
+    return null;
+  }
+}
+
+async function run() {
+  console.log('Fetching all post_places…');
+  const { data: places, error } = await supabase
+    .from('post_places')
+    .select('id, name, category, city, country');
+
+  if (error) { console.error('Fetch error:', error.message); process.exit(1); }
+  console.log(`Found ${places.length} places.`);
+
+  let updated = 0, skipped = 0, failed = 0;
+
+  for (const place of places) {
+    // Skip places that already have the new categories
+    // Re-run everything to catch any old misclassifications
+    const newCategory = await lookupCategory(place.name, place.city, place.country);
+
+    if (!newCategory) { failed++; continue; }
+    if (newCategory === place.category) { skipped++; continue; }
+
+    const { error: updateErr } = await supabase
+      .from('post_places')
+      .update({ category: newCategory })
+      .eq('id', place.id);
+
+    if (updateErr) {
+      console.warn(`  ✗ ${place.name} — update failed: ${updateErr.message}`);
+      failed++;
+    } else {
+      console.log(`  ✓ ${place.name} (${place.city}): ${place.category} → ${newCategory}`);
+      updated++;
+    }
+
+    // Respect Google rate limits
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  console.log(`\nDone. Updated: ${updated} | Unchanged: ${skipped} | Failed: ${failed}`);
+}
+
+run();

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Camera, Sparkles, Check, MapPin, X, Heart, MessageCircle, Send, Pencil, Loader2, Plus, GripVertical, RotateCcw, RotateCw } from 'lucide-react';
+import { ArrowLeft, Camera, Sparkles, Check, MapPin, X, Heart, MessageCircle, Send, Pencil, Loader2, Plus, GripVertical, RotateCcw, RotateCw, Bookmark } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -9,6 +9,8 @@ import type { Category } from '../types';
 import { supabase, getPublicUrl } from '../lib/supabase';
 import { googleTypesToCategory } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
+import MapView from '../components/MapView';
+import ImageCarousel from '../components/ImageCarousel';
 
 type Step = 'upload' | 'places' | 'preview';
 type Visibility = 'map' | 'profile' | 'feed';
@@ -28,9 +30,75 @@ interface IdentifiedPlace {
 }
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY as string | undefined;
 
 // Extract only the place name (first comma-separated component)
 const shortName = (name: string) => name.split(',')[0].trim();
+
+// ── AI place identification via Claude vision ──────────────────────────────────
+async function identifyPlaceWithAI(photoUrl: string): Promise<Partial<IdentifiedPlace> | null> {
+  if (!ANTHROPIC_KEY) return null;
+  try {
+    const blob = await fetch(photoUrl).then(r => r.blob());
+    const base64 = await new Promise<string>(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve((e.target?.result as string).split(',')[1]);
+      reader.readAsDataURL(blob);
+    });
+    const mediaType = (blob.type || 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 256,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+            { type: 'text', text: 'Identify the specific place, restaurant, café, hotel, or landmark in this photo. Reply ONLY with valid JSON: {"name":"Place Name","city":"City","country":"Country","category":"restaurant|cafe|bar|hotel|attraction|nature|beach|shop|experience|street|event|wellness|sports"}. If you cannot identify a specific named place, reply with {}.' },
+          ],
+        }],
+      }),
+    });
+    const data = await res.json();
+    const text: string = data.content?.[0]?.text ?? '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const result = JSON.parse(match[0]);
+    if (!result.name) return null;
+    // Enrich with Google Places to get lat/lng
+    if (GOOGLE_PLACES_KEY && result.name) {
+      const gRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.displayName,places.addressComponents,places.types,places.location' },
+        body: JSON.stringify({ textQuery: [result.name, result.city, result.country].filter(Boolean).join(', '), languageCode: 'en' }),
+      });
+      const gData = await gRes.json();
+      const place = gData.places?.[0];
+      if (place) {
+        const comps: any[] = place.addressComponents ?? [];
+        const find = (...t: string[]) => { const c = comps.find((c: any) => t.some((x: string) => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
+        return {
+          name: shortName(place.displayName?.text ?? result.name),
+          city: find('postal_town') || find('locality') || find('administrative_area_level_2') || result.city,
+          country: find('country') || result.country,
+          neighborhood: find('sublocality_level_1') || find('neighborhood') || find('sublocality'),
+          category: result.category || '',
+          lat: place.location?.latitude ?? undefined,
+          lng: place.location?.longitude ?? undefined,
+        };
+      }
+    }
+    return { name: result.name, city: result.city || '', country: result.country || '', category: result.category || '' };
+  } catch { return null; }
+}
 
 
 async function readExifGps(file: File): Promise<{ lat: number; lng: number } | null> {
@@ -131,27 +199,31 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
 }
 
 const categories: { id: Category; label: string; emoji: string }[] = [
-  { id: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
-  { id: 'cafe', label: 'Café', emoji: '☕' },
-  { id: 'bar', label: 'Bar', emoji: '🍸' },
-  { id: 'food', label: 'Food', emoji: '🍕' },
-  { id: 'hotel', label: 'Stay', emoji: '🏨' },
-  { id: 'attraction', label: 'Attraction', emoji: '🏛️' },
-  { id: 'nature', label: 'Nature', emoji: '🌿' },
-  { id: 'beach', label: 'Beach', emoji: '🏖️' },
-  { id: 'shop', label: 'Shop', emoji: '🛍️' },
-  { id: 'experience', label: 'Experience', emoji: '🗺️' },
-  { id: 'sports', label: 'Sports', emoji: '🎾' },
-  { id: 'wellness', label: 'Wellness', emoji: '💆' },
-  { id: 'street', label: 'Street', emoji: '🏙️' },
-  { id: 'event', label: 'Event', emoji: '🎟️' },
-  { id: 'flight', label: 'Flight', emoji: '✈️' },
-  { id: 'transport', label: 'Transport', emoji: '🚗' },
+  { id: 'restaurant',    label: 'Restaurant',    emoji: '🍽️' },
+  { id: 'cafe',          label: 'Café',          emoji: '☕' },
+  { id: 'treats',        label: 'Treats',        emoji: '🍰' },
+  { id: 'bar',           label: 'Bar',           emoji: '🍸' },
+  { id: 'nightlife',     label: 'Nightlife',     emoji: '🎵' },
+  { id: 'food',          label: 'Food',          emoji: '🍕' },
+  { id: 'hotel',         label: 'Stay',          emoji: '🏨' },
+  { id: 'landmark',      label: 'Landmark',      emoji: '🏛️' },
+  { id: 'art',           label: 'Art',           emoji: '🎨' },
+  { id: 'nature',        label: 'Nature',        emoji: '🌿' },
+  { id: 'beach',         label: 'Beach',         emoji: '🏖️' },
+  { id: 'shop',          label: 'Shop',          emoji: '🛍️' },
+  { id: 'experience',    label: 'Experience',    emoji: '🎡' },
+  { id: 'neighbourhood', label: 'Neighbourhood', emoji: '🏘️' },
+  { id: 'sports',        label: 'Sports',        emoji: '🎾' },
+  { id: 'wellness',      label: 'Wellness',      emoji: '💆' },
+  { id: 'event',         label: 'Event',         emoji: '🎟️' },
+  { id: 'flight',        label: 'Flight',        emoji: '✈️' },
+  { id: 'transport',     label: 'Transport',     emoji: '🚗' },
 ];
 
 interface Props {
   userId: string;
   userAvatar?: string | null;
+  username?: string;
   onComplete: (info: { visibility: Visibility; placesCount: number }) => void;
 }
 
@@ -249,12 +321,16 @@ function SortablePlaceRow({
   onRemove,
   onUpdate,
   onEditPhoto,
+  onIdentifyWithAI,
+  aiIdentifying,
 }: {
   p: IdentifiedPlace;
   onToggleExpanded: (id: string) => void;
   onRemove: (id: string) => void;
   onUpdate: (id: string, updates: Partial<IdentifiedPlace>) => void;
   onEditPhoto: (id: string) => void;
+  onIdentifyWithAI?: (id: string) => void;
+  aiIdentifying?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.id });
   const style = {
@@ -265,10 +341,13 @@ function SortablePlaceRow({
     zIndex: isDragging ? 10 : undefined,
   };
 
-  const needsAddress = !p.analyzing && !p.name;
+  const needsAddress  = !p.analyzing && !p.name;
+  const needsCoords   = !p.analyzing && !!p.name && p.lat == null;
+  const needsCategory = !p.analyzing && !!p.name && p.lat != null && !p.category;
+  const needsInfo     = needsAddress || needsCoords || needsCategory;
 
   return (
-    <div ref={setNodeRef} style={style} className={`rounded-2xl transition-colors ${needsAddress ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-gray-50'}`}>
+    <div ref={setNodeRef} style={style} className={`rounded-2xl transition-colors ${needsInfo ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-gray-50'}`}>
       <div className="flex items-center gap-2 p-3">
         {/* Drag handle */}
         <button
@@ -295,7 +374,7 @@ function SortablePlaceRow({
               <div className="absolute inset-0 bg-black/20 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
                 <Pencil size={12} className="text-white" />
               </div>
-              {needsAddress ? (
+              {needsInfo ? (
                 <div className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-amber-400 flex items-center justify-center">
                   <span className="text-white text-[9px] font-black">!</span>
                 </div>
@@ -314,10 +393,14 @@ function SortablePlaceRow({
               <div className="h-3 bg-gray-200 rounded-full w-3/4 animate-pulse" />
               <div className="h-2.5 bg-gray-200 rounded-full w-1/2 animate-pulse" />
             </div>
-          ) : needsAddress ? (
+          ) : needsInfo ? (
             <button className="text-left w-full" onClick={() => onToggleExpanded(p.id)}>
-              <p className="font-semibold text-amber-600 text-sm">Address required</p>
-              <p className="text-xs text-amber-400 mt-0.5">Tap to search on Google Maps</p>
+              <p className="font-semibold text-amber-600 text-sm">
+                {needsAddress ? 'Address required' : needsCoords ? 'Confirm location' : 'Pick a category'}
+              </p>
+              <p className="text-xs text-amber-400 mt-0.5">
+                {needsAddress ? 'Tap to search on Google Maps' : needsCoords ? 'Search so we can pin it on the map' : 'Tap to choose a type'}
+              </p>
             </button>
           ) : (
             <>
@@ -335,10 +418,10 @@ function SortablePlaceRow({
             <button
               onClick={() => onToggleExpanded(p.id)}
               className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
-                p.expanded ? 'bg-gray-900' : needsAddress ? 'bg-amber-400' : 'bg-white shadow-sm'
+                p.expanded ? 'bg-gray-900' : needsInfo ? 'bg-amber-400' : 'bg-white shadow-sm'
               }`}
             >
-              <Pencil size={13} className={p.expanded || needsAddress ? 'text-white' : 'text-gray-500'} />
+              <Pencil size={13} className={p.expanded || needsInfo ? 'text-white' : 'text-gray-500'} />
             </button>
           )}
           <button
@@ -352,6 +435,19 @@ function SortablePlaceRow({
 
       {p.expanded && !p.analyzing && (
         <div className="border-t border-gray-100 bg-white px-3 pb-3 pt-3 rounded-b-2xl overflow-visible">
+          {/* AI identification — shown when no coords yet */}
+          {p.lat == null && ANTHROPIC_KEY && onIdentifyWithAI && (
+            <button
+              onClick={() => onIdentifyWithAI(p.id)}
+              disabled={aiIdentifying}
+              className="w-full mb-3 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gray-900 text-white text-xs font-semibold disabled:opacity-50 transition-opacity"
+            >
+              {aiIdentifying
+                ? <><Loader2 size={13} className="animate-spin" />Identifying…</>
+                : <><Sparkles size={13} />Identify this place with AI</>
+              }
+            </button>
+          )}
           <div className="mb-3">
             <PlaceSearch onSelect={result => onUpdate(p.id, result as Partial<IdentifiedPlace>)} />
           </div>
@@ -385,6 +481,9 @@ function SortablePlaceRow({
               />
             </span>
           </div>
+          <p className={`text-xs mb-1.5 font-medium ${!p.category ? 'text-amber-500' : 'text-gray-400'}`}>
+            {!p.category ? '⚠ Pick a category to continue' : 'Category'}
+          </p>
           <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {categories.map(cat => (
               <button
@@ -406,7 +505,7 @@ function SortablePlaceRow({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function Add({ userId, userAvatar, onComplete }: Props) {
+export default function Add({ userId, userAvatar, username, onComplete }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [places, setPlaces] = useState<IdentifiedPlace[]>([]);
   const [caption, setCaption] = useState('');
@@ -418,6 +517,7 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
   const [postError, setPostError] = useState('');
   const [editingPlaces, setEditingPlaces] = useState(false);
   const [editingPhotoId, setEditingPhotoId] = useState<string | null>(null);
+  const [aiIdentifyingId, setAiIdentifyingId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const addMoreRef = useRef<HTMLInputElement>(null);
   const carouselStartX = useRef(0);
@@ -495,6 +595,17 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
   const handlePhotoEdited = (id: string, newUrl: string) => {
     setPlaces(prev => prev.map(p => p.id === id ? { ...p, photo: newUrl } : p));
     setEditingPhotoId(null);
+  };
+
+  const handleIdentifyWithAI = async (id: string) => {
+    const place = places.find(p => p.id === id);
+    if (!place) return;
+    setAiIdentifyingId(id);
+    const result = await identifyPlaceWithAI(place.photo);
+    if (result) {
+      setPlaces(prev => prev.map(p => p.id === id ? { ...p, ...result, expanded: false } : p));
+    }
+    setAiIdentifyingId(null);
   };
 
   // ── Save post to Supabase ──────────────────────────────────────────
@@ -669,14 +780,17 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
   if (step === 'places') {
     const anyAnalyzing = places.some(p => p.analyzing);
     const analyzingCount = places.filter(p => p.analyzing).length;
-    const missingAddress = places.filter(p => !p.analyzing && !p.name);
-    const allAddressed = !anyAnalyzing && missingAddress.length === 0;
+    const missingInfo = places.filter(p => !p.analyzing && (!p.name || p.lat == null || !p.category));
+    const allAddressed = !anyAnalyzing && missingInfo.length === 0;
 
     if (places.length === 0) {
       return (
         <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-4 px-6">
-          <p className="text-gray-400 text-sm text-center">All places removed.</p>
-          <button onClick={() => setStep('upload')} className="text-gray-900 font-semibold text-sm underline">
+          <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center mb-1">
+            <Camera size={24} strokeWidth={1.5} className="text-gray-400" />
+          </div>
+          <p className="text-gray-400 text-sm text-center">All places removed</p>
+          <button onClick={() => setStep('upload')} className="px-6 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold">
             Start over
           </button>
         </div>
@@ -686,23 +800,30 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
     return (
       <div className="min-h-screen bg-white flex flex-col">
 
-        <div className="px-4 pt-5 pb-3">
-          <button onClick={() => setStep('upload')} className="mb-3">
-            <ArrowLeft className="w-6 h-6 text-slate-700" />
+        {/* Header */}
+        <div className="px-4 pt-5 pb-4 flex items-center gap-3">
+          <button
+            onClick={() => setStep('upload')}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
+          >
+            <ArrowLeft size={17} strokeWidth={1.5} className="text-gray-700" />
           </button>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight">
-            {anyAnalyzing ? 'Checking location data' : `${places.length} place${places.length !== 1 ? 's' : ''} added`}
-          </h1>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {anyAnalyzing
-              ? `${analyzingCount} remaining…`
-              : missingAddress.length > 0
-                ? `${missingAddress.length} place${missingAddress.length !== 1 ? 's' : ''} still need${missingAddress.length === 1 ? 's' : ''} an address`
-                : 'All places tagged — ready to continue'}
-          </p>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-bold text-gray-900 leading-tight">
+              {anyAnalyzing ? 'Reading locations…' : `${places.length} place${places.length !== 1 ? 's' : ''} added`}
+            </h1>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {anyAnalyzing
+                ? `${analyzingCount} still processing…`
+                : missingInfo.length > 0
+                  ? `${missingInfo.length} place${missingInfo.length === 1 ? '' : 's'} still need${missingInfo.length === 1 ? 's' : ''} info`
+                  : 'All places tagged — ready to continue'}
+            </p>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pt-1 pb-4 space-y-3">
+        {/* Place list */}
+        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={places.map(p => p.id)} strategy={verticalListSortingStrategy}>
               {places.map(p => (
@@ -713,35 +834,36 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
                   onRemove={removePlace}
                   onUpdate={updatePlace}
                   onEditPhoto={id => setEditingPhotoId(id)}
+                  onIdentifyWithAI={ANTHROPIC_KEY ? handleIdentifyWithAI : undefined}
+                  aiIdentifying={aiIdentifyingId === p.id}
                 />
               ))}
             </SortableContext>
           </DndContext>
 
-          <label
-            id="places-add-more-label"
-            className="relative w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer overflow-hidden"
-          >
+          {/* Add more photos — clean solid button */}
+          <label className="relative w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-gray-50 text-gray-400 text-sm font-medium active:bg-gray-100 transition-colors cursor-pointer overflow-hidden">
             <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
             <Camera size={16} strokeWidth={1.5} />
             Add more photos
           </label>
         </div>
 
-        <div className="px-4 pb-6 pt-3 border-t border-gray-100">
-          {!anyAnalyzing && missingAddress.length > 0 && (
-            <p className="text-center text-xs text-amber-500 font-medium mb-2">
-              Search an address for every photo to continue
+        {/* Footer CTA */}
+        <div className="px-4 pb-8 pt-3 border-t border-gray-100">
+          {!anyAnalyzing && missingInfo.length > 0 && (
+            <p className="text-center text-xs text-amber-500 font-medium mb-3">
+              Each place needs a location, category, and name to continue
             </p>
           )}
           <button
             onClick={() => setStep('preview')}
             disabled={!allAddressed}
             className={`w-full py-4 rounded-2xl font-semibold text-base transition-all ${
-              !allAddressed ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-slate-900 text-white'
+              !allAddressed ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-gray-900 text-white'
             }`}
           >
-            {anyAnalyzing ? 'Checking location…' : 'Write your caption'}
+            {anyAnalyzing ? 'Checking locations…' : 'Write your caption →'}
           </button>
         </div>
       </div>
@@ -753,196 +875,154 @@ export default function Add({ userId, userAvatar, onComplete }: Props) {
     <div className="min-h-screen bg-white flex flex-col">
 
       <div className="flex-1 overflow-y-auto">
-        <div>
-          <div className="px-4 pt-4 pb-2">
-            <button onClick={() => setStep('places')}><ArrowLeft className="w-6 h-6 text-slate-700" /></button>
-          </div>
 
-          <div className="border-y border-gray-100">
-            <div className="flex items-start gap-3 px-4 pt-3 pb-2">
-              <img src={userAvatar ?? '/aitana-avatar.jpg'} alt="" className="w-8 h-8 rounded-full object-cover object-top flex-shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 leading-tight">You</p>
-                <p className="text-xs text-gray-500 font-medium mt-0.5 flex items-center gap-1 truncate">
-                  <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                  {locationLabel}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => setEditingPlaces(prev => !prev)}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-                    editingPlaces ? 'bg-gray-900' : 'bg-gray-100'
-                  }`}
-                >
-                  <Pencil size={14} strokeWidth={1.5} className={editingPlaces ? 'text-white' : 'text-gray-500'} />
-                </button>
-                <label
-                  className="relative w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer overflow-hidden"
-                >
-                  <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <Plus size={16} strokeWidth={1.5} className="text-gray-500" />
-                </label>
-              </div>
-            </div>
-
-            {/* Carousel */}
-            {places.length > 0 && (
-              <div
-                className="relative overflow-hidden select-none"
-                onPointerDown={e => { carouselStartX.current = e.clientX; carouselDragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); }}
-                onPointerUp={e => {
-                  if (!carouselDragging.current) return;
-                  carouselDragging.current = false;
-                  const delta = carouselStartX.current - e.clientX;
-                  if (Math.abs(delta) > 40) setCarouselIndex(i => Math.max(0, Math.min(places.length - 1, i + (delta > 0 ? 1 : -1))));
-                }}
-                onPointerCancel={() => { carouselDragging.current = false; }}
-              >
-                <div className="flex transition-transform duration-300 ease-out" style={{ transform: `translateX(-${carouselIndex * 100}%)` }}>
-                  {places.map(p => (
-                    <img key={p.id} src={p.photo} alt="" draggable={false} className="w-full flex-shrink-0 aspect-[4/5] object-cover pointer-events-none" />
-                  ))}
-                </div>
-                {places.length > 1 && (
-                  <div className="absolute bottom-3 left-4 flex items-center gap-1.5">
-                    {places.map((_, i) => (
-                      <button key={i} onClick={() => setCarouselIndex(i)} className={`rounded-full transition-all duration-200 ${i === carouselIndex ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'}`} />
-                    ))}
-                  </div>
-                )}
-                {places[carouselIndex] && (
-                  <div className="absolute bottom-3 right-4 flex items-center gap-1 bg-black/40 backdrop-blur-sm rounded-full px-2.5 py-1">
-                    <MapPin size={8} className="text-white/80 flex-shrink-0" />
-                    <span className="text-white text-[11px] font-semibold leading-none">{places[carouselIndex].name || 'Unnamed'}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="px-4 py-3.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <button className="flex items-center gap-1.5">
-                    <Heart size={22} strokeWidth={1.5} className="text-gray-700" />
-                    <span className="text-xs text-gray-500">0</span>
-                  </button>
-                  <button className="flex items-center gap-1.5">
-                    <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
-                    <span className="text-xs text-gray-500">0</span>
-                  </button>
-                  <button><Send size={22} strokeWidth={1.5} className="text-gray-700" /></button>
-                </div>
-                <button className="px-5 py-1.5 rounded-full border border-gray-900 text-sm font-semibold text-gray-900">Save</button>
-              </div>
-            </div>
-
-            {caption && (
-              <div className="px-4 pb-4">
-                <p className="text-sm text-gray-700 leading-snug line-clamp-2">{caption}</p>
-              </div>
-            )}
-            {!caption && <div className="pb-3" />}
+        {/* Header */}
+        <div className="px-4 pt-5 pb-4 flex items-center gap-3">
+          <button
+            onClick={() => setStep('places')}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
+          >
+            <ArrowLeft size={17} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          <div>
+            <h1 className="text-lg font-bold text-gray-900 leading-tight">Almost there</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Add a caption and share your trip</p>
           </div>
         </div>
 
-        {/* Inline place editing in preview */}
-        {editingPlaces && (
-          <div className="border-b border-gray-100 bg-gray-50/50">
-            <div className="px-4 pt-4 pb-2">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                {places.length} Place{places.length !== 1 ? 's' : ''} tagged
-              </p>
-            </div>
-            <div className="px-4 pb-4 space-y-3">
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={places.map(p => p.id)} strategy={verticalListSortingStrategy}>
-                  {places.map(p => (
-                    <SortablePlaceRow
-                      key={p.id}
-                      p={p}
-                      onToggleExpanded={toggleExpanded}
-                      onRemove={removePlace}
-                      onUpdate={updatePlace}
-                      onEditPhoto={id => setEditingPhotoId(id)}
-                    />
-                  ))}
-                </SortableContext>
-              </DndContext>
 
-              <label
-                className="relative w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm font-medium active:bg-gray-50 transition-colors cursor-pointer overflow-hidden"
-              >
-                <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                <Camera size={16} strokeWidth={1.5} />
-                Add more photos
-              </label>
+        {/* Post preview card — matches the actual feed card */}
+        <div className="px-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-400">Post preview</p>
+            <label className="flex items-center gap-1 text-xs font-semibold text-gray-400 active:opacity-60 cursor-pointer">
+              <input ref={addMoreRef} type="file" accept="image/*" multiple onChange={handleAddMore} className="hidden" />
+              <Plus size={13} strokeWidth={2} />
+              Add photo
+            </label>
+          </div>
+          <div className="bg-white rounded-3xl overflow-hidden shadow-sm">
+            {/* Photo carousel with overlays */}
+            <div className="relative">
+              <ImageCarousel
+                images={places.map(p => p.photo)}
+                labels={places.map(p => shortName(p.name))}
+                sublabels={places.map(p => [p.city, p.country].filter(Boolean).join(', '))}
+              />
+              {/* Profile pill — top left */}
+              <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/25 backdrop-blur-md rounded-full pl-1 pr-3 py-1 pointer-events-none">
+                {userAvatar
+                  ? <img src={userAvatar} alt="" className="w-6 h-6 rounded-full object-cover object-top border border-white/40 flex-shrink-0" />
+                  : <div className="w-6 h-6 rounded-full bg-white/20 border border-white/40 flex-shrink-0" />
+                }
+                <span className="text-white text-xs font-semibold leading-none ml-0.5">{username || 'You'}</span>
+              </div>
+              {/* Time — top right */}
+              <span className="absolute top-4 right-4 text-white/60 text-[10px] font-medium pointer-events-none">Just now</span>
+            </div>
+            {/* Below-photo content — only show if caption has been written */}
+            {caption ? (
+              <div className="px-4 pt-3 pb-4">
+                <p className="text-sm text-gray-800 leading-snug">{caption}</p>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Mini map preview */}
+        {places.some(p => p.lat != null) && (
+          <div className="px-4 mb-5">
+            <p className="text-xs font-semibold text-gray-400 mb-2">On the map</p>
+            <div className="rounded-2xl overflow-hidden">
+              <MapView
+                places={places.filter(p => p.lat != null && p.lng != null).map(p => ({
+                  id: p.id,
+                  lat: p.lat!,
+                  lng: p.lng!,
+                  name: shortName(p.name),
+                  city: p.city,
+                  country: p.country,
+                }))}
+                height="160px"
+              />
             </div>
           </div>
         )}
 
         {/* Caption / Hashtags / Privacy */}
-        <div className="bg-white px-4 pt-6 pb-6">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Caption</p>
-          <textarea
-            value={caption}
-            onChange={e => setCaption(e.target.value)}
-            placeholder={places.length > 1
-              ? `a ${places[0]?.city?.toLowerCase() ?? 'trip'} day done right…`
-              : 'Write something about this place…'}
-            rows={2}
-            className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-900 outline-none placeholder-gray-300 focus:bg-gray-100 resize-none transition-colors leading-relaxed"
-          />
+        <div className="px-4 pb-8 space-y-5">
 
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 mt-5">Hashtags</p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 bg-gray-50 rounded-2xl px-4 py-3">
-            {places.map(p => (
-              <span key={p.id} className="text-[12px] font-medium text-slate-400">#{shortName(p.name).replace(/\s+/g, '')}</span>
-            ))}
-            {[...new Set(places.map(p => p.city).filter(Boolean))].map(city => (
-              <span key={city} className="text-[12px] font-medium text-slate-400">#{city.replace(/\s+/g, '')}</span>
-            ))}
-            {extraHashtags.filter(t => t.trim()).map(t => (
-              <span key={t} className="text-[12px] font-medium text-slate-400">#{t.replace(/^#+/, '').replace(/\s+/g, '')}</span>
-            ))}
-            <input
-              value={extraTagInput}
-              onChange={e => setExtraTagInput(e.target.value)}
-              onKeyDown={e => {
-                if ((e.key === ' ' || e.key === 'Enter') && extraTagInput.trim()) {
-                  e.preventDefault();
-                  setExtraHashtags(prev => [...prev, extraTagInput.trim()]);
-                  setExtraTagInput('');
-                }
-              }}
-              placeholder="+ add"
-              className="text-[12px] font-medium text-slate-500 bg-transparent outline-none placeholder-slate-300"
-              style={{ width: `${Math.max(40, (extraTagInput.length + 5) * 7)}px` }}
+          {/* Caption */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 mb-2">Caption</p>
+            <textarea
+              value={caption}
+              onChange={e => setCaption(e.target.value)}
+              placeholder={places.length > 1
+                ? `a ${places[0]?.city?.toLowerCase() ?? 'trip'} day done right…`
+                : 'Write something about this place…'}
+              rows={3}
+              className="w-full bg-gray-50 rounded-2xl px-4 py-3.5 text-sm text-gray-900 outline-none placeholder-gray-300 focus:bg-gray-100 resize-none transition-colors leading-relaxed"
             />
           </div>
 
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 mt-5">Privacy</p>
-          <div className="flex gap-2">
-            {visibilityOptions.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setVisibility(opt.value)}
-                className={`flex-1 py-2.5 rounded-2xl text-xs font-semibold transition-all ${
-                  visibility === opt.value ? 'bg-slate-900 text-white' : 'bg-gray-100 text-gray-500'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          {/* Hashtags */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 mb-2">Hashtags</p>
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2 bg-gray-50 rounded-2xl px-4 py-3.5">
+              {places.map(p => (
+                <span key={p.id} className="text-xs font-medium text-orange-400">#{shortName(p.name).replace(/\s+/g, '')}</span>
+              ))}
+              {[...new Set(places.map(p => p.city).filter(Boolean))].map(city => (
+                <span key={city} className="text-xs font-medium text-orange-400">#{city.replace(/\s+/g, '')}</span>
+              ))}
+              {extraHashtags.filter(t => t.trim()).map(t => (
+                <span key={t} className="text-xs font-medium text-orange-400">#{t.replace(/^#+/, '').replace(/\s+/g, '')}</span>
+              ))}
+              <input
+                value={extraTagInput}
+                onChange={e => setExtraTagInput(e.target.value)}
+                onKeyDown={e => {
+                  if ((e.key === ' ' || e.key === 'Enter') && extraTagInput.trim()) {
+                    e.preventDefault();
+                    setExtraHashtags(prev => [...prev, extraTagInput.trim()]);
+                    setExtraTagInput('');
+                  }
+                }}
+                placeholder="+ add tag"
+                className="text-xs font-medium text-gray-400 bg-transparent outline-none placeholder-gray-300"
+                style={{ width: `${Math.max(60, (extraTagInput.length + 6) * 7)}px` }}
+              />
+            </div>
+          </div>
+
+          {/* Who can see it */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 mb-2">Who can see it</p>
+            <div className="flex gap-2">
+              {visibilityOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setVisibility(opt.value)}
+                  className={`flex-1 py-3 rounded-2xl text-xs font-semibold transition-all ${
+                    visibility === opt.value ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-500'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {postError && (
-            <p className="text-xs text-red-400 bg-red-50 rounded-xl px-4 py-3 mt-4">{postError}</p>
+            <p className="text-xs text-red-400 bg-red-50 rounded-2xl px-4 py-3">{postError}</p>
           )}
+
+          {/* Post button */}
           <button
             onClick={handlePost}
             disabled={posting}
-            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-semibold text-base mt-5 disabled:opacity-60 flex items-center justify-center gap-2"
+            className="w-full py-4 bg-gray-900 text-white rounded-2xl font-semibold text-base disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {posting && <Loader2 size={18} className="animate-spin" />}
             {posting ? 'Posting…' : visibility === 'feed' ? 'Post to curio' : visibility === 'profile' ? 'Share with followers' : 'Save privately'}

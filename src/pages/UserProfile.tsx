@@ -76,6 +76,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [showColMap, setShowColMap] = useState(true);
   const [enrichingMap, setEnrichingMap] = useState(false);
   const [mapSearch, setMapSearch] = useState('');
+  const userProfileMapRef = useRef<import('leaflet').Map | null>(null);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
   const [myCollections, setMyCollections] = useState<RealCollection[]>([]);
@@ -372,12 +373,21 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
               >
                 <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
               </button>
-              <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[55%] overflow-hidden">
+              <div className="flex items-center gap-1.5 bg-black/35 backdrop-blur-md rounded-full px-2 py-1.5 w-fit max-w-[65%] overflow-hidden">
                 {profile?.avatarUrl
-                  ? <img src={profile.avatarUrl} alt={profile.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
-                  : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">{initials}</span></div>
+                  ? <img src={profile.avatarUrl} alt={profile.name} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" />
+                  : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{initials}</span></div>
                 }
-                <p className="text-white font-semibold text-sm leading-tight truncate">{profile?.username || profile?.name}</p>
+                {(selectedPost.collaborators ?? []).slice(0, 2).map(c => (
+                  c.avatarUrl
+                    ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="-ml-2 w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" />
+                    : <div key={c.id} className="-ml-2 w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{c.name[0]?.toUpperCase()}</span></div>
+                ))}
+                <p className="text-white font-semibold text-sm leading-tight truncate ml-1">
+                  {(selectedPost.collaborators ?? []).length > 0
+                    ? `${profile?.username || profile?.name} & ${(selectedPost.collaborators ?? []).map(c => c.username || c.name).join(' & ')}`
+                    : (profile?.username || profile?.name)}
+                </p>
               </div>
             </div>
           </div>
@@ -444,9 +454,12 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
 
           {/* Places + map */}
           <div className="px-5 pt-4 border-t border-gray-100">
+            {(() => {
+              const uniquePlaceCount = new Set(selectedPost.places.map(p => p.name.split(',')[0].trim().toLowerCase())).size;
+              return (
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                {selectedPost.places.length} place{selectedPost.places.length !== 1 ? 's' : ''}
+                {uniquePlaceCount} place{uniquePlaceCount !== 1 ? 's' : ''}
               </p>
               {selectedPost.places.some(p => p.lat != null) && (
                 <button
@@ -458,6 +471,7 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                 </button>
               )}
             </div>
+              ); })()}
             {showPostMap && (() => {
               const mapPlaces = selectedPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name.split(',')[0].trim(), city: p.city, country: p.country }));
               return mapPlaces.length > 0 ? (
@@ -757,18 +771,28 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           <div className="pb-10">
             {/* Map with stats overlay */}
             <div className="px-4 pt-4">
-              <div className="rounded-2xl overflow-hidden relative">
-                {mapPlaces.length > 0 ? (
-                  <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
-                    <MapView places={mapPlaces} height="220px" />
-                  </Suspense>
-                ) : (
-                  <div className="h-52 bg-gray-100 flex items-center justify-center">
-                    <p className="text-xs text-gray-400">No places with coordinates yet</p>
-                  </div>
-                )}
-                {/* Stats overlay */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3">
+              <div className="rounded-2xl relative" style={{ height: 220 }}>
+                {/* Map clipped to rounded corners */}
+                <div className="rounded-2xl overflow-hidden absolute inset-0">
+                  {mapPlaces.length > 0 ? (
+                    <Suspense fallback={<div className="h-full bg-gray-100 animate-pulse" />}>
+                      <MapView
+                        places={mapPlaces}
+                        height="220px"
+                        hideZoomControls
+                        onMapReady={map => { userProfileMapRef.current = map; }}
+                      />
+                    </Suspense>
+                  ) : (
+                    <div className="h-full bg-gray-100 flex items-center justify-center">
+                      <p className="text-xs text-gray-400">No places with coordinates yet</p>
+                    </div>
+                  )}
+                </div>
+                {/* Full-width gradient */}
+                <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/70 to-transparent rounded-b-2xl pointer-events-none" />
+                {/* Stats */}
+                <div className="absolute bottom-0 left-0 px-4 py-3 pointer-events-none">
                   <div className="flex gap-6">
                     <div>
                       <p className="text-base font-black text-white">{countriesCount}</p>
@@ -780,6 +804,30 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
                     </div>
                   </div>
                 </div>
+                {/* Zoom controls */}
+                {mapPlaces.length > 0 && (
+                  <div className="absolute bottom-3 right-3 flex flex-col gap-1" style={{ zIndex: 10 }}>
+                    <button
+                      onClick={() => userProfileMapRef.current?.zoomIn()}
+                      className="w-8 h-8 rounded-[10px] bg-white flex items-center justify-center"
+                      style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.15)', border: 'none' }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <line x1="6" y1="0" x2="6" y2="12" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+                        <line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => userProfileMapRef.current?.zoomOut()}
+                      className="w-8 h-8 rounded-[10px] bg-white flex items-center justify-center"
+                      style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.15)', border: 'none' }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

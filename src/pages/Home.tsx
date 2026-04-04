@@ -863,7 +863,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
           </div>
 
           {/* Date — very end */}
-          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{selectedPost.createdAt}</p>
+          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
 
       </div>
       {saveSheet}
@@ -942,13 +942,22 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                   labels={post.places.map(p => p.name.split(',')[0].trim())}
                   sublabels={post.places.map(p => [p.city, p.country].filter(Boolean).join(', '))}
                 />
-                {/* Profile overlay — top left */}
+                {/* Profile overlay — top left (owner + collaborators) */}
                 <button
                   onClick={() => setViewingUserId(post.userId)}
-                  className="absolute top-3 left-3 flex items-center gap-2 bg-black/25 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-75"
+                  className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/25 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-75"
                 >
                   <img src={avatarSrc} alt={post.profile.name} className="w-6 h-6 rounded-full object-cover object-top border border-white/40 flex-shrink-0" />
-                  <span className="text-white text-xs font-semibold leading-none">{post.profile.name}</span>
+                  {(post.collaborators ?? []).slice(0, 2).map(c => (
+                    c.avatarUrl
+                      ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="-ml-2 w-6 h-6 rounded-full object-cover border border-white/40 flex-shrink-0" />
+                      : <div key={c.id} className="-ml-2 w-6 h-6 rounded-full bg-white/20 border border-white/40 flex items-center justify-center flex-shrink-0"><span className="text-white text-[9px] font-bold">{c.name[0]?.toUpperCase()}</span></div>
+                  ))}
+                  <span className="text-white text-xs font-semibold leading-none ml-0.5">
+                    {(post.collaborators ?? []).length > 0
+                      ? `${post.profile.username || post.profile.name} & ${(post.collaborators ?? []).map(c => c.username || c.name).join(' & ')}`
+                      : (post.profile.username || post.profile.name)}
+                  </span>
                 </button>
                 {/* Time — top right */}
                 <span className="absolute top-4 right-4 text-white/60 text-[10px] font-medium">{timeAgo}</span>
@@ -956,9 +965,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
 
               {/* Below-photo content */}
               <div className="px-4 pt-3 pb-4">
-                {/* Caption */}
-                {post.caption && <p className="text-sm text-gray-800 leading-snug mb-2.5">{post.caption}</p>}
-
                 {/* Actions row */}
                 {(() => {
                   const allPlacesSaved = post.places.length > 0 && post.places.every(p => allSavedPlaceIds.has(p.id));
@@ -1024,6 +1030,9 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                   </div>
                   );
                 })()}
+                {/* Caption */}
+                {post.caption && <p className="text-sm text-gray-800 leading-snug mt-2.5">{post.caption}</p>}
+
                 {/* Comments section */}
                 {showCommentsPostId === post.id && (
                   <div className="mt-3 pt-3 border-t border-gray-100">

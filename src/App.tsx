@@ -172,6 +172,7 @@ export default function App() {
             key={pageResetKey}
             userId={appUser?.id ?? ''}
             userAvatar={appUser?.avatar ?? null}
+            username={appUser?.username ?? ''}
             onComplete={({ visibility, placesCount }) => {
               const label = visibility === 'feed' ? 'Posted to curio' : visibility === 'profile' ? 'Shared with followers' : 'Saved privately';
               setPostToast({ label, sub: `${placesCount} place${placesCount > 1 ? 's' : ''} tagged` });

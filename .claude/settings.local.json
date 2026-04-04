@@ -138,7 +138,13 @@
       "Bash(npx netlify-cli@latest --version)",
       "Bash(sudo npm:*)",
       "Bash(./node_modules/.bin/netlify link:*)",
-      "Bash(find /Users/aitanacomas -name state.json -path *netlify*)"
+      "Bash(find /Users/aitanacomas -name state.json -path *netlify*)",
+      "Bash(vercel --version)",
+      "Bash(python3 -c \"import sys; [print\\(repr\\(line.rstrip\\(\\)\\)\\) for line in sys.stdin]\")",
+      "Bash(python3 -c \"import sys; [print\\(f''''{i+660}: {repr\\(line.rstrip\\(\\)\\)}''''\\) for i, line in enumerate\\(sys.stdin\\)]\")",
+      "Bash(node scripts/geocode-all-places.mjs)",
+      "Bash(find '/Users/aitanacomas/Desktop/Social Media App' -name *.env* -o -name .env*)",
+      "WebSearch"
     ]
   }
 }

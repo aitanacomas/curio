@@ -532,9 +532,14 @@ function PlanCard({ trip, onClick, userId }: { trip: Trip; onClick: () => void; 
           {trip.dates ? (
             <p className="text-white/80 text-xs flex items-center gap-1"><CalendarDays size={10} strokeWidth={1.5} />{trip.dates}</p>
           ) : (
-            <p className="text-white/60 text-xs">No dates set</p>
+            <p className="text-white/50 text-xs flex items-center gap-1"><CalendarDays size={10} strokeWidth={1.5} />Brainstorm</p>
           )}
-          {trip.dates && <p className="text-white/60 text-xs">· {countDaysFromDateStr(trip.dates)} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places</p>}
+          {trip.dates
+            ? <p className="text-white/60 text-xs">· {countDaysFromDateStr(trip.dates)} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places</p>
+            : trip.days.reduce((a, d) => a + d.items.length, 0) > 0
+              ? <p className="text-white/60 text-xs">· {trip.days.reduce((a, d) => a + d.items.length, 0)} ideas</p>
+              : null
+          }
         </div>
       </div>
     </button>
@@ -1475,6 +1480,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       items: [...d.items].sort((a, b) => parseTimeToMinutes(a.time ?? '') - parseTimeToMinutes(b.time ?? '')),
     }));
     const allItems = sortedDays.flatMap(d => d.items);
+    const allItemsWithDayId = sortedDays.flatMap(d => d.items.map(i => ({ ...i, _dayId: d.id ?? null })));
+    const hasDates = !!selectedTrip.dates && selectedTrip.dates.trim().length > 0;
     const statusConfig: Record<Trip['status'], { label: string; color: string }> = {
       dreaming: { label: '✨ Want to do / see', color: 'bg-purple-100 text-purple-700' },
       planning: { label: '📋 Planning it', color: 'bg-amber-100 text-amber-700' },
@@ -1531,10 +1538,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </div>
           <div className="absolute bottom-4 left-4 right-4">
             <h2 className="text-2xl font-black text-white">{selectedTrip.destination}</h2>
-            {selectedTrip.dates && (
+            {selectedTrip.dates ? (
               <p className="text-white text-xs flex items-center gap-1 mt-1">
                 <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
               </p>
+            ) : (
+              <button onClick={() => openEditPlan(selectedTrip)} className="flex items-center gap-1 mt-1 text-white/60 text-xs hover:text-white/80 transition-colors">
+                <CalendarDays size={11} strokeWidth={1.5} />Add dates
+              </button>
             )}
             {selectedTrip.country && (
               <p className="text-white text-xs flex items-center gap-1 mt-0.5">
@@ -1549,7 +1560,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
         {/* Stats row */}
         <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
-          {[{ value: countDaysFromDates(selectedTrip.dates), label: 'Days' }, { value: totalItems, label: 'Places' }, { value: bookedCount, label: 'Booked' }].map(s => (
+          {[
+            hasDates
+              ? { value: countDaysFromDates(selectedTrip.dates), label: 'Days' }
+              : { value: allItems.length, label: 'Ideas' },
+            { value: totalItems, label: 'Places' },
+            { value: bookedCount, label: 'Booked' },
+          ].map(s => (
             <div key={s.label} className="flex-1 py-3 text-center">
               <p className="text-base font-black text-gray-900">{s.value}</p>
               <p className="text-xs text-gray-400">{s.label}</p>
@@ -1688,79 +1705,72 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         {/* Place list — TRIP only (events returned early above) */}
         <div className="px-4 pt-4 pb-28">
 
-          {/* Header row: place count + show/hide map */}
-          {selectedTrip.days.length > 0 && (
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{totalItems} places</p>
-              <button
-                onClick={() => setShowMap(m => !m)}
-                className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
-              >
-                <MapPin size={12} strokeWidth={2} />
-                {showMap ? 'Hide map' : 'Show map'}
-              </button>
-            </div>
-          )}
-
-          {/* Inline map — shown/hidden */}
-          {showMap && selectedTrip.days.length > 0 && (
-            <div className="rounded-2xl overflow-hidden mb-5" style={{ height: 260 }}>
-              <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
-                {mapLoading && Object.keys(mapCoords).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
-                    <Loader2 size={20} className="animate-spin text-gray-400" />
-                    <p className="text-xs text-gray-400">Finding places on map…</p>
-                  </div>
-                ) : (
-                  <MapView
-                    places={selectedTrip.days.flatMap(d => d.items).filter(i => mapCoords[i.id]).map(i => ({
-                      id: i.id,
-                      lat: mapCoords[i.id].lat,
-                      lng: mapCoords[i.id].lng,
-                      name: i.name,
-                      city: selectedTrip.destination,
-                      country: selectedTrip.country,
-                    }))}
-                    height="260px"
-                  />
+          {!hasDates ? (
+            /* ══════════════════════════════════════
+               BRAINSTORM MODE — flat idea list
+               ══════════════════════════════════════ */
+            <>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-xs font-bold text-gray-900 uppercase tracking-wider">Brainstorm</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Add places you're dreaming of</p>
+                </div>
+                {allItems.length > 0 && (
+                  <button
+                    onClick={() => setShowMap(m => !m)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
+                  >
+                    <MapPin size={12} strokeWidth={2} />
+                    {showMap ? 'Hide map' : 'Map'}
+                  </button>
                 )}
-              </Suspense>
-            </div>
-          )}
+              </div>
 
-          {selectedTrip.days.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <p className="text-3xl mb-3">✨</p>
-              <p className="text-base font-bold text-gray-900 mb-1">Nothing added yet</p>
-              <p className="text-sm text-gray-400 mb-6">Set up your days or add places directly</p>
-              {selectedTrip.dates && countDaysFromDates(selectedTrip.dates) > 0 && (
-                <button onClick={handleInitDays} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold mb-3">
-                  <CalendarDays size={14} strokeWidth={2} /> Set up {countDaysFromDates(selectedTrip.dates)} days
-                </button>
-              )}
-              <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-600 rounded-full text-sm font-semibold">
-                <Plus size={14} strokeWidth={2} /> Add a place
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {sortedDays
-                .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx)
-                .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length)
-                .map((day, di) => (
-                <div key={di}>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
-                    {day.id && (
-                      <button onClick={() => setDeleteDayConfirm({ id: day.id!, label: day.label })}
-                        className="text-gray-300 hover:text-red-400 transition-colors p-1">
-                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                      </button>
+              {/* Inline map */}
+              {showMap && allItems.length > 0 && (
+                <div className="rounded-2xl overflow-hidden mb-5" style={{ height: 220 }}>
+                  <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
+                    {mapLoading && Object.keys(mapCoords).length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
+                        <Loader2 size={20} className="animate-spin text-gray-400" />
+                        <p className="text-xs text-gray-400">Finding places…</p>
+                      </div>
+                    ) : (
+                      <MapView
+                        places={allItems.filter(i => mapCoords[i.id]).map(i => ({
+                          id: i.id, lat: mapCoords[i.id].lat, lng: mapCoords[i.id].lng,
+                          name: i.name, city: selectedTrip.destination, country: selectedTrip.country,
+                        }))}
+                        height="220px"
+                      />
                     )}
-                  </div>
-                  <div className="space-y-2.5">
-                    {day.items.map(item => (
-                      <div key={item.id} className="bg-gray-50 rounded-2xl p-3" onClick={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}>
+                  </Suspense>
+                </div>
+              )}
+
+              {/* Flat idea list */}
+              {allItemsWithDayId.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <p className="text-4xl mb-3">✨</p>
+                  <p className="text-base font-bold text-gray-900 mb-1">Start dreaming</p>
+                  <p className="text-sm text-gray-400 mb-6">Add places you want to visit — restaurants, stays, experiences, anything</p>
+                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold">
+                    <Plus size={14} strokeWidth={2} /> Add a place
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {allItemsWithDayId.map(item => {
+                    const isBooked = item.status === 'booked' || item.booked;
+                    const isPending = item.status === 'pending';
+                    const isWishlist = !isBooked && !isPending;
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl p-3 transition-colors ${isBooked ? 'bg-green-50/70 border border-green-100' : isPending ? 'bg-amber-50/70 border border-amber-100' : 'bg-white border-2 border-dashed border-gray-200'}`}
+                        onClick={() => { setDetailItem(item); setDetailItemDayId(item._dayId); setShowItemDetail(true); }}
+                      >
                         <div className="flex items-start gap-3">
                           <ItemThumb image={item.image} name={item.name} category={item.category} />
                           <div className="flex-1 min-w-0">
@@ -1769,22 +1779,12 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                               {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
                               {item.neighborhood ? ` · ${item.neighborhood}` : ''}
                             </p>
-                            {item.time && (
-                              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                                <Clock size={9} strokeWidth={1.5} />
-                                {item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
-                              </p>
-                            )}
-                            {(item.checkIn || item.checkOut) && (
-                              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                                <CalendarDays size={9} strokeWidth={1.5} />
-                                {fmtDate(item.checkIn)}{item.checkIn && item.checkOut ? ' → ' : ''}{fmtDate(item.checkOut)}
-                              </p>
-                            )}
+                            {item.notes && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1 italic">{item.notes}</p>}
                           </div>
                           <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                            {(item.status === 'booked' || item.booked) && <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full">Booked</span>}
-                            {item.status === 'pending' && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+                            {isBooked && <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">✓ Booked</span>}
+                            {isPending && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+                            {isWishlist && <span className="text-[10px] text-gray-300 font-medium">Wishlist</span>}
                           </div>
                         </div>
                         {(selectedTrip.collaborators?.length ?? 0) > 0 && item.addedBy && (
@@ -1793,28 +1793,172 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                               ? <img src={item.addedByAvatar} alt="" className="w-4 h-4 rounded-full object-cover" />
                               : <div className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center text-[8px] font-bold text-white">{(item.addedByName ?? '?')[0].toUpperCase()}</div>
                             }
-                            <span className="text-[10px] text-gray-400">
-                              {item.addedBy === userId ? 'You' : (item.addedByName ?? 'Someone')} added this
-                            </span>
+                            <span className="text-[10px] text-gray-400">{item.addedBy === userId ? 'You' : (item.addedByName ?? 'Someone')} added this</span>
                           </div>
                         )}
                       </div>
-                    ))}
-                    {day.items.length === 0 && (
-                      <div className="border-2 border-dashed border-gray-100 rounded-2xl py-5 flex items-center justify-center">
-                        <p className="text-sm text-gray-300">Nothing added</p>
-                      </div>
-                    )}
-                    <button onClick={() => openAddPlace(day.id ?? null)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
-                      <Plus size={12} strokeWidth={2} /> Add place / plan
-                    </button>
-                  </div>
+                    );
+                  })}
+
+                  {/* Add place button */}
+                  <button onClick={() => openAddPlace(null)} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                    <Plus size={12} strokeWidth={2} /> Add a place
+                  </button>
                 </div>
-              ))}
-              <button onClick={handleAddDay} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-100 text-sm text-gray-300 font-medium">
-                <Plus size={14} strokeWidth={1.5} /> Add a day
-              </button>
-            </div>
+              )}
+
+              {/* "Add dates & start organizing" CTA */}
+              <div className="mt-6 bg-orange-50 rounded-2xl px-4 py-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold text-gray-900">Ready to plan it out?</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Add dates to organize day by day</p>
+                </div>
+                <button
+                  onClick={() => openEditPlan(selectedTrip)}
+                  className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-full text-xs font-bold"
+                >
+                  <CalendarDays size={12} strokeWidth={2} /> Add dates
+                </button>
+              </div>
+            </>
+          ) : (
+            /* ══════════════════════════════════════
+               ITINERARY MODE — day-by-day structure
+               ══════════════════════════════════════ */
+            <>
+              {/* Header row: place count + show/hide map */}
+              {selectedTrip.days.length > 0 && (
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{totalItems} places</p>
+                  <button
+                    onClick={() => setShowMap(m => !m)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
+                  >
+                    <MapPin size={12} strokeWidth={2} />
+                    {showMap ? 'Hide map' : 'Show map'}
+                  </button>
+                </div>
+              )}
+
+              {/* Inline map — shown/hidden */}
+              {showMap && selectedTrip.days.length > 0 && (
+                <div className="rounded-2xl overflow-hidden mb-5" style={{ height: 260 }}>
+                  <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
+                    {mapLoading && Object.keys(mapCoords).length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
+                        <Loader2 size={20} className="animate-spin text-gray-400" />
+                        <p className="text-xs text-gray-400">Finding places on map…</p>
+                      </div>
+                    ) : (
+                      <MapView
+                        places={selectedTrip.days.flatMap(d => d.items).filter(i => mapCoords[i.id]).map(i => ({
+                          id: i.id, lat: mapCoords[i.id].lat, lng: mapCoords[i.id].lng,
+                          name: i.name, city: selectedTrip.destination, country: selectedTrip.country,
+                        }))}
+                        height="260px"
+                      />
+                    )}
+                  </Suspense>
+                </div>
+              )}
+
+              {selectedTrip.days.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <p className="text-3xl mb-3">🗓</p>
+                  <p className="text-base font-bold text-gray-900 mb-1">Nothing added yet</p>
+                  <p className="text-sm text-gray-400 mb-6">Set up your days or start adding places</p>
+                  {countDaysFromDates(selectedTrip.dates) > 0 && (
+                    <button onClick={handleInitDays} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-sm font-semibold mb-3">
+                      <CalendarDays size={14} strokeWidth={2} /> Set up {countDaysFromDates(selectedTrip.dates)} days
+                    </button>
+                  )}
+                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-600 rounded-full text-sm font-semibold">
+                    <Plus size={14} strokeWidth={2} /> Add a place
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {sortedDays
+                    .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx)
+                    .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length)
+                    .map((day, di) => (
+                    <div key={di}>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
+                        {day.id && (
+                          <button onClick={() => setDeleteDayConfirm({ id: day.id!, label: day.label })}
+                            className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-2.5">
+                        {day.items.map(item => {
+                          const isBooked = item.status === 'booked' || item.booked;
+                          const isPending = item.status === 'pending';
+                          return (
+                            <div
+                              key={item.id}
+                              className={`rounded-2xl p-3 transition-colors ${isBooked ? 'bg-green-50/70 border border-green-100' : isPending ? 'bg-amber-50/70 border border-amber-100' : 'bg-gray-50'}`}
+                              onClick={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}
+                            >
+                              <div className="flex items-start gap-3">
+                                <ItemThumb image={item.image} name={item.name} category={item.category} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name.split(',')[0].trim()}</p>
+                                  <p className="text-xs text-gray-400 mt-0.5 truncate">
+                                    {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
+                                    {item.neighborhood ? ` · ${item.neighborhood}` : ''}
+                                  </p>
+                                  {item.time && (
+                                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                                      <Clock size={9} strokeWidth={1.5} />
+                                      {item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
+                                    </p>
+                                  )}
+                                  {(item.checkIn || item.checkOut) && (
+                                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                                      <CalendarDays size={9} strokeWidth={1.5} />
+                                      {fmtDate(item.checkIn)}{item.checkIn && item.checkOut ? ' → ' : ''}{fmtDate(item.checkOut)}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                                  {isBooked && <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">✓ Booked</span>}
+                                  {isPending && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+                                </div>
+                              </div>
+                              {(selectedTrip.collaborators?.length ?? 0) > 0 && item.addedBy && (
+                                <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-100">
+                                  {item.addedByAvatar
+                                    ? <img src={item.addedByAvatar} alt="" className="w-4 h-4 rounded-full object-cover" />
+                                    : <div className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center text-[8px] font-bold text-white">{(item.addedByName ?? '?')[0].toUpperCase()}</div>
+                                  }
+                                  <span className="text-[10px] text-gray-400">
+                                    {item.addedBy === userId ? 'You' : (item.addedByName ?? 'Someone')} added this
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {day.items.length === 0 && (
+                          <div className="border-2 border-dashed border-gray-100 rounded-2xl py-5 flex items-center justify-center">
+                            <p className="text-sm text-gray-300">Nothing added</p>
+                          </div>
+                        )}
+                        <button onClick={() => openAddPlace(day.id ?? null)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                          <Plus size={12} strokeWidth={2} /> Add place / plan
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={handleAddDay} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-100 text-sm text-gray-300 font-medium">
+                    <Plus size={14} strokeWidth={1.5} /> Add a day
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
         </> /* end TRIP view */

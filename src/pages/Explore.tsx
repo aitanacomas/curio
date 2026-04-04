@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import UserProfile from './UserProfile';
 import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
-import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, type RealPost, type FollowProfile, type PostComment, type RealCollection, type Conversation } from '../lib/supabase';
+import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, type RealPost, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -44,21 +44,24 @@ interface FlatPlace {
 }
 
 const categoryChips = [
-  { id: 'all',        label: 'All',          emoji: '✨' },
-  { id: 'restaurant', label: 'Restaurant',   emoji: '🍽️' },
-  { id: 'cafe',       label: 'Café',         emoji: '☕' },
-  { id: 'bar',        label: 'Bar',          emoji: '🍸' },
-  { id: 'food',       label: 'Food',         emoji: '🍕' },
-  { id: 'hotel',      label: 'Stay',         emoji: '🏨' },
-  { id: 'attraction', label: 'Attraction',   emoji: '🏛️' },
-  { id: 'nature',     label: 'Nature',       emoji: '🌿' },
-  { id: 'beach',      label: 'Beach',        emoji: '🏖️' },
-  { id: 'shop',       label: 'Shop',         emoji: '🛍️' },
-  { id: 'experience', label: 'Experience',   emoji: '🗺️' },
-  { id: 'sports',     label: 'Sports',       emoji: '🎾' },
-  { id: 'wellness',   label: 'Wellness',     emoji: '💆' },
-  { id: 'street',     label: 'Street',       emoji: '🏙️' },
-  { id: 'event',      label: 'Event',        emoji: '🎟️' },
+  { id: 'all',          label: 'All',           emoji: '✨' },
+  { id: 'restaurant',   label: 'Restaurant',    emoji: '🍽️' },
+  { id: 'cafe',         label: 'Café',          emoji: '☕' },
+  { id: 'treats',       label: 'Treats',        emoji: '🍰' },
+  { id: 'bar',          label: 'Bar',           emoji: '🍸' },
+  { id: 'nightlife',    label: 'Nightlife',     emoji: '🎵' },
+  { id: 'food',         label: 'Food',          emoji: '🍕' },
+  { id: 'hotel',        label: 'Stay',          emoji: '🏨' },
+  { id: 'landmark',     label: 'Landmark',      emoji: '🏛️' },
+  { id: 'art',          label: 'Art',           emoji: '🎨' },
+  { id: 'nature',       label: 'Nature',        emoji: '🌿' },
+  { id: 'beach',        label: 'Beach',         emoji: '🏖️' },
+  { id: 'shop',         label: 'Shop',          emoji: '🛍️' },
+  { id: 'experience',   label: 'Experience',    emoji: '🎡' },
+  { id: 'neighbourhood',label: 'Neighbourhood', emoji: '🏘️' },
+  { id: 'sports',       label: 'Sports',        emoji: '🎾' },
+  { id: 'wellness',     label: 'Wellness',      emoji: '💆' },
+  { id: 'event',        label: 'Event',         emoji: '🎟️' },
 ];
 
 type FeedTab = 'For You' | 'Following';
@@ -66,6 +69,7 @@ type FeedTab = 'For You' | 'Following';
 export default function Explore({ onOpenMessages, appUser }: Props) {
   const [posts, setPosts] = useState<RealPost[]>([]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
+  const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState('all');
   const [activeTab, setActiveTab] = useState<FeedTab>('For You');
@@ -79,9 +83,11 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     Promise.all([
       getFeedPosts(),
       appUser?.id ? getFollowing(appUser.id) : Promise.resolve(new Set<string>()),
-    ]).then(([fetchedPosts, followingSet]) => {
+      appUser?.id ? buildTasteProfile(appUser.id) : Promise.resolve(null),
+    ]).then(([fetchedPosts, followingSet, profile]) => {
       setPosts(fetchedPosts);
       setFollowing(followingSet);
+      setTasteProfile(profile);
       setLoading(false);
     });
   }, [appUser?.id]);
@@ -97,7 +103,22 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [query, appUser?.id]);
 
-  // Flatten posts → individual place cards, shuffled once when posts load
+  // Stable per-place pseudo-random tiebreaker (no Math.random in sort)
+  const stableNoise = (id: string): number => {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+    return ((h >>> 0) % 1000) / 1000;
+  };
+
+  // Score a place against the taste profile
+  const tasteSore = (cat: string, city: string): number => {
+    if (!tasteProfile || tasteProfile.totalSignals === 0) return 0;
+    const catScore = tasteProfile.categoryWeights[cat] ?? 0;
+    const cityBonus = tasteProfile.topCities.includes(city) ? 0.1 : 0;
+    return catScore * 0.9 + cityBonus;
+  };
+
+  // Flatten posts → individual place cards
   const allPlaces: FlatPlace[] = useMemo(() => {
     const flat = posts.flatMap(post =>
       post.places.map((pl, i) => ({
@@ -112,13 +133,23 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         post,
       }))
     );
-    // Fisher-Yates shuffle
+
+    if (tasteProfile && tasteProfile.totalSignals > 0) {
+      // Blend taste score (30%) with stable noise (70%) so it nudges rather than clusters
+      return [...flat].sort((a, b) => {
+        const sA = tasteSore(a.category, a.city) * 0.3 + stableNoise(a.placeId) * 0.7;
+        const sB = tasteSore(b.category, b.city) * 0.3 + stableNoise(b.placeId) * 0.7;
+        return sB - sA;
+      });
+    }
+
+    // No profile yet — Fisher-Yates shuffle
     for (let i = flat.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [flat[i], flat[j]] = [flat[j], flat[i]];
     }
     return flat;
-  }, [posts]);
+  }, [posts, tasteProfile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tabFiltered = activeTab === 'Following'
     ? allPlaces.filter(p => following.has(p.post.userId))
@@ -243,6 +274,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         </div>
       )}
 
+
       {/* Grid */}
       <div className="p-3">
         {loading ? (
@@ -295,7 +327,16 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
 
 // ── Place card ───────────────────────────────────────────────────────────────
 
+const categoryEmoji: Record<string, string> = {
+  restaurant: '🍽️', cafe: '☕', treats: '🍰', bar: '🍸', nightlife: '🎵', food: '🍕', hotel: '🏨',
+  landmark: '🏛️', art: '🎨', attraction: '🏛️', // fallback for legacy posts
+  nature: '🌿', beach: '🏖️', shop: '🛍️',
+  experience: '🎡', neighbourhood: '🏘️', street: '🏙️',
+  sports: '🎾', wellness: '💆', event: '🎟️',
+};
+
 function PlaceCard({ place, onClick }: { place: FlatPlace; onClick: () => void }) {
+  const emoji = categoryEmoji[place.category];
   return (
     <button onClick={onClick} className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-95 transition-transform">
       {place.photoUrl ? (
@@ -306,6 +347,13 @@ function PlaceCard({ place, onClick }: { place: FlatPlace; onClick: () => void }
         </div>
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+
+      {/* Category badge — always shown when category exists */}
+      {emoji && (
+        <div className="absolute top-2 right-2 z-10 w-7 h-7 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center">
+          <span className="text-sm leading-none">{emoji}</span>
+        </div>
+      )}
 
       {/* Place info */}
       <div className="absolute bottom-0 left-0 right-0 p-2.5">
@@ -435,16 +483,25 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
           {/* Photo carousel — scrolls with the rest */}
           <div className="relative overflow-hidden rounded-t-[2rem]">
 
-            {/* Profile pill — top left */}
+            {/* Profile pill — top left (owner + collaborators) */}
             <button
               onClick={() => onViewUser?.(post.userId)}
-              className="absolute top-4 left-3 z-20 flex items-center gap-2 bg-black/55 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-80"
+              className="absolute top-4 left-3 z-20 flex items-center gap-1.5 bg-black/55 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-80"
             >
               {post.profile.avatarUrl
                 ? <img src={post.profile.avatarUrl} alt={post.profile.name} className="w-6 h-6 rounded-full object-cover object-top border border-white/30 flex-shrink-0" />
                 : <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"><span className="text-white text-[9px] font-bold">{initials}</span></div>
               }
-              <span className="text-white text-xs font-semibold leading-none">{post.profile.name}</span>
+              {(post.collaborators ?? []).slice(0, 2).map(c => (
+                c.avatarUrl
+                  ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="-ml-2 w-6 h-6 rounded-full object-cover border border-white/30 flex-shrink-0" />
+                  : <div key={c.id} className="-ml-2 w-6 h-6 rounded-full bg-white/20 border border-white/30 flex items-center justify-center flex-shrink-0"><span className="text-white text-[9px] font-bold">{c.name[0]?.toUpperCase()}</span></div>
+              ))}
+              <span className="text-white text-xs font-semibold leading-none ml-0.5">
+                {(post.collaborators ?? []).length > 0
+                  ? `${post.profile.username || post.profile.name} & ${(post.collaborators ?? []).map(c => c.username || c.name).join(' & ')}`
+                  : (post.profile.username || post.profile.name)}
+              </span>
             </button>
             {/* Close button — top right */}
             <button

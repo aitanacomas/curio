@@ -1,9 +1,9 @@
 import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
-import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { SortableContext, rectSortingStrategy, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
 import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
@@ -11,7 +11,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator } from '../lib/supabase';
 import { googleTypesToCategory } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 
@@ -126,13 +126,86 @@ function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; is
           </div>
         </div>
       )}
-      {(post.collaborators ?? []).length > 0 && (
-        <div className="absolute bottom-1.5 left-1.5 flex -space-x-1">
-          {(post.collaborators ?? []).slice(0, 3).map(c => (
-            c.avatarUrl
-              ? <img key={c.id} src={c.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-white" />
-              : <div key={c.id} className="w-5 h-5 rounded-full bg-gray-400 border border-white flex items-center justify-center text-[8px] font-bold text-white">{c.name[0]?.toUpperCase() || '?'}</div>
-          ))}
+    </div>
+  );
+}
+
+function SortableEditPlace({ place, i, total, isExpanded, onToggle, onRemove, onUpdateField, onSelectPlace, categoryEmojiMap }: {
+  place: RealPostPlace; i: number; total: number; isExpanded: boolean;
+  onToggle: () => void; onRemove: () => void;
+  onUpdateField: (field: keyof RealPostPlace, value: string) => void;
+  onSelectPlace: (result: { name: string; neighborhood: string; city: string; country: string; category: string }) => void;
+  categoryEmojiMap: Record<string, string>;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: place.id });
+  const emoji = categoryEmojiMap[place.category] ?? '';
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      className="border-b border-gray-100"
+    >
+      <div className="flex items-center gap-3 px-5 py-3.5">
+        {/* Drag handle */}
+        <button {...attributes} {...listeners} className="touch-none cursor-grab active:cursor-grabbing flex-shrink-0 p-1 -ml-1" style={{ touchAction: 'none' }}>
+          <GripVertical size={18} className="text-gray-300" />
+        </button>
+        {/* Photo + category badge */}
+        <div className="relative flex-shrink-0">
+          {place.photoUrl
+            ? <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-2xl object-cover" />
+            : <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-2xl">{emoji || '📍'}</div>
+          }
+          {emoji && (
+            <div className="absolute -bottom-1.5 -right-1.5 w-6 h-6 bg-white rounded-full shadow-sm flex items-center justify-center text-xs">{emoji}</div>
+          )}
+        </div>
+        {/* Info */}
+        <button className="flex-1 min-w-0 text-left" onClick={onToggle}>
+          <p className="text-[15px] font-semibold text-gray-900 truncate leading-tight">{place.name || <span className="text-gray-400 italic text-sm">Unnamed place</span>}</p>
+          <p className="text-[13px] text-gray-400 truncate mt-0.5">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
+          <p className="text-[11px] text-gray-300 mt-0.5">{isExpanded ? 'Tap to collapse' : 'Tap to edit'}</p>
+        </button>
+        {/* Remove */}
+        <button onClick={onRemove} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 active:bg-gray-200 flex-shrink-0">
+          <X size={12} strokeWidth={2} className="text-gray-500" />
+        </button>
+      </div>
+      {/* Expanded editor */}
+      {isExpanded && (
+        <div className="bg-gray-50 px-5 py-4 space-y-3">
+          <div className="flex items-center gap-3 bg-white rounded-2xl px-4 py-3">
+            <MapPin size={14} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
+            <input
+              value={place.name}
+              onChange={e => onUpdateField('name', e.target.value)}
+              placeholder="Place name"
+              className="flex-1 text-sm font-semibold text-gray-900 bg-transparent outline-none"
+            />
+          </div>
+          <PlaceSearch
+            placeholder="Search Google Maps to update…"
+            onSelect={onSelectPlace}
+          />
+          <div className="flex gap-2 overflow-x-auto -mx-5 px-5" style={{ scrollbarWidth: 'none' }}>
+            {([
+              ['restaurant','🍽️','Restaurant'],['cafe','☕','Café'],['treats','🍰','Treats'],
+              ['bar','🍸','Bar'],['nightlife','🎵','Nightlife'],['food','🍕','Food'],
+              ['hotel','🏨','Stay'],['landmark','🏛️','Landmark'],['art','🎨','Art'],
+              ['nature','🌿','Nature'],['beach','🏖️','Beach'],['shop','🛍️','Shop'],
+              ['experience','🎡','Experience'],['neighbourhood','🏘️','Neighbourhood'],
+              ['sports','🎾','Sports'],['wellness','💆','Wellness'],
+              ['event','🎟️','Event'],['flight','✈️','Flight'],['transport','🚗','Transport'],
+            ] as [string, string, string][]).map(([cat, em, label]) => (
+              <button
+                key={cat}
+                onClick={() => onUpdateField('category', cat)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-colors ${place.category === cat ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 border border-gray-200'}`}
+              >
+                {em} {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -226,6 +299,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [colPlaceIds, setColPlaceIds] = useState<Set<string>>(new Set());
   const [colFilter, setColFilter] = useState('all');
   const [mapSearch, setMapSearch] = useState('');
+  const profileMapRef = useRef<import('leaflet').Map | null>(null);
   const [showColMap, setShowColMap] = useState(true);
   const [addToColPlace, setAddToColPlace] = useState<{ id: string; name: string } | null>(null);
   const [placeInCollections, setPlaceInCollections] = useState<Set<string>>(new Set());
@@ -344,6 +418,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       getSharedCollections(appUser.id).then(setSharedCollections);
       getLikedPosts(appUser.id).then(setLikedRealPosts);
       getSavedPosts(appUser.id).then(setSavedRealPosts);
+      getSavedPlaceIds(appUser.id).then(setPostPlaceSavedIds);
       getFollowingProfiles(appUser.id).then(setFollowingProfiles);
       getFollowCounts(appUser.id).then(({ followers, following }) => {
         setRealFollowerCount(followers);
@@ -461,34 +536,37 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </button>
               {/* Avatar + name — frosted glass pill, collaborators tappable */}
               {(() => {
+                const isOwner = selectedRealPost.userId === appUser?.id;
                 const collabs = selectedRealPost.collaborators ?? [];
+                // Owner info: use appUser's live avatar when current user is owner, else use post's profile
+                const ownerAvatarSrc = isOwner ? (avatarPreview ?? appUser?.avatar ?? null) : (selectedRealPost.profile.avatarUrl ?? null);
+                const ownerName = isOwner ? (displayUser.username || displayUser.name) : (selectedRealPost.profile.username || selectedRealPost.profile.name);
+                // Names: owner first, then each collaborator
+                const allNames = [ownerName, ...collabs.map(c => c.username || c.name)];
+                // If current user is a collaborator (not owner), add themselves to the names
+                if (!isOwner && appUser) allNames.push(displayUser.username || displayUser.name);
                 return (
                   <div className="flex items-center gap-1.5 bg-black/35 backdrop-blur-md rounded-full px-2 py-1.5 w-fit max-w-[65%] overflow-hidden">
-                    {/* Owner avatar (own post — no navigation) */}
-                    <div className="flex items-center flex-shrink-0">
-                      {(avatarPreview ?? appUser?.avatar)
-                        ? <img src={avatarPreview ?? appUser!.avatar!} alt={displayUser.name} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20" />
-                        : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20"><span className="text-xs font-bold text-white">{displayUser.name[0]?.toUpperCase()}</span></div>
-                      }
-                    </div>
-                    {/* Collaborator avatars — each tappable */}
+                    {/* Owner avatar */}
+                    {ownerAvatarSrc
+                      ? <img src={ownerAvatarSrc} alt={ownerName} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" />
+                      : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{ownerName[0]?.toUpperCase()}</span></div>
+                    }
+                    {/* Collaborator avatars */}
                     {collabs.slice(0, 2).map(c => (
-                      <button
-                        key={c.id}
-                        onClick={() => { setSelectedRealPost(null); setViewingUserId(c.id); }}
-                        className="-ml-2 flex-shrink-0 active:opacity-75"
-                      >
-                        {c.avatarUrl
-                          ? <img src={c.avatarUrl} alt={c.name} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20" />
-                          : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20"><span className="text-xs font-bold text-white">{c.name[0]?.toUpperCase()}</span></div>
-                        }
-                      </button>
+                      c.avatarUrl
+                        ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="-ml-2 w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" />
+                        : <div key={c.id} className="-ml-2 w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{c.name[0]?.toUpperCase()}</span></div>
                     ))}
+                    {/* Current user avatar when they're a collaborator (not owner) */}
+                    {!isOwner && appUser && (
+                      (avatarPreview ?? appUser.avatar)
+                        ? <img src={avatarPreview ?? appUser.avatar!} alt={displayUser.name} className="-ml-2 w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" />
+                        : <div className="-ml-2 w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{displayUser.name[0]?.toUpperCase()}</span></div>
+                    )}
                     {/* Name(s) */}
                     <p className="text-white font-semibold text-sm leading-tight truncate ml-1">
-                      {collabs.length > 0
-                        ? `${displayUser.username || displayUser.name} & ${collabs.map(c => c.username || c.name).join(', ')}`
-                        : displayUser.username || displayUser.name}
+                      {allNames.length > 1 ? allNames.join(' & ') : allNames[0]}
                     </p>
                   </div>
                 );
@@ -563,9 +641,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           {/* Places + map */}
           {selectedRealPost.places.length > 0 && (
             <div className="px-5 pt-4 border-t border-gray-100">
+              {(() => {
+                const uniqueCount = new Set(selectedRealPost.places.map(p => p.name.split(',')[0].trim().toLowerCase())).size;
+                return (
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                  {selectedRealPost.places.length} place{selectedRealPost.places.length !== 1 ? 's' : ''}
+                  {uniqueCount} place{uniqueCount !== 1 ? 's' : ''}
                 </p>
                 <button
                   onClick={async () => {
@@ -594,6 +675,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   {showPostMap ? 'Hide map' : 'View on map'}
                 </button>
               </div>
+                ); })()}
               {showPostMap && (() => {
                 const mapPlaces = selectedRealPost.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name, city: p.city, country: p.country }));
                 if (geocodingPostMap && mapPlaces.length === 0) return (
@@ -702,6 +784,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </div>
             </div>
           </div>
+
+          {/* Date */}
+          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">
+            {new Date(selectedRealPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+
         </div>
       </div>
 
@@ -763,23 +851,28 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Edit post sheet */}
       {showEditPost && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditPost(false)} />
-          <div className="relative bg-white rounded-t-3xl pb-10 max-h-[90vh] flex flex-col">
-            <div className="flex justify-center pt-3 pb-2 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-            <div className="flex items-center justify-between px-4 pb-4 flex-shrink-0">
-              <h3 className="text-base font-bold text-gray-900">Edit post</h3>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowEditPost(false)} />
+          <div className="relative bg-white rounded-t-[2rem] max-h-[94vh] flex flex-col">
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-0 flex-shrink-0">
+              <div className="w-9 h-1 rounded-full bg-gray-200" />
+            </div>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0 border-b border-gray-100">
+              <button onClick={() => setShowEditPost(false)} className="text-sm font-medium text-gray-400 active:text-gray-600 transition-colors">
+                Cancel
+              </button>
+              <h3 className="text-sm font-bold text-gray-900 tracking-tight">Edit post</h3>
               <button
                 disabled={savingEditPost}
                 onClick={async () => {
                   setSavingEditPost(true);
-                  // Compute updated location_label from reordered places
                   const first = editPostPlaces[0];
                   const locationLabel = !first ? '' : editPostPlaces.length === 1
                     ? `${first.name.split(',')[0].trim()} · ${first.city}`
                     : `${first.name.split(',')[0].trim()} +${editPostPlaces.length - 1} · ${first.city}`;
-                  // Save caption + hashtags + location_label
                   await updatePostCaption(selectedRealPost.id, editPostCaption, editPostHashtags, locationLabel);
-                  // Always persist all editable place fields to DB
                   await Promise.all(editPostPlaces.map(ep =>
                     updatePostPlace(ep.id, {
                       name: ep.name,
@@ -789,144 +882,39 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       category: ep.category,
                     })
                   ));
-                  // Remove deleted places
                   const removedIds = selectedRealPost.places.filter(p => !editPostPlaces.find(ep => ep.id === p.id)).map(p => p.id);
                   for (const id of removedIds) await deletePostPlace(id);
-                  // Always persist new order
                   if (editPostPlaces.length > 0) await reorderPostPlaces(editPostPlaces.map(p => p.id));
-                  // Update local state everywhere
                   const updated = { ...selectedRealPost, caption: editPostCaption, hashtags: editPostHashtags, locationLabel, places: editPostPlaces };
                   setSelectedRealPost(updated);
                   setRealPosts(prev => prev.map(p => p.id === selectedRealPost.id ? updated : p));
                   setSavingEditPost(false);
                   setShowEditPost(false);
                 }}
-                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-50"
-              >{savingEditPost ? 'Saving…' : 'Save'}</button>
+                className="text-sm font-bold text-orange-500 disabled:opacity-40 active:opacity-70 transition-opacity"
+              >{savingEditPost ? 'Saving…' : 'Done'}</button>
             </div>
-            <div className="px-4 overflow-y-auto flex-1 space-y-5">
-              {/* Caption */}
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Caption</p>
+
+            <div className="overflow-y-auto flex-1 pb-10">
+
+              {/* Caption — frameless, feels like editing the post itself */}
+              <div className="px-5 pt-4 pb-4 border-b border-gray-100">
                 <textarea
                   value={editPostCaption}
                   onChange={e => setEditPostCaption(e.target.value)}
                   rows={3}
-                  className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none resize-none"
+                  placeholder="Write a caption…"
+                  className="w-full text-[15px] text-gray-900 leading-relaxed outline-none resize-none placeholder-gray-300 bg-transparent"
                 />
-              </div>
-              {/* Places — reorder + remove + edit address */}
-              {editPostPlaces.length > 0 && (
-                <div>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Images & Places</p>
-                  <p className="text-xs text-gray-400 mb-2.5">Tap a place to edit its details · use arrows to reorder</p>
-                  <div className="space-y-2">
-                    {editPostPlaces.map((place, i) => {
-                      const isExpanded = expandedPlaceId === place.id;
-                      const updateField = (field: keyof RealPostPlace, value: string) =>
-                        setEditPostPlaces(prev => prev.map(p => p.id === place.id ? { ...p, [field]: value } : p));
-                      return (
-                        <div key={place.id} className="bg-gray-50 rounded-2xl overflow-hidden">
-                          {/* Collapsed row */}
-                          <div className="flex items-center gap-3 p-2.5">
-                            {/* Number badge + image */}
-                            <div className="relative flex-shrink-0">
-                              {place.photoUrl
-                                ? <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover" />
-                                : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center text-xl">{categoryEmoji[place.category as keyof typeof categoryEmoji] ?? '📍'}</div>
-                              }
-                              <div className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-gray-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{i + 1}</div>
-                            </div>
-                            {/* Name + location — tap to expand */}
-                            <button className="flex-1 min-w-0 text-left" onClick={() => setExpandedPlaceId(isExpanded ? null : place.id)}>
-                              <p className="text-sm font-semibold text-gray-900 truncate">{place.name || <span className="text-gray-400 italic">No name</span>}</p>
-                              <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country || <span className="italic">No location</span>}</p>
-                              {place.category && <p className="text-xs text-gray-400">{categoryEmoji[place.category as keyof typeof categoryEmoji]} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
-                            </button>
-                            {/* Move up/down */}
-                            <div className="flex flex-col gap-1 flex-shrink-0">
-                              <button disabled={i === 0} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i-1], a[i]] = [a[i], a[i-1]]; return a; })} className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300">
-                                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2l3.5 4H1.5z" fill="currentColor"/></svg>
-                              </button>
-                              <button disabled={i === editPostPlaces.length - 1} onClick={() => setEditPostPlaces(prev => { const a = [...prev]; [a[i], a[i+1]] = [a[i+1], a[i]]; return a; })} className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-200 disabled:opacity-25 active:bg-gray-300">
-                                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 8L1.5 4h7z" fill="currentColor"/></svg>
-                              </button>
-                            </div>
-                            {/* Remove */}
-                            <button onClick={() => { setEditPostPlaces(prev => prev.filter(p => p.id !== place.id)); if (isExpanded) setExpandedPlaceId(null); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0">
-                              <X size={12} strokeWidth={2} className="text-gray-500" />
-                            </button>
-                          </div>
-                          {/* Expanded editor */}
-                          {isExpanded && (
-                            <div className="px-3 pb-3 space-y-3 border-t border-gray-100 pt-3">
-                              {/* Google Places search — fills all fields automatically */}
-                              <div>
-                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Search on Google Maps</p>
-                                <PlaceSearch
-                                  placeholder="Search to update address…"
-                                  onSelect={result => {
-                                    setEditPostPlaces(prev => prev.map(p => p.id === place.id ? {
-                                      ...p,
-                                      name: result.name || p.name,
-                                      neighborhood: result.neighborhood,
-                                      city: result.city,
-                                      country: result.country,
-                                      category: result.category || p.category,
-                                    } : p));
-                                  }}
-                                />
-                              </div>
-                              {/* Current resolved address (read + editable) */}
-                              <div className="bg-gray-50 rounded-xl px-3 py-2.5 space-y-1.5">
-                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Current address</p>
-                                <input
-                                  value={place.name}
-                                  onChange={e => updateField('name', e.target.value)}
-                                  placeholder="Place name"
-                                  className="w-full text-sm font-semibold text-gray-900 bg-transparent outline-none border-b border-dashed border-gray-200 pb-1"
-                                />
-                                <input
-                                  value={[place.neighborhood, place.city, place.country].filter(Boolean).join(', ')}
-                                  readOnly
-                                  className="w-full text-xs text-gray-400 bg-transparent outline-none cursor-default"
-                                  placeholder="No address yet — search above"
-                                />
-                              </div>
-                              {/* Category chips */}
-                              <div>
-                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Category</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {(['restaurant','cafe','bar','food','hotel','attraction','nature','beach','shop','experience','sports','wellness'] as const).map(cat => (
-                                    <button
-                                      key={cat}
-                                      onClick={() => updateField('category', cat)}
-                                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${place.category === cat ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-500'}`}
-                                    >
-                                      {categoryEmoji[cat]} {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {/* Hashtags */}
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Hashtags</p>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 bg-gray-50 rounded-xl px-4 py-3 min-h-[44px]">
+                {/* Hashtags inline below caption */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
                   {editPostHashtags.map(tag => (
                     <button
                       key={tag}
                       onClick={() => setEditPostHashtags(prev => prev.filter(t => t !== tag))}
-                      className="flex items-center gap-1 text-xs font-medium text-orange-400"
+                      className="flex items-center gap-1 text-[13px] font-medium text-orange-500"
                     >
-                      #{tag}<X size={9} strokeWidth={2.5} className="text-orange-300" />
+                      #{tag} <X size={9} strokeWidth={2.5} className="text-orange-300" />
                     </button>
                   ))}
                   <input
@@ -940,17 +928,53 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                         setEditTagInput('');
                       }
                     }}
-                    placeholder="+ add"
-                    className="text-xs font-medium text-gray-500 bg-transparent outline-none placeholder-gray-300"
-                    style={{ width: `${Math.max(40, (editTagInput.length + 5) * 7)}px` }}
+                    placeholder="# add tag"
+                    className="text-[13px] font-medium text-gray-400 bg-transparent outline-none placeholder-gray-300 min-w-[60px]"
+                    style={{ width: `${Math.max(60, (editTagInput.length + 5) * 8)}px` }}
                   />
                 </div>
-                <p className="text-[10px] text-gray-300 mt-1 px-1">Tap a tag to remove · press space or enter to add</p>
               </div>
+
+              {/* Places — drag to reorder */}
+              {editPostPlaces.length > 0 && (
+                <div className="pt-1">
+                  <DndContext
+                    sensors={dndSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={(event: DragEndEvent) => {
+                      const { active, over } = event;
+                      if (over && active.id !== over.id) {
+                        setEditPostPlaces(prev => {
+                          const oldIndex = prev.findIndex(p => p.id === active.id);
+                          const newIndex = prev.findIndex(p => p.id === over.id);
+                          return arrayMove(prev, oldIndex, newIndex);
+                        });
+                      }
+                    }}
+                  >
+                    <SortableContext items={editPostPlaces.map(p => p.id)} strategy={verticalListSortingStrategy}>
+                      {editPostPlaces.map((place, i) => (
+                        <SortableEditPlace
+                          key={place.id}
+                          place={place}
+                          i={i}
+                          total={editPostPlaces.length}
+                          isExpanded={expandedPlaceId === place.id}
+                          onToggle={() => setExpandedPlaceId(expandedPlaceId === place.id ? null : place.id)}
+                          onRemove={() => { setEditPostPlaces(prev => prev.filter(p => p.id !== place.id)); if (expandedPlaceId === place.id) setExpandedPlaceId(null); }}
+                          onUpdateField={(field, value) => setEditPostPlaces(prev => prev.map(p => p.id === place.id ? { ...p, [field]: value } : p))}
+                          onSelectPlace={result => setEditPostPlaces(prev => prev.map(p => p.id === place.id ? { ...p, name: result.name || p.name, neighborhood: result.neighborhood, city: result.city, country: result.country, category: result.category || p.category } : p))}
+                          categoryEmojiMap={categoryEmoji}
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
+                </div>
+              )}
+
               {/* Collaborators */}
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">With</p>
-                {/* Current collaborators */}
+              <div className="px-5 pt-4 pb-4 border-b border-gray-100">
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">With</p>
                 {postCollaborators.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-3">
                     {postCollaborators.map(c => (
@@ -959,20 +983,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                           ? <img src={c.profile.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
                           : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center text-[9px] font-bold text-gray-600">{c.profile.name[0]?.toUpperCase() || '?'}</div>}
                         <span className="text-xs font-medium text-gray-700">@{c.profile.username}</span>
-                        {c.status === 'pending' && <span className="text-[9px] text-gray-400">pending</span>}
-                        <button
-                          onClick={async () => {
-                            await removePostCollaborator(selectedRealPost.id, c.userId);
-                            setPostCollaborators(prev => prev.filter(x => x.userId !== c.userId));
-                          }}
-                          className="ml-0.5 text-gray-400"
-                        ><X size={10} strokeWidth={2.5} /></button>
+                        {c.status === 'pending' && <span className="text-[9px] text-gray-400 ml-0.5">pending</span>}
+                        <button onClick={async () => { await removePostCollaborator(selectedRealPost.id, c.userId); setPostCollaborators(prev => prev.filter(x => x.userId !== c.userId)); }} className="ml-0.5 text-gray-400"><X size={10} strokeWidth={2.5} /></button>
                       </div>
                     ))}
                   </div>
                 )}
-                {/* Search + invite */}
-                <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5">
+                <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-2.5">
+                  <Search size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
                   <input
                     value={postCollabSearch}
                     onChange={async e => {
@@ -980,68 +998,56 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       if (e.target.value.trim().length > 0) {
                         const results = await searchProfiles(e.target.value, appUser?.id ?? '');
                         setPostCollabResults(results.filter(r => !postCollaborators.find(c => c.userId === r.id)));
-                      } else {
-                        setPostCollabResults([]);
-                      }
+                      } else { setPostCollabResults([]); }
                     }}
-                    placeholder="Search to add a collaborator…"
+                    placeholder="Add a collaborator…"
                     className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
                   />
                 </div>
                 {postCollabResults.length > 0 && (
-                  <div className="mt-1.5 bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                  <div className="mt-2 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     {postCollabResults.slice(0, 5).map(u => (
-                      <button
-                        key={u.id}
-                        disabled={invitingPostCollab === u.id}
+                      <button key={u.id} disabled={invitingPostCollab === u.id}
                         onClick={async () => {
                           if (!appUser?.id) return;
                           setInvitingPostCollab(u.id);
                           const err = await addPostCollaborator(selectedRealPost.id, u.id, appUser.id);
                           if (!err) {
-                            const newCollab: PostCollaborator = {
-                              id: `${selectedRealPost.id}-${u.id}`,
-                              postId: selectedRealPost.id,
-                              userId: u.id,
-                              invitedBy: appUser.id,
-                              status: 'pending',
-                              createdAt: new Date().toISOString(),
-                              profile: { name: u.name, username: u.username, avatarUrl: u.avatarUrl },
-                            };
+                            const newCollab: PostCollaborator = { id: `${selectedRealPost.id}-${u.id}`, postId: selectedRealPost.id, userId: u.id, invitedBy: appUser.id, status: 'pending', createdAt: new Date().toISOString(), profile: { name: u.name, username: u.username, avatarUrl: u.avatarUrl } };
                             setPostCollaborators(prev => [...prev, newCollab]);
                             setPostCollabResults(prev => prev.filter(r => r.id !== u.id));
                             setPostCollabSearch('');
                           }
                           setInvitingPostCollab(null);
                         }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left border-b border-gray-50 last:border-0 active:bg-gray-50"
                       >
-                        {u.avatarUrl
-                          ? <img src={u.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-                          : <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">{u.name[0]?.toUpperCase() || '?'}</div>}
+                        {u.avatarUrl ? <img src={u.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" /> : <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">{u.name[0]?.toUpperCase() || '?'}</div>}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
                           <p className="text-xs text-gray-400">@{u.username}</p>
                         </div>
-                        <span className="text-xs font-semibold text-orange-500 flex-shrink-0">
-                          {invitingPostCollab === u.id ? 'Inviting…' : 'Invite'}
-                        </span>
+                        <span className="text-xs font-semibold text-orange-500 flex-shrink-0">{invitingPostCollab === u.id ? 'Inviting…' : 'Invite'}</span>
                       </button>
                     ))}
                   </div>
                 )}
               </div>
-              {/* Delete post */}
-              <button
-                onClick={async () => {
-                  if (!confirm('Delete this post?')) return;
-                  await deletePost(selectedRealPost.id);
-                  setRealPosts(prev => prev.filter(p => p.id !== selectedRealPost.id));
-                  setShowEditPost(false);
-                  setSelectedRealPost(null);
-                }}
-                className="w-full py-3 text-sm font-semibold text-red-500 bg-red-50 rounded-2xl"
-              >Delete post</button>
+
+              {/* Delete */}
+              <div className="px-5 pt-5 pb-2">
+                <button
+                  onClick={async () => {
+                    if (!confirm('Delete this post?')) return;
+                    await deletePost(selectedRealPost.id);
+                    setRealPosts(prev => prev.filter(p => p.id !== selectedRealPost.id));
+                    setShowEditPost(false);
+                    setSelectedRealPost(null);
+                  }}
+                  className="w-full py-3 text-sm font-semibold text-red-500 active:opacity-70 transition-opacity"
+                >Delete post</button>
+              </div>
+
             </div>
           </div>
         </div>
@@ -1767,7 +1773,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
 
           {/* Date — very end */}
-          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{selectedPost.createdAt}</p>
+          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
 
         </div>
       </div>
@@ -2602,18 +2608,29 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           <div className="pb-10">
             {/* Map with stats overlay */}
             <div className="px-4 pt-4">
-              <div className="rounded-2xl overflow-hidden relative">
-                {mapPlaces.length > 0 ? (
-                  <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse" />}>
-                    <MapView places={mapPlaces} height="220px" />
-                  </Suspense>
-                ) : (
-                  <div className="h-52 bg-gray-100 flex items-center justify-center">
-                    <p className="text-xs text-gray-400">Your places will appear here as you add posts</p>
-                  </div>
-                )}
-                {/* Stats overlay — only covers left half so zoom controls stay visible */}
-                <div className="absolute bottom-0 left-0 w-3/5 bg-gradient-to-t from-black/70 to-transparent px-4 py-3 pointer-events-none">
+              {/* Outer wrapper: relative but NO overflow-hidden so overlays can exceed map bounds */}
+              <div className="rounded-2xl relative" style={{ height: 220 }}>
+                {/* Map clipped to rounded corners */}
+                <div className="rounded-2xl overflow-hidden absolute inset-0">
+                  {mapPlaces.length > 0 ? (
+                    <Suspense fallback={<div className="h-full bg-gray-100 animate-pulse" />}>
+                      <MapView
+                        places={mapPlaces}
+                        height="220px"
+                        hideZoomControls
+                        onMapReady={map => { profileMapRef.current = map; }}
+                      />
+                    </Suspense>
+                  ) : (
+                    <div className="h-full bg-gray-100 flex items-center justify-center">
+                      <p className="text-xs text-gray-400">Your places will appear here as you add posts</p>
+                    </div>
+                  )}
+                </div>
+                {/* Full-width gradient — pointer-events-none so map is still pannable */}
+                <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/70 to-transparent rounded-b-2xl pointer-events-none" />
+                {/* Stats — on top of gradient */}
+                <div className="absolute bottom-0 left-0 px-4 py-3 pointer-events-none">
                   <div className="flex gap-6">
                     <div>
                       <p className="text-base font-black text-white">{countriesCount}</p>
@@ -2625,6 +2642,30 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     </div>
                   </div>
                 </div>
+                {/* Zoom controls — on top of gradient, bottom-right */}
+                {mapPlaces.length > 0 && (
+                  <div className="absolute bottom-3 right-3 flex flex-col gap-1" style={{ zIndex: 10 }}>
+                    <button
+                      onClick={() => profileMapRef.current?.zoomIn()}
+                      className="w-8 h-8 rounded-[10px] bg-white flex items-center justify-center"
+                      style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.15)', border: 'none' }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <line x1="6" y1="0" x2="6" y2="12" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+                        <line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => profileMapRef.current?.zoomOut()}
+                      className="w-8 h-8 rounded-[10px] bg-white flex items-center justify-center"
+                      style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.15)', border: 'none' }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2656,7 +2697,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       <p className="text-xs text-gray-400">{cPlaces.length} place{cPlaces.length !== 1 ? 's' : ''}</p>
                     </div>
                     <div className="space-y-2">
-                      {cPlaces.map((pl, i) => (
+                      {cPlaces.map((pl, i) => {
+                        const isSaved = postPlaceSavedIds.has(pl.id);
+                        return (
                         <div key={`${pl.id}-${i}`} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
                           {pl.photoUrl ? (
                             <img src={pl.photoUrl} alt={pl.name} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
@@ -2671,8 +2714,27 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                             </p>
                             {pl.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(pl.category)} {pl.category.charAt(0).toUpperCase() + pl.category.slice(1)}</p>}
                           </div>
+                          {appUser && !appUser.isDemo && (
+                            <button
+                              onClick={() => {
+                                if (!isSaved) {
+                                  setPostPlaceSavedIds(prev => new Set(prev).add(pl.id));
+                                  savePlace(appUser.id, pl.id);
+                                }
+                                setAddToColPlace({ id: pl.id, name: pl.name });
+                                setLoadingPlaceCollections(true);
+                                getPlaceCollectionIds(pl.id).then(ids => { setPlaceInCollections(ids); setLoadingPlaceCollections(false); });
+                              }}
+                              className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${isSaved ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
+                            >
+                              {isSaved
+                                ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                                : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />}
+                            </button>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}

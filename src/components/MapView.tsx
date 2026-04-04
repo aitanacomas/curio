@@ -89,14 +89,22 @@ function ZoomControls() {
   );
 }
 
+function MapReadyCallback({ onMapReady }: { onMapReady: (map: L.Map) => void }) {
+  const map = useMap();
+  useEffect(() => { onMapReady(map); }, [map, onMapReady]);
+  return null;
+}
+
 interface Props {
   places: MapPlace[];
   center?: [number, number];
   zoom?: number;
   height?: string;
+  onMapReady?: (map: L.Map) => void;
+  hideZoomControls?: boolean;
 }
 
-export default function MapView({ places, center = [20, 10], zoom = 2, height = '300px' }: Props) {
+export default function MapView({ places, center = [20, 10], zoom = 2, height = '300px', onMapReady, hideZoomControls = false }: Props) {
   return (
     <MapContainer
       center={center}
@@ -113,7 +121,8 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       <TileLayer url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png" minZoom={5} />
       {places.length === 0 && <FitWorld />}
       {places.length > 1 && <FitBounds places={places} />}
-      <ZoomControls />
+      {!hideZoomControls && <ZoomControls />}
+      {onMapReady && <MapReadyCallback onMapReady={onMapReady} />}
       {places.map(place => (
         <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon()}>
           <Popup>
