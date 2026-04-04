@@ -778,7 +778,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [showAskAISheet, setShowAskAISheet] = useState(false);
   const [askAIPrompt, setAskAIPrompt] = useState('');
   const [askAILoading, setAskAILoading] = useState(false);
-  const [askAISuggestions, setAskAISuggestions] = useState<{ name: string; category: string; neighborhood: string; reason: string }[]>([]);
+  const [askAISuggestions, setAskAISuggestions] = useState<{ name: string; category: string; neighborhood: string; reason: string; lat?: number; lng?: number }[]>([]);
   const [askAIError, setAskAIError] = useState('');
   const [addedAISuggestions, setAddedAISuggestions] = useState<Set<number>>(new Set());
   const [addingAISuggestion, setAddingAISuggestion] = useState<number | null>(null);
@@ -1745,7 +1745,7 @@ Return ONLY valid JSON, no markdown, no explanation:
     setShowAskAISheet(true);
   };
 
-  const handleAddAISuggestion = async (suggestion: { name: string; category: string; neighborhood: string; reason: string }, index: number) => {
+  const handleAddAISuggestion = async (suggestion: { name: string; category: string; neighborhood: string; reason: string; lat?: number; lng?: number }, index: number) => {
     if (!selectedTrip || !userId) return;
     setAddingAISuggestion(index);
     let updatedDays = [...selectedTrip.days];
