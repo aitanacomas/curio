@@ -2038,7 +2038,8 @@ Return ONLY valid JSON, no markdown, no explanation:
       setMapCoords(prev => ({ ...prev, ...storedCoords }));
     }
 
-    // Only geocode items that have no stored coords and haven't been geocoded yet
+    // Geocode old items that have no stored coords — use places:searchText directly
+    // (works from browser, no proxy needed) and write coords back to DB permanently
     const toGeocode = allItems.filter(item => item.lat == null && !mapCoords[item.id] && !storedCoords[item.id]);
     if (toGeocode.length === 0) { setMapLoading(false); return; }
     let cancelled = false;
@@ -2054,10 +2055,26 @@ Return ONLY valid JSON, no markdown, no explanation:
             selectedTrip.destination,
             selectedTrip.country,
           ].filter(Boolean).join(', ');
-          // Use server-side proxy to avoid browser Referer/CORS issues
-          const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+              'X-Goog-FieldMask': 'places.location',
+            },
+            body: JSON.stringify({ textQuery: q, languageCode: 'en' }),
+          });
           const data = await res.json();
-          if (data.lat && data.lng) newCoords[item.id] = { lat: data.lat, lng: data.lng };
+          const loc = data.places?.[0]?.location;
+          if (loc?.latitude && loc?.longitude) {
+            const lat = loc.latitude;
+            const lng = loc.longitude;
+            newCoords[item.id] = { lat, lng };
+            // Write back to DB so this item never needs geocoding again
+            if (item.id && !item.id.startsWith('item-')) {
+              updatePlanItem(item.id, { lat, lng });
+            }
+          }
           await new Promise(r => setTimeout(r, 120));
         } catch { /* silent */ }
       }
