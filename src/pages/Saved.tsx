@@ -53,7 +53,7 @@ function LocationSearch({ value, onChange, onCoverImage }: { value: string; onCh
   };
 
   return (
-    <div className="relative">
+    <div>
       <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
         <MapPin size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
         <input
@@ -65,13 +65,14 @@ function LocationSearch({ value, onChange, onCoverImage }: { value: string; onCh
         {searching && <Loader2 size={13} className="text-gray-400 animate-spin flex-shrink-0" />}
       </div>
       {suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
+        <div className="mt-1 bg-white rounded-xl border border-gray-100 overflow-hidden">
           {suggestions.map(s => (
             <button
               key={s.placeId}
               onClick={() => handleSelect(s.placeId, s.text)}
-              className="w-full text-left px-4 py-2.5 text-sm text-gray-800 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-800 hover:bg-gray-50 border-b border-gray-50 last:border-0 flex items-center gap-2"
             >
+              <MapPin size={11} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
               {s.text}
             </button>
           ))}
