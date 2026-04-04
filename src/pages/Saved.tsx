@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send } from 'lucide-react';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal } from 'lucide-react';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
@@ -1537,7 +1537,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </button>
           <div className="absolute top-4 right-4 flex gap-2">
             <button onClick={() => { openEditPlan(selectedTrip); }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
-              <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
+              <SlidersHorizontal size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
             <button onClick={() => {
               const text = `${selectedTrip.destination} trip — ${selectedTrip.dates}`;
@@ -1553,23 +1553,83 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           </div>
           <div className="absolute bottom-4 left-4 right-4">
             <h2 className="text-2xl font-black text-white">{selectedTrip.destination}</h2>
-            {selectedTrip.dates ? (
-              <p className="text-white text-xs flex items-center gap-1 mt-1">
-                <CalendarDays size={11} strokeWidth={1.5} />{selectedTrip.dates}
-              </p>
-            ) : (
-              <button onClick={() => openEditPlan(selectedTrip)} className="flex items-center gap-1 mt-1 text-white/60 text-xs hover:text-white/80 transition-colors">
-                <CalendarDays size={11} strokeWidth={1.5} />Add dates
-              </button>
-            )}
-            {selectedTrip.country && (
-              <p className="text-white text-xs flex items-center gap-1 mt-0.5">
-                <MapPin size={11} strokeWidth={1.5} />{selectedTrip.country}
-              </p>
-            )}
-            {selectedTrip.description && (
-              <p className="text-white text-xs mt-1 line-clamp-2">{selectedTrip.description}</p>
-            )}
+            {/* Date + location + collaborators in one row */}
+            <div className="flex items-center justify-between mt-2 gap-3">
+              <div className="min-w-0">
+                {selectedTrip.dates ? (
+                  <p className="text-white/70 text-xs flex items-center gap-1">
+                    <CalendarDays size={10} strokeWidth={1.5} />{selectedTrip.dates}
+                    {selectedTrip.country ? <span className="text-white/40"> · </span> : null}
+                    {selectedTrip.country ? <span>{selectedTrip.country}</span> : null}
+                  </p>
+                ) : (
+                  <button onClick={() => openEditPlan(selectedTrip)} className="flex items-center gap-1 text-white/50 text-xs">
+                    <CalendarDays size={10} strokeWidth={1.5} />Add dates
+                  </button>
+                )}
+              </div>
+              {/* Collaborator avatars + invite */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex -space-x-1.5">
+                  {(() => {
+                    const isOwner = !selectedTrip.ownerId || selectedTrip.ownerId === userId;
+                    const avatars = [];
+                    if (isOwner) {
+                      avatars.push(userAvatar
+                        ? <img key="you" src={userAvatar} alt="You" className="w-6 h-6 rounded-full object-cover border-2 border-white/40" style={{zIndex:10}} />
+                        : <div key="you" className="w-6 h-6 rounded-full bg-gray-900 border-2 border-white/40 flex items-center justify-center" style={{zIndex:10}}><span className="text-white text-[8px] font-bold">Y</span></div>
+                      );
+                    } else {
+                      selectedTrip.ownerAvatar
+                        ? avatars.push(<img key="owner" src={selectedTrip.ownerAvatar} alt="Owner" className="w-6 h-6 rounded-full object-cover border-2 border-white/40" style={{zIndex:10}} />)
+                        : avatars.push(<div key="owner" className="w-6 h-6 rounded-full bg-gray-400 border-2 border-white/40 flex items-center justify-center" style={{zIndex:10}}><span className="text-white text-[8px] font-bold">{selectedTrip.ownerName?.[0]?.toUpperCase() ?? '?'}</span></div>);
+                      avatars.push(userAvatar
+                        ? <img key="you" src={userAvatar} alt="You" className="w-6 h-6 rounded-full object-cover border-2 border-white/40" style={{zIndex:9}} />
+                        : <div key="you" className="w-6 h-6 rounded-full bg-gray-900 border-2 border-white/40 flex items-center justify-center" style={{zIndex:9}}><span className="text-white text-[8px] font-bold">Y</span></div>
+                      );
+                    }
+                    collabs.filter(c => c.id !== userId).slice(0, 2).forEach((c, i) => {
+                      avatars.push(c.avatar
+                        ? <img key={c.id} src={c.avatar} alt={c.name} className={`w-6 h-6 rounded-full object-cover border-2 border-white/40 ${c.pending ? 'opacity-50' : ''}`} style={{zIndex: 8-i}} />
+                        : <div key={c.id} className={`w-6 h-6 rounded-full bg-gray-400 border-2 border-white/40 flex items-center justify-center ${c.pending ? 'opacity-50' : ''}`} style={{zIndex: 8-i}}><span className="text-white text-[8px] font-bold">{c.name[0]?.toUpperCase()}</span></div>
+                      );
+                    });
+                    return avatars;
+                  })()}
+                </div>
+                <button
+                  onClick={async () => {
+                    const existing = selectedTrip.collaborators ?? [];
+                    setInviteCollabs(existing);
+                    setInviteOriginalIds(new Set(existing.map(c => c.id)));
+                    setInviteInput('');
+                    setShowInvite(true);
+                    if (userId) {
+                      const [followers, following] = await Promise.all([getFollowerProfiles(userId), getFollowingProfiles(userId)]);
+                      const combined = [...followers, ...following].filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i);
+                      setInviteFollowList(combined);
+                      setInviteSuggestions(combined.filter(f => !(selectedTrip.collaborators ?? []).some(c => c.id === f.id)));
+                    }
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 text-white text-[11px] font-semibold"
+                >
+                  <UserPlus size={10} strokeWidth={2} /> Invite
+                </button>
+                {userId && selectedTrip.ownerId && selectedTrip.ownerId !== userId && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Leave this trip?')) return;
+                      await leavePlan(selectedTrip.id, userId);
+                      setPlans(prev => prev.filter(p => p.id !== selectedTrip.id));
+                      setSelectedTrip(null);
+                    }}
+                    className="px-2.5 py-1 rounded-full bg-red-500/80 text-white text-[11px] font-semibold"
+                  >
+                    Leave
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1589,131 +1649,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
           ))}
         </div>
 
-        {/* Collaborators strip */}
-        {(() => {
-          const isOwner = !selectedTrip.ownerId || selectedTrip.ownerId === userId;
-          // Collaborators excluding the current user (they're shown as "You")
-          const othersInTrip = collabs.filter(c => c.id !== userId);
-          const confirmedOthers = othersInTrip.filter(c => !c.pending);
-          const pendingOthers = othersInTrip.filter(c => c.pending);
-
-          return (
-          <div className="flex items-center gap-3 px-4 pt-3 pb-2">
-          <div className="flex -space-x-2">
-            {isOwner ? (
-              /* Owner view: You first, then collaborators */
-              <>
-                {userAvatar ? (
-                  <img src={userAvatar} alt="You" className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0 z-10" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center flex-shrink-0 z-10">
-                    <span className="text-white text-xs font-bold">You</span>
-                  </div>
-                )}
-                {othersInTrip.map((c, i) => (
-                  <div key={c.id} className="relative flex-shrink-0" style={{ zIndex: 9 - i }}>
-                    {c.avatar
-                      ? <img src={c.avatar} alt={c.name} className={`w-8 h-8 rounded-full object-cover border-2 border-white ${c.pending ? 'opacity-50' : ''}`} />
-                      : <div className={`w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center text-xs font-bold text-white ${c.pending ? 'opacity-50' : ''}`}>{c.name[0]?.toUpperCase()}</div>
-                    }
-                    {c.pending && (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white flex items-center justify-center">
-                        <div className="w-2.5 h-2.5 rounded-full border border-gray-400 border-dashed" />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </>
-            ) : (
-              /* Collaborator view: owner first, then You */
-              <>
-                {selectedTrip.ownerAvatar ? (
-                  <img src={selectedTrip.ownerAvatar} alt={selectedTrip.ownerName ?? 'Owner'} className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0 z-10" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center flex-shrink-0 z-10">
-                    <span className="text-white text-xs font-bold">{selectedTrip.ownerName?.[0]?.toUpperCase() ?? '?'}</span>
-                  </div>
-                )}
-                {userAvatar ? (
-                  <img src={userAvatar} alt="You" className="w-8 h-8 rounded-full object-cover border-2 border-white flex-shrink-0" style={{ zIndex: 8 }} />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center flex-shrink-0" style={{ zIndex: 8 }}>
-                    <span className="text-white text-xs font-bold">You</span>
-                  </div>
-                )}
-                {othersInTrip.map((c, i) => (
-                  <div key={c.id} className="relative flex-shrink-0" style={{ zIndex: 7 - i }}>
-                    {c.avatar
-                      ? <img src={c.avatar} alt={c.name} className={`w-8 h-8 rounded-full object-cover border-2 border-white ${c.pending ? 'opacity-50' : ''}`} />
-                      : <div className={`w-8 h-8 rounded-full bg-gray-400 border-2 border-white flex items-center justify-center text-xs font-bold text-white ${c.pending ? 'opacity-50' : ''}`}>{c.name[0]?.toUpperCase()}</div>
-                    }
-                    {c.pending && (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white flex items-center justify-center">
-                        <div className="w-2.5 h-2.5 rounded-full border border-gray-400 border-dashed" />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            {isOwner ? (
-              othersInTrip.length === 0 ? (
-                <p className="text-xs text-gray-400">Just you on this plan</p>
-              ) : (
-                <div>
-                  {confirmedOthers.length > 0 && (
-                    <p className="text-xs text-gray-600 font-medium">You + {confirmedOthers.map(c => c.name.split(' ')[0]).join(', ')}</p>
-                  )}
-                  {pendingOthers.length > 0 && (
-                    <p className="text-xs text-gray-400">{pendingOthers.map(c => c.name.split(' ')[0]).join(', ')} invited</p>
-                  )}
-                </div>
-              )
-            ) : (
-              <div>
-                <p className="text-xs text-gray-600 font-medium">{selectedTrip.ownerName?.split(' ')[0] ?? 'Owner'} + You{confirmedOthers.length > 0 ? `, ${confirmedOthers.map(c => c.name.split(' ')[0]).join(', ')}` : ''}</p>
-                {pendingOthers.length > 0 && (
-                  <p className="text-xs text-gray-400">{pendingOthers.map(c => c.name.split(' ')[0]).join(', ')} invited</p>
-                )}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={async () => {
-              const existing = selectedTrip.collaborators ?? [];
-              setInviteCollabs(existing);
-              setInviteOriginalIds(new Set(existing.map(c => c.id)));
-              setInviteInput('');
-              setShowInvite(true);
-              if (userId) {
-                const [followers, following] = await Promise.all([getFollowerProfiles(userId), getFollowingProfiles(userId)]);
-                const combined = [...followers, ...following].filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i);
-                setInviteFollowList(combined);
-                setInviteSuggestions(combined.filter(f => !(selectedTrip.collaborators ?? []).some(c => c.id === f.id)));
-              }
-            }}
-            className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-gray-100 px-3 py-1.5 rounded-full flex-shrink-0"
-          >
-            <UserPlus size={12} strokeWidth={2} /> Invite
-          </button>
-          {userId && selectedTrip.ownerId && selectedTrip.ownerId !== userId && (
-            <button
-              onClick={async () => {
-                if (!confirm('Leave this trip?')) return;
-                await leavePlan(selectedTrip.id, userId);
-                setPlans(prev => prev.filter(p => p.id !== selectedTrip.id));
-                setSelectedTrip(null);
-              }}
-              className="text-xs font-semibold text-red-500 bg-red-50 px-3 py-1.5 rounded-full flex-shrink-0"
-            >
-              Leave
-            </button>
-          )}
-          </div>
-          );
-        })()}
 
 
 
@@ -1744,22 +1679,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
                BRAINSTORM MODE — flat idea list
                ══════════════════════════════════════ */
             <>
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-xs font-bold text-gray-900 uppercase tracking-wider">Brainstorm</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Add places you're dreaming of</p>
-                </div>
-                {allItems.length > 0 && (
-                  <button
-                    onClick={() => setShowMap(m => !m)}
-                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
-                  >
-                    <MapPin size={12} strokeWidth={2} />
-                    {showMap ? 'Hide map' : 'Map'}
+              {/* Map toggle */}
+              {allItems.length > 0 && (
+                <div className="flex justify-end mb-3">
+                  <button onClick={() => setShowMap(m => !m)} className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">
+                    <MapPin size={12} strokeWidth={2} />{showMap ? 'Hide map' : 'Map'}
                   </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Inline map */}
               {showMap && allItems.length > 0 && (
