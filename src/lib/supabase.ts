@@ -1398,7 +1398,7 @@ export async function createPlanItem(
 
 export async function updatePlanItem(
   itemId: string,
-  data: Partial<{ name: string; category: string; image_url: string; time_label: string; time_end: string; notes: string; address: string; neighborhood: string; status: string; check_in: string; check_out: string; location: string; booked: boolean; plan_day_id: string; lat: number | null; lng: number | null }>
+  data: Partial<{ name: string; category: string; image_url: string; time_label: string; time_end: string; notes: string; address: string; neighborhood: string; status: string; check_in: string; check_out: string; location: string; booked: boolean; plan_day_id: string; lat: number | null; lng: number | null; position: number }>
 ): Promise<boolean> {
   const { error } = await supabase.from('plan_items').update(data).eq('id', itemId);
   if (!error) return true;

@@ -1,8 +1,11 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles } from 'lucide-react';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles, GripVertical } from 'lucide-react';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY as string;
@@ -401,6 +404,66 @@ function ItemThumb({ image, name, category, size = 'md' }: { image?: string; nam
   return <img src={image} alt={name} className={`${cls} object-cover flex-shrink-0`} onError={() => setErr(true)} />;
 }
 
+function SortableItineraryItem({ item, dayId, userId, onOpen, categoryEmoji, categoryDisplayName, collaborators }: {
+  item: { id: string; name: string; category: string; image?: string; time?: string; timeEnd?: string; checkIn?: string; checkOut?: string; status?: string; booked?: boolean; neighborhood?: string; addedBy?: string | null; addedByName?: string | null; addedByAvatar?: string | null };
+  dayId: string | null;
+  userId?: string;
+  onOpen: () => void;
+  categoryEmoji: Record<string, string>;
+  categoryDisplayName: Record<string, string>;
+  collaborators?: { id: string }[];
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+  const isBooked = item.status === 'booked' || item.booked;
+  const isPending = item.status === 'pending';
+  const fmtDate = (s?: string) => { if (!s) return ''; try { return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch { return s; } };
+  return (
+    <div ref={setNodeRef} style={style} className={`rounded-2xl p-3 transition-colors ${isBooked ? 'bg-green-50/70 border border-green-100' : isPending ? 'bg-amber-50/70 border border-amber-100' : 'bg-gray-50'}`}>
+      <div className="flex items-start gap-3">
+        <div {...listeners} {...attributes} className="mt-1 touch-none cursor-grab active:cursor-grabbing flex-shrink-0 text-gray-300" onClick={e => e.stopPropagation()}>
+          <GripVertical size={14} strokeWidth={1.5} />
+        </div>
+        <ItemThumb image={item.image} name={item.name} category={item.category} />
+        <div className="flex-1 min-w-0" onClick={onOpen}>
+          <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name.split(',')[0].trim()}</p>
+          <p className="text-xs text-gray-400 mt-0.5 truncate">
+            {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
+            {item.neighborhood ? ` · ${item.neighborhood}` : ''}
+          </p>
+          {item.time && (
+            <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+              <Clock size={9} strokeWidth={1.5} />
+              {item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
+            </p>
+          )}
+          {(item.checkIn || item.checkOut) && (
+            <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+              <CalendarDays size={9} strokeWidth={1.5} />
+              {fmtDate(item.checkIn)}{item.checkIn && item.checkOut ? ' → ' : ''}{fmtDate(item.checkOut)}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          {isBooked && <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">✓ Booked</span>}
+          {isPending && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+        </div>
+      </div>
+      {(collaborators?.length ?? 0) > 0 && item.addedBy && (
+        <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-100">
+          {item.addedByAvatar
+            ? <img src={item.addedByAvatar} alt="" className="w-4 h-4 rounded-full object-cover" />
+            : <div className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center text-[8px] font-bold text-white">{(item.addedByName ?? '?')[0].toUpperCase()}</div>
+          }
+          <span className="text-[10px] text-gray-400">
+            {item.addedBy === userId ? 'You' : (item.addedByName ?? 'Someone')} added this
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlaceRow({ place, isLocked, isSaved, onToggleSave, onBook }: {
   place: Place;
   isLocked: boolean;
@@ -767,12 +830,15 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [showReturnFlight, setShowReturnFlight] = useState(false);
   const [returnFlightForm, setReturnFlightForm] = useState<{ flightNumber: string; departureTime: string; arrivalTime: string }>({ flightNumber: '', departureTime: '', arrivalTime: '' });
   const [bookingsExpanded, setBookingsExpanded] = useState(true);
-  // AI itinerary generation
+  // Itinerary generation
   const [showGenerateSheet, setShowGenerateSheet] = useState(false);
   const [generateSelectedIds, setGenerateSelectedIds] = useState<Set<string>>(new Set());
   const [generateLoading, setGenerateLoading] = useState(false);
   const [generateError, setGenerateError] = useState('');
-  // Track which plans have had AI itineraries generated this session
+  // Drag-and-drop in itinerary view
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  // Track which plans have had itineraries generated this session
   const [aiGeneratedPlanIds, setAiGeneratedPlanIds] = useState<Set<string>>(new Set());
   // AI Ask for ideas
   const [showAskAISheet, setShowAskAISheet] = useState(false);
@@ -1592,94 +1658,62 @@ Email: ${bookingEmailText.slice(0, 3000)}` }] }],
     setPlanBookings(prev => prev.filter(b => b.id !== id));
   };
 
-  // ── AI Itinerary Generator ────────────────────────────────────────────────
+  // ── Itinerary Generator (neighborhood-based, no AI) ──────────────────────
   const handleGenerateItinerary = async () => {
     if (!selectedTrip || !userId) return;
     setGenerateLoading(true);
     setGenerateError('');
 
-    const allTripItems = selectedTrip.days.flatMap(d => d.items);
-    const placesToUse = allTripItems.filter(p => generateSelectedIds.has(p.id));
-    const numDays = countDaysFromDates(selectedTrip.dates) || 3;
-
-    const prompt = `You are a travel itinerary planner. Create a day-by-day itinerary for a trip to ${selectedTrip.destination || selectedTrip.country} (${selectedTrip.dates || `${numDays} days`}).
-
-The user has saved these places they want to visit:
-${placesToUse.map((p, i) => `${i + 1}. ${p.name} — ${p.category} — ${[p.neighborhood, p.location].filter(Boolean).join(', ')}`).join('\n')}
-
-Rules:
-- Distribute places across ${numDays} day(s) as evenly as possible
-- Group places that are in the same neighborhood/area on the same day to minimise travel
-- For restaurants/cafes: suggest morning ones earlier, dinner ones later in the day
-- Assign a realistic timeLabel (e.g. "9:00 AM", "1:00 PM", "7:30 PM") to each place
-- Add a short, useful one-line note for each place (what to order, what to see, tip)
-- If there are more places than fit comfortably, prioritise variety across categories
-
-Return ONLY valid JSON, no markdown, no explanation:
-{
-  "days": [
-    {
-      "label": "Day 1",
-      "places": [
-        { "name": "Place Name", "timeLabel": "10:00 AM", "notes": "Short tip here" }
-      ]
-    }
-  ]
-}`;
-
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.4, maxOutputTokens: 2000 },
-          }),
-        }
-      );
+      const allTripItems = selectedTrip.days.flatMap(d => d.items);
+      const placesToUse = allTripItems.filter(p => generateSelectedIds.has(p.id));
+      const numDays = countDaysFromDates(selectedTrip.dates) || 3;
 
-      if (!res.ok) throw new Error(res.status === 429 ? 'Too many requests — wait a moment and try again.' : `API error ${res.status}`);
-      const data = await res.json();
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('No JSON in response');
-      const parsed = JSON.parse(jsonMatch[0]) as { days: { label: string; places: { name: string; timeLabel: string; notes: string }[] }[] };
+      // Group by neighborhood → city → 'Other'
+      const groups = new Map<string, TripItem[]>();
+      for (const item of placesToUse) {
+        const key = item.neighborhood || item.location || 'Other';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(item);
+      }
 
-      // Build a lookup from name → trip item
-      const placeByName: Record<string, TripItem> = {};
-      for (const p of placesToUse) placeByName[p.name.toLowerCase()] = p;
+      // Distribute groups across days: assign each group to the day with fewest items
+      const dayBuckets: TripItem[][] = Array.from({ length: numDays }, () => []);
+      const sortedGroups = [...groups.values()].sort((a, b) => b.length - a.length);
+      for (const groupItems of sortedGroups) {
+        const targetIdx = dayBuckets.reduce((minIdx, d, i) => d.length < dayBuckets[minIdx].length ? i : minIdx, 0);
+        dayBuckets[targetIdx].push(...groupItems);
+      }
 
-      // Create plan days + items, build local Trip update in parallel
+      // Persist to DB and build local state
       const newDays: TripDay[] = [];
-      for (let di = 0; di < parsed.days.length; di++) {
-        const dayData = parsed.days[di];
-        const newDay = await createPlanDay(selectedTrip.id, dayData.label, di);
+      for (let di = 0; di < numDays; di++) {
+        const label = getTripDayLabel(selectedTrip, di);
+        const newDay = await createPlanDay(selectedTrip.id, label, di);
         if (!newDay) continue;
         const items: TripItem[] = [];
-        for (let pi = 0; pi < dayData.places.length; pi++) {
-          const p = dayData.places[pi];
-          const saved = placeByName[p.name.toLowerCase()];
+        for (let pi = 0; pi < dayBuckets[di].length; pi++) {
+          const item = dayBuckets[di][pi];
           const dbItem = await createPlanItem(selectedTrip.id, newDay.id, {
-            name: p.name,
-            category: saved?.category ?? 'experience',
-            image_url: saved?.image ?? '',
-            time_label: p.timeLabel,
+            name: item.name,
+            category: item.category,
+            image_url: item.image ?? '',
+            time_label: '',
             time_end: '',
-            notes: p.notes,
-            address: saved?.address ?? '',
-            neighborhood: saved?.neighborhood ?? '',
-            location: saved?.location ?? '',
+            notes: item.notes ?? '',
+            address: item.address ?? '',
+            neighborhood: item.neighborhood ?? '',
+            location: item.location ?? '',
             status: 'none',
             check_in: '',
             check_out: '',
             position: pi,
-            lat: saved?.lat ?? undefined, lng: saved?.lng ?? undefined,
+            lat: item.lat ?? undefined,
+            lng: item.lng ?? undefined,
           });
           if (dbItem) items.push(dbItem);
         }
-        newDays.push({ id: newDay.id, label: dayData.label, items });
+        newDays.push({ id: newDay.id, label, items });
       }
 
       const updatedTrip: Trip = { ...selectedTrip, days: newDays };
@@ -1693,6 +1727,61 @@ Return ONLY valid JSON, no markdown, no explanation:
     } finally {
       setGenerateLoading(false);
     }
+  };
+
+  // ── Itinerary drag-and-drop ───────────────────────────────────────────────
+  const handleItineraryDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragId(null);
+    if (!over || active.id === over.id || !selectedTrip) return;
+
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    // Find source day and item
+    const sourceDayIdx = selectedTrip.days.findIndex(d => d.items.some(i => i.id === activeId));
+    if (sourceDayIdx === -1) return;
+    const sourceDay = selectedTrip.days[sourceDayIdx];
+    const activeItemIdx = sourceDay.items.findIndex(i => i.id === activeId);
+    const activeItem = sourceDay.items[activeItemIdx];
+
+    // Check if over is a day id (drop on empty day zone) or an item id
+    const targetDayByDayId = selectedTrip.days.findIndex(d => d.id === overId);
+    const targetDayByItemId = selectedTrip.days.findIndex(d => d.items.some(i => i.id === overId));
+    const destDayIdx = targetDayByDayId !== -1 ? targetDayByDayId : targetDayByItemId;
+    if (destDayIdx === -1) return;
+
+    const newDays = selectedTrip.days.map(d => ({ ...d, items: [...d.items] }));
+
+    if (sourceDayIdx === destDayIdx) {
+      // Reorder within the same day
+      const overItemIdx = newDays[sourceDayIdx].items.findIndex(i => i.id === overId);
+      if (overItemIdx === -1) return;
+      newDays[sourceDayIdx].items = arrayMove(newDays[sourceDayIdx].items, activeItemIdx, overItemIdx);
+      // Persist new positions
+      newDays[sourceDayIdx].items.forEach((item, pos) => {
+        updatePlanItem(item.id, { position: pos });
+      });
+    } else {
+      // Move to a different day
+      newDays[sourceDayIdx].items.splice(activeItemIdx, 1);
+      const destDay = newDays[destDayIdx];
+      const overItemIdx = destDay.items.findIndex(i => i.id === overId);
+      const insertAt = overItemIdx === -1 ? destDay.items.length : overItemIdx;
+      destDay.items.splice(insertAt, 0, activeItem);
+      // Persist day change + positions
+      if (destDay.id) updatePlanItem(activeId, { plan_day_id: destDay.id, position: insertAt });
+      destDay.items.forEach((item, pos) => {
+        if (item.id !== activeId) updatePlanItem(item.id, { position: pos });
+      });
+      newDays[sourceDayIdx].items.forEach((item, pos) => {
+        updatePlanItem(item.id, { position: pos });
+      });
+    }
+
+    const updated = { ...selectedTrip, days: newDays };
+    setSelectedTrip(updated);
+    setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updated : p));
   };
 
   // ── Ask AI for ideas ─────────────────────────────────────────────────────
@@ -2614,86 +2703,76 @@ Return ONLY valid JSON, no markdown, no explanation:
                   </button>
                 </div>
               ) : (
-                <div className="space-y-6">
-                  {sortedDays
-                    .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx)
-                    .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length)
-                    .map((day, di) => (
-                    <div key={di}>
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
-                        {day.id && (
-                          <button onClick={() => setDeleteDayConfirm({ id: day.id!, label: day.label })}
-                            className="text-gray-300 hover:text-red-400 transition-colors p-1">
-                            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                          </button>
-                        )}
-                      </div>
-                      <div className="space-y-2.5">
-                        {day.items.map(item => {
-                          const isBooked = item.status === 'booked' || item.booked;
-                          const isPending = item.status === 'pending';
-                          return (
-                            <div
-                              key={item.id}
-                              className={`rounded-2xl p-3 transition-colors ${isBooked ? 'bg-green-50/70 border border-green-100' : isPending ? 'bg-amber-50/70 border border-amber-100' : 'bg-gray-50'}`}
-                              onClick={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}
-                            >
-                              <div className="flex items-start gap-3">
-                                <ItemThumb image={item.image} name={item.name} category={item.category} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-semibold text-gray-900 leading-snug">{item.name.split(',')[0].trim()}</p>
-                                  <p className="text-xs text-gray-400 mt-0.5 truncate">
-                                    {categoryEmoji[item.category] ?? '📍'} {categoryDisplayName[item.category] ?? item.category}
-                                    {item.neighborhood ? ` · ${item.neighborhood}` : ''}
-                                  </p>
-                                  {item.time && (
-                                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                                      <Clock size={9} strokeWidth={1.5} />
-                                      {item.time}{item.timeEnd ? ` – ${item.timeEnd}` : ''}
-                                    </p>
-                                  )}
-                                  {(item.checkIn || item.checkOut) && (
-                                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                                      <CalendarDays size={9} strokeWidth={1.5} />
-                                      {fmtDate(item.checkIn)}{item.checkIn && item.checkOut ? ' → ' : ''}{fmtDate(item.checkOut)}
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                                  {isBooked && <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">✓ Booked</span>}
-                                  {isPending && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
-                                </div>
+                <DndContext
+                  sensors={dndSensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={(e: DragStartEvent) => setActiveDragId(String(e.active.id))}
+                  onDragEnd={handleItineraryDragEnd}
+                >
+                  <div className="space-y-6">
+                    {sortedDays
+                      .filter((day, idx, arr) => arr.findIndex(d => d.label === day.label) === idx)
+                      .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length)
+                      .map((day, di) => (
+                      <div key={di}>
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
+                          {day.id && (
+                            <button onClick={() => setDeleteDayConfirm({ id: day.id!, label: day.label })}
+                              className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3h9M5 3V2h3v1M5.5 5.5v4M7.5 5.5v4M3 3l.7 7.3A1 1 0 003.7 11h5.6a1 1 0 001-.7L11 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            </button>
+                          )}
+                        </div>
+                        <SortableContext items={day.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-2.5">
+                            {day.items.map(item => (
+                              <SortableItineraryItem
+                                key={item.id}
+                                item={item}
+                                dayId={day.id ?? null}
+                                userId={userId}
+                                onOpen={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}
+                                categoryEmoji={categoryEmoji}
+                                categoryDisplayName={categoryDisplayName}
+                                collaborators={selectedTrip.collaborators}
+                              />
+                            ))}
+                            {day.items.length === 0 && (
+                              <div className="border-2 border-dashed border-gray-100 rounded-2xl py-5 flex items-center justify-center">
+                                <p className="text-sm text-gray-300">Nothing added</p>
                               </div>
-                              {(selectedTrip.collaborators?.length ?? 0) > 0 && item.addedBy && (
-                                <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-100">
-                                  {item.addedByAvatar
-                                    ? <img src={item.addedByAvatar} alt="" className="w-4 h-4 rounded-full object-cover" />
-                                    : <div className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center text-[8px] font-bold text-white">{(item.addedByName ?? '?')[0].toUpperCase()}</div>
-                                  }
-                                  <span className="text-[10px] text-gray-400">
-                                    {item.addedBy === userId ? 'You' : (item.addedByName ?? 'Someone')} added this
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {day.items.length === 0 && (
-                          <div className="border-2 border-dashed border-gray-100 rounded-2xl py-5 flex items-center justify-center">
-                            <p className="text-sm text-gray-300">Nothing added</p>
+                            )}
+                            <button onClick={() => openAddPlace(day.id ?? null)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                              <Plus size={12} strokeWidth={2} /> Add place / plan
+                            </button>
                           </div>
-                        )}
-                        <button onClick={() => openAddPlace(day.id ?? null)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
-                          <Plus size={12} strokeWidth={2} /> Add place / plan
-                        </button>
+                        </SortableContext>
                       </div>
-                    </div>
-                  ))}
-                  <button onClick={handleAddDay} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-100 text-sm text-gray-300 font-medium">
-                    <Plus size={14} strokeWidth={1.5} /> Add a day
-                  </button>
-                </div>
+                    ))}
+                    <button onClick={handleAddDay} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-gray-100 text-sm text-gray-300 font-medium">
+                      <Plus size={14} strokeWidth={1.5} /> Add a day
+                    </button>
+                  </div>
+                  <DragOverlay>
+                    {activeDragId ? (() => {
+                      const activeItem = selectedTrip.days.flatMap(d => d.items).find(i => i.id === activeDragId);
+                      if (!activeItem) return null;
+                      return (
+                        <div className="rounded-2xl p-3 bg-white shadow-xl border border-gray-100 opacity-95">
+                          <div className="flex items-start gap-3">
+                            <GripVertical size={14} strokeWidth={1.5} className="mt-1 text-gray-300 flex-shrink-0" />
+                            <ItemThumb image={activeItem.image} name={activeItem.name} category={activeItem.category} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900">{activeItem.name.split(',')[0].trim()}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">{categoryEmoji[activeItem.category] ?? '📍'} {categoryDisplayName[activeItem.category] ?? activeItem.category}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })() : null}
+                  </DragOverlay>
+                </DndContext>
               )}
             </>
           )}
@@ -3061,7 +3140,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
                 <div className="w-8" />
                 <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Generate Itinerary</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Build Itinerary</p>
                 <button onClick={() => setShowGenerateSheet(false)} disabled={generateLoading} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
                   <X size={14} strokeWidth={2} className="text-gray-600" />
                 </button>
@@ -3071,9 +3150,9 @@ Return ONLY valid JSON, no markdown, no explanation:
                 {/* Intro */}
                 <div className="bg-gray-50 rounded-2xl px-4 py-3 mb-4">
                   <p className="text-sm font-semibold text-gray-900 mb-0.5">
-                    ✨ AI will build your {countDaysFromDates(selectedTrip.dates) || '?'}-day itinerary
+                    🗓 Organise into {countDaysFromDates(selectedTrip.dates) || '?'} days by neighbourhood
                   </p>
-                  <p className="text-xs text-gray-400">Select the saved places you want to include. AI will group them by area and suggest timings.</p>
+                  <p className="text-xs text-gray-400">Select places to include. We'll group nearby spots into the same day to minimise travel — then you can drag to rearrange.</p>
                 </div>
 
                 {/* Select all toggle */}
@@ -3151,7 +3230,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                       Building your itinerary…
                     </>
                   ) : (
-                    <>✨ Generate {generateSelectedIds.size > 0 ? `with ${generateSelectedIds.size} places` : ''}</>
+                    <>🗓 Organise {generateSelectedIds.size > 0 ? `${generateSelectedIds.size} places` : ''} into days</>
                   )}
                 </button>
               </div>
