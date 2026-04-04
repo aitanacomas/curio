@@ -3549,8 +3549,8 @@ Return ONLY valid JSON, no markdown, no explanation:
                   </div>
                 )}
 
-                {/* Place search — Google Places autocomplete, same as Add Post */}
-                <div className="mb-5">
+                {/* Place search — same framework as Add Post */}
+                <div className="mb-4">
                   <PlaceSearch
                     placeholder="Search restaurant, stay, activity…"
                     onSelect={result => {
@@ -3560,48 +3560,48 @@ Return ONLY valid JSON, no markdown, no explanation:
                       if (result.city) setAddPlaceCity(result.city);
                       if (result.country) setAddPlaceCountry(result.country);
                       if (result.address) setAddPlaceAddress(result.address);
-                      if (result.photo && !addPlaceCustomImage) setAddPlaceCustomImage(result.photo);
                       if (result.placeId) setAddPlaceSelectedId(result.placeId);
                       setAddPlaceLat(result.lat ?? null);
                       setAddPlaceLng(result.lng ?? null);
                     }}
                   />
-                  {/* Selected place card — shown after picking from autocomplete */}
-                  {addPlaceSelectedName && (
-                    <div className="mt-2 bg-gray-50 rounded-xl px-4 py-3">
-                      <input
-                        value={addPlaceSelectedName}
-                        onChange={e => setAddPlaceSelectedName(e.target.value)}
-                        className="font-bold text-gray-900 text-sm w-full outline-none bg-transparent border-b border-dashed border-gray-300 focus:border-gray-500 pb-0.5 mb-2 transition-colors"
-                        placeholder="Place name"
-                      />
-                      <div className="flex items-center" style={{ gap: '4px' }}>
-                        <MapPin size={10} className="text-gray-400 flex-shrink-0" />
-                        <span className="text-xs text-gray-400 flex items-center flex-wrap" style={{ gap: 0 }}>
-                          <input
-                            value={addPlaceNeighborhood}
-                            onChange={e => setAddPlaceNeighborhood(e.target.value)}
-                            className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
-                            style={{ width: `${Math.max(52, (addPlaceNeighborhood || 'Neighbourhood').length * 7.2)}px`, padding: 0, margin: 0 }}
-                            placeholder="Neighbourhood"
-                          /><span>,&nbsp;</span><input
-                            value={addPlaceCity}
-                            onChange={e => setAddPlaceCity(e.target.value)}
-                            className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
-                            style={{ width: `${Math.max(28, (addPlaceCity || 'City').length * 7.2)}px`, padding: 0, margin: 0 }}
-                            placeholder="City"
-                          /><span>,&nbsp;</span><input
-                            value={addPlaceCountry}
-                            onChange={e => setAddPlaceCountry(e.target.value)}
-                            className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
-                            style={{ width: `${Math.max(40, (addPlaceCountry || 'Country').length * 7.2)}px`, padding: 0, margin: 0 }}
-                            placeholder="Country"
-                          />
-                        </span>
-                      </div>
-                    </div>
-                  )}
                 </div>
+
+                {/* Name + location — shown after selecting a place, matches Add Post layout */}
+                {addPlaceSelectedName && (
+                  <div className="mb-4">
+                    <input
+                      value={addPlaceSelectedName}
+                      onChange={e => setAddPlaceSelectedName(e.target.value)}
+                      className="font-bold text-gray-900 text-sm w-full outline-none bg-transparent border-b border-dashed border-gray-300 focus:border-gray-500 pb-0.5 mb-2 transition-colors"
+                      placeholder="Place name"
+                    />
+                    <div className="flex items-center" style={{ gap: '4px' }}>
+                      <MapPin size={10} className="text-gray-400 flex-shrink-0" />
+                      <span className="text-xs text-gray-400 flex items-center" style={{ gap: 0 }}>
+                        <input
+                          value={addPlaceNeighborhood}
+                          onChange={e => setAddPlaceNeighborhood(e.target.value)}
+                          className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                          style={{ width: `${Math.max(52, (addPlaceNeighborhood || 'Neighbourhood').length * 7.2)}px`, padding: 0, margin: 0 }}
+                          placeholder="Neighbourhood"
+                        /><span>,&nbsp;</span><input
+                          value={addPlaceCity}
+                          onChange={e => setAddPlaceCity(e.target.value)}
+                          className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                          style={{ width: `${Math.max(28, (addPlaceCity || 'City').length * 7.2)}px`, padding: 0, margin: 0 }}
+                          placeholder="City"
+                        /><span>,&nbsp;</span><input
+                          value={addPlaceCountry}
+                          onChange={e => setAddPlaceCountry(e.target.value)}
+                          className="outline-none bg-transparent text-xs text-gray-400 border-b border-dashed border-gray-200 focus:border-gray-400 transition-colors"
+                          style={{ width: `${Math.max(40, (addPlaceCountry || 'Country').length * 7.2)}px`, padding: 0, margin: 0 }}
+                          placeholder="Country"
+                        />
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Custom image */}
                 <div className="mb-5">
@@ -3640,36 +3640,36 @@ Return ONLY valid JSON, no markdown, no explanation:
 
                 {/* Category */}
                 <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-400 mb-2">Type <span className="font-normal">(optional)</span></p>
-                  <div className="flex gap-2 flex-wrap">
+                  <p className={`text-xs mb-1.5 font-medium ${!addPlaceCategory ? 'text-gray-400' : 'text-gray-400'}`}>
+                    Type <span className="font-normal">(optional)</span>
+                  </p>
+                  <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                     {[
-                      { key: 'restaurant', label: '🍽️ Restaurant' },
-                      { key: 'cafe', label: '☕ Cafe' },
-                      { key: 'bar', label: '🍸 Bar' },
-                      { key: 'food', label: '🍕 Food' },
-                      { key: 'hotel', label: '🏨 Stay' },
-                      { key: 'attraction', label: '🏛️ Attraction' },
-                      { key: 'nature', label: '🌿 Nature' },
-                      { key: 'beach', label: '🏖️ Beach' },
-                      { key: 'shop', label: '🛍️ Shop' },
-                      { key: 'experience', label: '🗺️ Experience' },
-                      { key: 'sports', label: '🎾 Sports' },
-                      { key: 'wellness', label: '💆 Wellness' },
-                      { key: 'street', label: '🏙️ Street' },
-                      { key: 'event', label: '🎟️ Event' },
-                      { key: 'flight', label: '✈️ Flight' },
-                      { key: 'transport', label: '🚗 Transport' },
+                      { key: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
+                      { key: 'cafe', label: 'Cafe', emoji: '☕' },
+                      { key: 'bar', label: 'Bar', emoji: '🍸' },
+                      { key: 'food', label: 'Food', emoji: '🍕' },
+                      { key: 'hotel', label: 'Stay', emoji: '🏨' },
+                      { key: 'attraction', label: 'Attraction', emoji: '🏛️' },
+                      { key: 'nature', label: 'Nature', emoji: '🌿' },
+                      { key: 'beach', label: 'Beach', emoji: '🏖️' },
+                      { key: 'shop', label: 'Shop', emoji: '🛍️' },
+                      { key: 'experience', label: 'Experience', emoji: '🗺️' },
+                      { key: 'sports', label: 'Sports', emoji: '🎾' },
+                      { key: 'wellness', label: 'Wellness', emoji: '💆' },
+                      { key: 'street', label: 'Street', emoji: '🏙️' },
+                      { key: 'event', label: 'Event', emoji: '🎟️' },
+                      { key: 'flight', label: 'Flight', emoji: '✈️' },
+                      { key: 'transport', label: 'Transport', emoji: '🚗' },
                     ].map(cat => (
                       <button
                         key={cat.key}
                         onClick={() => setAddPlaceCategory(prev => prev === cat.key ? '' : cat.key)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                          addPlaceCategory === cat.key
-                            ? 'bg-gray-900 text-white border-gray-900'
-                            : 'bg-white text-gray-600 border-gray-200'
+                        className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                          addPlaceCategory === cat.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
                         }`}
                       >
-                        {cat.label}
+                        <span>{cat.emoji}</span><span>{cat.label}</span>
                       </button>
                     ))}
                   </div>
