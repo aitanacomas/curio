@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import UserProfile from './UserProfile';
+import PlacePage from '../components/PlacePage';
 import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
-import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, type RealPost, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile } from '../lib/supabase';
+import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile } from '../lib/supabase';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -46,7 +47,7 @@ interface FlatPlace {
 const categoryChips = [
   { id: 'all',          label: 'All',           emoji: '✨' },
   { id: 'restaurant',   label: 'Restaurant',    emoji: '🍽️' },
-  { id: 'cafe',         label: 'Café',          emoji: '☕' },
+  { id: 'cafe',         label: 'Cafe',          emoji: '☕' },
   { id: 'treats',       label: 'Treats',        emoji: '🍰' },
   { id: 'bar',          label: 'Bar',           emoji: '🍸' },
   { id: 'nightlife',    label: 'Nightlife',     emoji: '🎵' },
@@ -414,6 +415,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
   const [postSaveColIds, setPostSaveColIds] = useState<Set<string>>(new Set());
   const [allPlacesSaved, setAllPlacesSaved] = useState(false);
   const shareSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const initials = post.profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   // Deduplicate places by name
@@ -679,7 +681,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                       key={pl.id}
                       className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3"
                     >
-                      <button onClick={() => scrollTo(i)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                      <button onClick={() => setSelectedPlacePage(pl)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
                         {pl.photoUrl
                           ? <img src={pl.photoUrl} alt={pl.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                           : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-xl">{emoji}</span></div>
@@ -1026,6 +1028,14 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
             </div>
           </div>
         </div>
+      )}
+
+      {/* Place Page overlay */}
+      {selectedPlacePage && (
+        <PlacePage
+          place={selectedPlacePage}
+          onClose={() => setSelectedPlacePage(null)}
+        />
       )}
     </div>
   );

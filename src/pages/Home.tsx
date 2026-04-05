@@ -7,7 +7,8 @@ import { feedItems, users, places, collections } from '../data/mockData';
 import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
-import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getOrCreateConversation, getConversations, sendMessage, getMessages, geocodeMissingPlaces, getPostComments, addComment, savePlace, unsavePlace, getSavedPlaceIds, searchProfiles, createCollection, type RealPost, type RealCollection, type Conversation, type Message, type PostComment, type FollowProfile } from '../lib/supabase';
+import PlacePage from '../components/PlacePage';
+import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getOrCreateConversation, getConversations, sendMessage, getMessages, geocodeMissingPlaces, getPostComments, addComment, savePlace, unsavePlace, getSavedPlaceIds, searchProfiles, createCollection, type RealPost, type RealPostPlace, type RealCollection, type Conversation, type Message, type PostComment, type FollowProfile } from '../lib/supabase';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
@@ -74,6 +75,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showAllComments, setShowAllComments] = useState(false);
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
+  const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const [realPosts, setRealPosts] = useState<RealPost[]>([]);
   const [showFindPeople, setShowFindPeople] = useState(false);
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
@@ -744,6 +746,10 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                 const isSaved = savedPlaces.has(place.id);
                 return (
                   <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                    <button
+                      onClick={() => setSelectedPlacePage({ id: place.id, name: place.name, category: place.category, neighborhood: place.neighbourhood ?? '', city: place.city, country: place.country, photoUrl: place.image, position: 0, lat: place.lat, lng: place.lng })}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                    >
                     <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
@@ -757,6 +763,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                         </p>
                       )}
                     </div>
+                    </button>
                     <div className="flex gap-2 flex-shrink-0">
                       {place.bookingAvailable && (
                         <button onClick={() => setBookingPlace(place)} className="text-xs font-bold bg-gray-900 text-white rounded-full px-2.5 py-1">Book</button>
@@ -837,6 +844,9 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
       </div>
       {saveSheet}
       <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
+      {selectedPlacePage && (
+        <PlacePage place={selectedPlacePage} onClose={() => setSelectedPlacePage(null)} />
+      )}
       </>
     );
   }

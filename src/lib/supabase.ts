@@ -1854,6 +1854,45 @@ export async function getPostById(postId: string): Promise<RealPost | null> {
   };
 }
 
+export async function getPostsAtPlace(placeName: string): Promise<RealPost[]> {
+  const { data } = await supabase
+    .from('post_places')
+    .select('post_id')
+    .ilike('name', `%${placeName}%`)
+    .limit(50);
+  const postIds = [...new Set((data ?? []).map((r: any) => r.post_id))];
+  if (postIds.length === 0) return [];
+  const { data: posts } = await supabase
+    .from('posts')
+    .select(`
+      id, user_id, caption, location_label, created_at, hashtags,
+      profiles ( name, username, avatar_url ),
+      post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )
+    `)
+    .in('id', postIds)
+    .eq('visibility', 'feed')
+    .order('created_at', { ascending: false });
+  if (!posts) return [];
+  return (posts as any[]).map(p => ({
+    id: p.id,
+    userId: p.user_id,
+    caption: p.caption ?? '',
+    locationLabel: p.location_label ?? '',
+    createdAt: p.created_at,
+    hashtags: p.hashtags ?? [],
+    profile: { name: p.profiles?.name ?? '', username: p.profiles?.username ?? '', avatarUrl: p.profiles?.avatar_url ?? null },
+    collaborators: [],
+    places: ((p.post_places ?? []) as any[])
+      .sort((a, b) => a.position - b.position)
+      .map((pl: any) => ({
+        id: pl.id, name: pl.name ?? '', category: pl.category ?? '',
+        neighborhood: pl.neighborhood ?? '', city: pl.city ?? '',
+        country: pl.country ?? '', photoUrl: pl.photo_url ?? '',
+        position: pl.position ?? 0, lat: pl.lat ?? null, lng: pl.lng ?? null,
+      })),
+  }));
+}
+
 export async function getSavedPlaceIds(userId: string): Promise<Set<string>> {
   const { data } = await supabase
     .from('saved_places')
