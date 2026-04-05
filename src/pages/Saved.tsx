@@ -1665,6 +1665,11 @@ Email: ${bookingEmailText.slice(0, 3000)}` }] }],
     setGenerateError('');
 
     try {
+      // Delete all existing days first to avoid duplicates on regenerate
+      for (const day of selectedTrip.days) {
+        if (day.id) await deletePlanDay(day.id);
+      }
+
       const allTripItems = selectedTrip.days.flatMap(d => d.items);
       const placesToUse = allTripItems.filter(p => generateSelectedIds.has(p.id));
       const numDays = countDaysFromDates(selectedTrip.dates) || 3;
