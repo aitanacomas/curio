@@ -357,6 +357,28 @@ export async function getUserCollections(userId: string): Promise<RealCollection
   }));
 }
 
+// ── Collection cover photos (batch, for mosaic) ───────────────────────────────
+export async function getCollectionCoverPhotos(collectionIds: string[]): Promise<Record<string, string[]>> {
+  if (collectionIds.length === 0) return {};
+  try {
+    const { data } = await supabase
+      .from('collection_places')
+      .select('collection_id, post_places(photo_url)')
+      .in('collection_id', collectionIds);
+    const result: Record<string, string[]> = {};
+    for (const row of (data ?? [])) {
+      const url = (row as any).post_places?.photo_url;
+      if (!url) continue;
+      const cid = (row as any).collection_id;
+      if (!result[cid]) result[cid] = [];
+      if (result[cid].length < 4) result[cid].push(url);
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 // ── Collection Places ─────────────────────────────────────────────────────────
 export async function getCollectionPlaces(collectionId: string): Promise<RealPostPlace[]> {
   // Try with added_by + profile join first; fall back to simple query if column doesn't exist

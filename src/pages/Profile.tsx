@@ -11,7 +11,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
 import { googleTypesToCategory } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 import GuideDetail from '../components/GuideDetail';
@@ -310,6 +310,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [newColCoverPreview, setNewColCoverPreview] = useState<string | null>(null);
   const [savingCollection, setSavingCollection] = useState(false);
   const [sharedCollections, setSharedCollections] = useState<RealCollection[]>([]);
+  const [collectionCoverPhotos, setCollectionCoverPhotos] = useState<Record<string, string[]>>({});
   const [userGuides, setUserGuides] = useState<Guide[]>([]);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
   const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
@@ -410,7 +411,10 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           }
         }
       });
-      getUserCollections(appUser.id).then(setRealCollections);
+      getUserCollections(appUser.id).then(cols => {
+        setRealCollections(cols);
+        getCollectionCoverPhotos(cols.map(c => c.id)).then(setCollectionCoverPhotos);
+      });
       getSharedCollections(appUser.id).then(setSharedCollections);
       getUserGuides(appUser.id).then(setUserGuides);
       getLikedPosts(appUser.id).then(setLikedRealPosts);
@@ -2464,11 +2468,21 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     getCollectionCollaborators(col.id).then(setCollectionCollaborators);
                   }}>
                   <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
-                    {col.coverImageUrl
-                      ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
-                      : <span className="text-5xl">{col.emoji || '🗂️'}</span>
-                    }
-                    {col.coverImageUrl && col.emoji && (
+                    {col.coverImageUrl ? (
+                      <img src={col.coverImageUrl} className="w-full h-full object-cover" />
+                    ) : (collectionCoverPhotos[col.id]?.length ?? 0) >= 2 ? (
+                      <div className="grid grid-cols-2 gap-px w-full h-full">
+                        {[0,1,2,3].map(i => {
+                          const url = collectionCoverPhotos[col.id]?.[i];
+                          return url
+                            ? <img key={i} src={url} className="w-full h-full object-cover" />
+                            : <div key={i} className="bg-gray-200" />;
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-5xl">{col.emoji || '🗂️'}</span>
+                    )}
+                    {(col.coverImageUrl || (collectionCoverPhotos[col.id]?.length ?? 0) >= 2) && col.emoji && (
                       <div className="absolute bottom-2 left-2 text-xl leading-none">{col.emoji}</div>
                     )}
                   </div>
