@@ -1,11 +1,9 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Send, MapPin, ArrowLeft, Bookmark, BookmarkCheck, Map, X, Link, Copy, Mail, Check, Users, Plus, Search } from 'lucide-react';
+import { Heart, MessageCircle, Send, MapPin, ArrowLeft, Bookmark, BookmarkCheck, Map, X, Mail, Check, Copy, Users, Plus, Search } from 'lucide-react';
 import type { Tab } from '../types/index';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { users, places } from '../data/mockData';
-import type { FeedItem, User, Collection, Place, AppUser } from '../types';
-import BookingSheet from '../components/BookingSheet';
+import type { AppUser } from '../types';
 import ImageCarousel from '../components/ImageCarousel';
 import PlacePage from '../components/PlacePage';
 import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getOrCreateConversation, getConversations, sendMessage, getMessages, geocodeMissingPlaces, getPostComments, addComment, savePlace, unsavePlace, getSavedPlaceIds, searchProfiles, createCollection, type RealPost, type RealPostPlace, type RealCollection, type Conversation, type Message, type PostComment, type FollowProfile } from '../lib/supabase';
@@ -13,31 +11,6 @@ import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikeP
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
 const MapView = lazy(() => import('../components/MapView'));
-
-
-const mockDMs: Record<string, { from: string; text: string; time: string; mine?: boolean }[]> = {
-  'user-2': [
-    { from: 'user-2', text: 'ok bodega for dinner this week? I need those tacos again', time: '2h' },
-    { from: 'user-1', text: 'YES. Thursday?', time: '2h', mine: true },
-    { from: 'user-2', text: 'Thursday works! I\'ll book', time: '1h' },
-    { from: 'user-1', text: 'perfect see you then', time: '1h', mine: true },
-  ],
-  'user-3': [
-    { from: 'user-3', text: 'Hey! Saw your Paris recs. Septime is on my list for sure', time: '1d' },
-    { from: 'user-1', text: 'You have to go, book 2 weeks ahead though', time: '1d', mine: true },
-    { from: 'user-3', text: 'Noted. Any other hidden gems in Paris?', time: '23h' },
-  ],
-  'user-4': [
-    { from: 'user-4', text: 'Just sent you the Tokyo hotel list 🏨', time: '3d' },
-    { from: 'user-1', text: 'This is incredible, saving all of them', time: '3d', mine: true },
-  ],
-};
-
-interface ShareTarget {
-  type: 'post' | 'place';
-  label: string;
-  image: string;
-}
 
 interface Props {
   showMessages?: boolean;
@@ -50,19 +23,7 @@ interface Props {
 
 export default function Home({ showMessages = false, messagesTargetUserId, onMessagesClose, isNewUser, appUser, onNavigate }: Props) {
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
-  const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
-  const [savedPlaces, setSavedPlaces] = useState<Set<string>>(new Set(['place-28', 'place-29', 'place-30', 'place-31', 'place-32']));
-  const [showMap, setShowMap] = useState(false);
-  const [storyUser, setStoryUser] = useState<User | null>(null);
-  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
-  const [sentTo, setSentTo] = useState<Set<string>>(new Set());
-  const [commentText, setCommentText] = useState('');
-  const [linkCopied, setLinkCopied] = useState(false);
   const [showInbox, setShowInbox] = useState(showMessages);
-  const [saveTarget, setSaveTarget] = useState<{ type: 'post' | 'place'; id: string } | null>(null);
-  const [collectionSaves, setCollectionSaves] = useState<Record<string, Set<string>>>({});
-  const [newListName, setNewListName] = useState('');
-  const [showNewList, setShowNewList] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -71,8 +32,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageText, setMessageText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [showAllComments, setShowAllComments] = useState(false);
-  const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
   const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const [realPosts, setRealPosts] = useState<RealPost[]>([]);
   const [showFindPeople, setShowFindPeople] = useState(false);
@@ -148,21 +107,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
     getConversations(appUser.id).then(setConversations);
   }, [appUser]);
 
-  useEffect(() => {
-    if (!saveTarget) return;
-    const prevent = (e: Event) => {
-      const sheet = document.getElementById('save-sheet');
-      if (sheet && sheet.contains(e.target as Node)) return;
-      e.preventDefault();
-    };
-    document.addEventListener('wheel', prevent, { passive: false });
-    document.addEventListener('touchmove', prevent, { passive: false });
-    return () => {
-      document.removeEventListener('wheel', prevent);
-      document.removeEventListener('touchmove', prevent);
-    };
-  }, [saveTarget]);
-
   // Load conversations when inbox opens
   useEffect(() => {
     if (!showInbox || !appUser?.id || appUser.isDemo) return;
@@ -207,90 +151,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeConversationId]);
-
-  // Load comments for the selected post detail view
-  useEffect(() => {
-    if (!selectedPost) return;
-    if (commentsMap[selectedPost.id]) return;
-    getPostComments(selectedPost.id).then(comments => {
-      setCommentsMap(prev => ({ ...prev, [selectedPost.id]: comments }));
-    });
-  }, [selectedPost?.id]);
-
-  const toggleLike = (id: string) => {
-    setSelectedPost(prev => prev && prev.id === id
-      ? { ...prev, liked: !prev.liked, likes: prev.liked ? prev.likes - 1 : prev.likes + 1 }
-      : prev
-    );
-  };
-
-  const toggleSave = (id: string) => {
-    setSelectedPost(prev => prev && prev.id === id ? { ...prev, saved: !prev.saved } : prev);
-  };
-
-  const toggleSavePlace = (placeId: string) => {
-    setSavedPlaces(prev => {
-      const next = new Set(prev);
-      if (next.has(placeId)) next.delete(placeId); else next.add(placeId);
-      return next;
-    });
-  };
-
-  const sendTo = (userId: string) => {
-    setSentTo(prev => new Set(prev).add(userId));
-  };
-
-  const copyLink = () => {
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
-  };
-
-  const getUserById = (id: string) => users.find(u => u.id === id)!;
-  const getPlaceById = (id: string) => places.find(p => p.id === id)!;
-
-  const getPostPlaces = (item: FeedItem) => {
-    const ids = item.placeIds ?? [item.placeId];
-    return ids.map(id => getPlaceById(id)).filter(Boolean);
-  };
-
-  const friends = users.filter(u => u.id !== 'user-1' && u.id !== 'user-8');
-
-  const saveToCollection = (collectionId: string | 'all') => {
-    if (!saveTarget) return;
-    if (collectionId === 'all') {
-      if (saveTarget.type === 'post') toggleSave(saveTarget.id);
-      else toggleSavePlace(saveTarget.id);
-    } else {
-      setCollectionSaves(prev => {
-        const next = { ...prev };
-        const set = new Set(next[collectionId] ?? []);
-        set.add(saveTarget.id);
-        next[collectionId] = set;
-        return next;
-      });
-      if (saveTarget.type === 'place') {
-        addPlaceToCollection(collectionId, saveTarget.id);
-      }
-    }
-    setSaveTarget(null);
-    setShowNewList(false);
-    setNewListName('');
-  };
-
-  const createAndSave = async () => {
-    if (!newListName.trim() || !saveTarget || !appUser?.id) return;
-    const { data: newCol } = await createCollection(appUser.id, { name: newListName.trim(), emoji: '📌', description: '', cover_image_url: null });
-    if (newCol) {
-      setUserCollections(prev => [...prev, newCol]);
-      setCollectionSaves(prev => ({ ...prev, [newCol.id]: new Set([saveTarget.id]) }));
-      if (saveTarget.type === 'place') {
-        addPlaceToCollection(newCol.id, saveTarget.id);
-      }
-    }
-    setSaveTarget(null);
-    setShowNewList(false);
-    setNewListName('');
-  };
 
   const handleSendMessage = async () => {
     if (!activeConversationId || !messageText.trim() || !appUser?.id) return;
@@ -443,362 +303,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
           })}
         </div>
       </div>
-    );
-  }
-
-  // ── Share Sheet ─────────────────────────────────────────────────
-  if (shareTarget) {
-    return (
-      <div className="bg-white min-h-screen">
-        <div className="flex items-center justify-between px-4 pt-5 pb-4 border-b border-gray-100">
-          <h2 className="text-base font-bold text-gray-900">Share</h2>
-          <button onClick={() => { setShareTarget(null); setSentTo(new Set()); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
-            <X size={16} strokeWidth={1.5} className="text-gray-700" />
-          </button>
-        </div>
-
-        {/* Preview of what's being shared */}
-        <div className="px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
-            <img src={shareTarget.image} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
-            <p className="text-sm font-semibold text-gray-900 truncate">{shareTarget.label}</p>
-          </div>
-        </div>
-
-        {/* Send to friends */}
-        <div className="px-4 pt-4">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Send to</p>
-          <div className="space-y-3">
-            {friends.map(friend => {
-              const sent = sentTo.has(friend.id);
-              return (
-                <div key={friend.id} className="flex items-center gap-3">
-                  <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0" style={{ objectPosition: friend.avatarPosition ?? 'top' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">{friend.name}</p>
-                    <p className="text-xs text-gray-400">@{friend.username}</p>
-                  </div>
-                  <button
-                    onClick={() => sendTo(friend.id)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                      sent ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-300 text-gray-700'
-                    }`}
-                  >
-                    {sent ? 'Sent' : 'Send'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Other share options */}
-        <div className="px-4 pt-6">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Other options</p>
-          <div className="flex gap-3">
-            <button
-              onClick={copyLink}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                linkCopied ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'
-              }`}
-            >
-              {linkCopied ? <Copy size={14} strokeWidth={1.5} /> : <Link size={14} strokeWidth={1.5} />}
-              {linkCopied ? 'Copied!' : 'Copy link'}
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 rounded-xl text-sm font-medium text-gray-700">
-              <MapPin size={14} strokeWidth={1.5} />
-              Share to story
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Save Sheet Overlay (shared) ──────────────────────────────────
-  const saveSheet = saveTarget ? (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-      <div className="absolute inset-0 bg-black/40" onClick={() => { setSaveTarget(null); setShowNewList(false); setNewListName(''); }} />
-      <div id="save-sheet" className="relative bg-white rounded-t-3xl h-[75vh] flex flex-col">
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 rounded-full bg-gray-200" />
-        </div>
-        <div className="px-4 pt-2 pb-4">
-          <h2 className="text-base font-bold text-gray-900">Save to</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-8">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-            <button onClick={() => saveToCollection('all')} className="text-left">
-              <div className="rounded-xl aspect-square bg-gray-100 flex items-center justify-center">
-                <span className="text-4xl">🔖</span>
-              </div>
-              <p className="text-sm font-semibold text-gray-900 mt-2">All Saved</p>
-              <p className="text-xs text-gray-400">Default</p>
-            </button>
-            {userCollections.map(col => {
-              const isSavedToCol = collectionSaves[col.id]?.has(saveTarget.id);
-              return (
-                <button key={col.id} onClick={() => saveToCollection(col.id)} className="text-left">
-                  <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
-                    {col.coverImageUrl
-                      ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
-                      : <span className="text-4xl flex items-center justify-center w-full h-full">{col.emoji}</span>
-                    }
-                    {isSavedToCol && (
-                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded-xl">
-                        <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center">
-                          <Check size={16} className="text-gray-900" strokeWidth={2.5} />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
-                  <p className="text-xs text-gray-400">{col.placesCount} places</p>
-                </button>
-              );
-            })}
-            {showNewList ? (
-              <div className="text-left">
-                <div className="rounded-xl aspect-square bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 p-3">
-                  <input
-                    autoFocus
-                    value={newListName}
-                    onChange={e => setNewListName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && createAndSave()}
-                    placeholder="List name..."
-                    className="w-full bg-white rounded-lg px-2 py-1.5 text-xs outline-none text-gray-900 placeholder-gray-400 text-center border border-gray-200"
-                  />
-                  <button
-                    onClick={createAndSave}
-                    disabled={!newListName.trim()}
-                    className={`text-xs font-bold px-3 py-1 rounded-full transition-colors ${newListName.trim() ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-300'}`}
-                  >
-                    Create
-                  </button>
-                </div>
-                <p className="text-sm font-semibold text-gray-400 mt-2">New list</p>
-              </div>
-            ) : (
-              <button onClick={() => setShowNewList(true)} className="text-left">
-                <div className="rounded-xl border-2 border-dashed border-gray-200 aspect-square flex items-center justify-center bg-gray-50">
-                  <span className="text-3xl text-gray-300">+</span>
-                </div>
-                <p className="text-sm font-semibold text-gray-400 mt-2">New list</p>
-                <p className="text-xs text-gray-300">Add a collection</p>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  ) : null;
-
-  // ── Post Detail View ─────────────────────────────────────────────
-  if (selectedPost) {
-    const user = getUserById(selectedPost.userId);
-    const postPlaces = getPostPlaces(selectedPost);
-    const centerPlace = postPlaces[0];
-    const comments = commentsMap[selectedPost.id] ?? [];
-
-    return (
-      <>
-      <div className="bg-white min-h-screen pb-24">
-
-        {/* ── Full-bleed photo with frosted glass controls ── */}
-        <div className="relative">
-          <ImageCarousel images={selectedPost.images} labels={postPlaces.map(p => p.name.split(',')[0].trim())} sublabels={postPlaces.map(p => [p.neighbourhood, p.city].filter(Boolean).join(', ') || p.country)} scales={selectedPost.id === 'feed-8' ? [1.02, 1, 1, 1, 1.05] : selectedPost.id === 'feed-9' ? [1, 1, 1, 1, 1.07, 1] : undefined} />
-          {/* Top overlay: back | user pill | share */}
-          <div className="absolute top-0 left-0 right-0 px-4 pt-5 pb-8 bg-gradient-to-b from-black/55 via-black/10 to-transparent">
-            <div className="flex items-center gap-2.5">
-              <button
-                onClick={() => { setSelectedPost(null); setShowMap(false); setCommentText(''); setShowAllComments(false); }}
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
-              >
-                <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
-              </button>
-              <button
-                onClick={() => { setSelectedPost(null); setViewingUserId(selectedPost.userId); }}
-                className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[55%] overflow-hidden active:opacity-75"
-              >
-                <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full object-cover object-top flex-shrink-0" />
-                <p className="text-white font-semibold text-sm leading-tight truncate">{user.name}</p>
-              </button>
-            </div>
-          </div>
-        </div>
-
-          {/* Like / Comment / Share / Save */}
-          <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
-            <div className="flex items-center gap-5">
-              <button
-                onClick={() => toggleLike(selectedPost.id)}
-                className="flex items-center gap-1.5"
-              >
-                <Heart size={22} strokeWidth={1.5} className={selectedPost.liked ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
-                <span className="text-sm font-medium text-gray-500">{selectedPost.likes.toLocaleString()}</span>
-              </button>
-              <button className="flex items-center gap-1.5">
-                <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
-                <span className="text-sm font-medium text-gray-500">{selectedPost.comments}</span>
-              </button>
-              <button onClick={() => setShareTarget({ type: 'post', label: selectedPost.caption.slice(0, 50) + '…', image: selectedPost.images[0] })}>
-                <Send size={21} strokeWidth={1.5} className="text-gray-800" />
-              </button>
-            </div>
-            <button onClick={() => selectedPost.saved ? toggleSave(selectedPost.id) : setSaveTarget({ type: 'post', id: selectedPost.id })}>
-              {selectedPost.saved
-                ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
-                : <Bookmark size={22} strokeWidth={1.5} className="text-gray-700" />}
-            </button>
-          </div>
-
-          {/* Caption */}
-          {selectedPost.caption && (
-            <div className="px-5 pt-4 pb-5">
-              <p className="text-sm text-gray-800 leading-relaxed">{selectedPost.caption}</p>
-            </div>
-          )}
-
-          {/* Places in this post */}
-          <div className="px-5 pt-4 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                {postPlaces.length} place{postPlaces.length !== 1 ? 's' : ''}
-              </p>
-              {postPlaces.length >= 1 && (
-                <button
-                  onClick={() => setShowMap(p => !p)}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
-                    showMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  <Map size={12} strokeWidth={1.5} />
-                  {showMap ? 'Hide map' : 'View on map'}
-                </button>
-              )}
-            </div>
-
-            {/* Mini map */}
-            {showMap && postPlaces.length >= 1 && centerPlace && (
-              <div className="mb-4 rounded-2xl overflow-hidden">
-                <Suspense fallback={<div className="h-48 bg-gray-100 animate-pulse" />}>
-                  <MapView
-                    places={postPlaces}
-                    center={[centerPlace.lat, centerPlace.lng]}
-                    zoom={15}
-                    height="200px"
-                  />
-                </Suspense>
-              </div>
-            )}
-
-            <div className="space-y-2.5 pb-5">
-              {postPlaces.map(place => {
-                const isSaved = savedPlaces.has(place.id);
-                return (
-                  <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                    <button
-                      onClick={() => setSelectedPlacePage({ id: place.id, name: place.name, category: place.category, neighborhood: place.neighbourhood ?? '', city: place.city, country: place.country, photoUrl: place.image, position: 0, lat: place.lat, lng: place.lng })}
-                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                    >
-                    <img src={place.image} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
-                      <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-                        <MapPin size={9} strokeWidth={1.5} className="flex-shrink-0" />
-                        {[place.neighbourhood, place.city].filter(Boolean).join(', ') || place.country}
-                      </p>
-                      {place.category && (
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          📍 {place.category.charAt(0).toUpperCase() + place.category.slice(1)}
-                        </p>
-                      )}
-                    </div>
-                    </button>
-                    <div className="flex gap-2 flex-shrink-0">
-                      {place.bookingAvailable && (
-                        <button onClick={() => setBookingPlace(place)} className="text-xs font-bold bg-gray-900 text-white rounded-full px-2.5 py-1">Book</button>
-                      )}
-                      <button
-                        onClick={() => isSaved ? toggleSavePlace(place.id) : setSaveTarget({ type: 'place', id: place.id })}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${isSaved ? 'bg-gray-900 border-gray-900' : 'border-gray-200 bg-white'}`}
-                      >
-                        <Bookmark size={13} strokeWidth={1.5} className={isSaved ? 'fill-white text-white' : 'text-gray-600'} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Comments */}
-          <div className="px-5 pt-5 border-t border-gray-100">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
-            {comments.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-3">Be the first one to add a comment ✨</p>
-            )}
-            {comments.length > 0 && (
-              <div className="space-y-3 mb-4">
-                {(showAllComments ? comments : comments.slice(0, 2)).map((c) => {
-                  const dateLabel = new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                  return (
-                    <div key={c.id} className="flex items-start gap-2.5">
-                      {c.profile.avatarUrl
-                        ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" />
-                        : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0 mt-0.5 flex items-center justify-center text-[10px] font-bold text-gray-400">{c.profile.name?.[0]}</div>
-                      }
-                      <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl px-3 py-2.5">
-                        <div className="flex items-baseline gap-1.5">
-                          <p className="text-xs font-semibold text-gray-900">{c.profile.name.split(' ')[0]}</p>
-                          <p className="text-[10px] text-gray-400">{dateLabel}</p>
-                        </div>
-                        <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-                {!showAllComments && selectedPost.comments > 2 && (
-                  <button onClick={() => setShowAllComments(true)} className="text-xs text-gray-400 font-medium">
-                    See all {selectedPost.comments} comments
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mt-3">
-              <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0" />
-              <input
-                value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                placeholder="Add a comment…"
-                className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
-              />
-              {commentText.trim() && appUser?.id && (
-                <button
-                  onClick={async () => {
-                    const text = commentText.trim();
-                    setCommentText('');
-                    const newComment = await addComment(appUser.id, selectedPost.id, text);
-                    if (newComment) {
-                      setCommentsMap(prev => ({ ...prev, [selectedPost.id]: [...(prev[selectedPost.id] ?? []), newComment] }));
-                    }
-                  }}
-                  className="text-xs font-bold text-gray-900"
-                >Post</button>
-              )}
-            </div>
-          </div>
-
-          {/* Date — very end */}
-          <p className="text-xs text-gray-400 px-5 pt-4 pb-8">{new Date(selectedPost.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-
-      </div>
-      {saveSheet}
-      <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
-      {selectedPlacePage && (
-        <PlacePage place={selectedPlacePage} onClose={() => setSelectedPlacePage(null)} />
-      )}
-      </>
     );
   }
 
@@ -1183,9 +687,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
 
       </div>
 
-      {saveSheet}
-      <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
-
       {/* Collection picker sheet */}
       {addToColPlace && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
@@ -1524,7 +1025,21 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
       )}
 
       {selectedPlacePage && (
-        <PlacePage place={selectedPlacePage} onClose={() => setSelectedPlacePage(null)} />
+        <PlacePage
+          place={selectedPlacePage}
+          onClose={() => setSelectedPlacePage(null)}
+          isSaved={allSavedPlaceIds.has(selectedPlacePage.id)}
+          onToggleSave={async () => {
+            if (!appUser?.id || !selectedPlacePage) return;
+            if (allSavedPlaceIds.has(selectedPlacePage.id)) {
+              setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(selectedPlacePage.id); return n; });
+              await unsavePlace(appUser.id, selectedPlacePage.id);
+            } else {
+              setAllSavedPlaceIds(prev => new Set(prev).add(selectedPlacePage.id));
+              await savePlace(appUser.id, selectedPlacePage.id);
+            }
+          }}
+        />
       )}
     </div>
   );

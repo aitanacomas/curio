@@ -200,7 +200,7 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
 
 const categories: { id: Category; label: string; emoji: string }[] = [
   { id: 'restaurant',    label: 'Restaurant',    emoji: '🍽️' },
-  { id: 'cafe',          label: 'Café',          emoji: '☕' },
+  { id: 'cafe',          label: 'Cafe',          emoji: '☕' },
   { id: 'treats',        label: 'Treats',        emoji: '🍰' },
   { id: 'bar',           label: 'Bar',           emoji: '🍸' },
   { id: 'nightlife',     label: 'Nightlife',     emoji: '🎵' },

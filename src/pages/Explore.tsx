@@ -84,12 +84,14 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [exploreSavedPlaces, setExploreSavedPlaces] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     Promise.all([
       getFeedPosts(),
       appUser?.id ? getFollowing(appUser.id) : Promise.resolve(new Set<string>()),
       appUser?.id ? buildTasteProfile(appUser.id) : Promise.resolve(null),
+      appUser?.id ? getSavedPlaces(appUser.id).then(sp => setExploreSavedPlaces(new Set(sp.map(p => p.id)))) : Promise.resolve(),
     ]).then(([fetchedPosts, followingSet, profile]) => {
       setPosts(fetchedPosts);
       setFollowing(followingSet);
@@ -394,7 +396,22 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
 
       {/* Place Page — rendered at page level so it's not clipped by PostModal */}
       {selectedPlacePage && (
-        <PlacePage place={selectedPlacePage} onClose={() => setSelectedPlacePage(null)} />
+        <PlacePage
+          place={selectedPlacePage}
+          onClose={() => setSelectedPlacePage(null)}
+          isSaved={exploreSavedPlaces.has(selectedPlacePage.id)}
+          onToggleSave={async () => {
+            if (!appUser?.id) return;
+            const id = selectedPlacePage.id;
+            if (exploreSavedPlaces.has(id)) {
+              setExploreSavedPlaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+              await unsavePlace(appUser.id, id);
+            } else {
+              setExploreSavedPlaces(prev => new Set(prev).add(id));
+              await savePlace(appUser.id, id);
+            }
+          }}
+        />
       )}
     </div>
   );

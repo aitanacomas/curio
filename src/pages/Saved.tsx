@@ -170,7 +170,6 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
   );
 }
 
-import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
 import { getBookingUrl, isBookable } from '../lib/placeUtils';
@@ -231,120 +230,6 @@ interface Trip {
   collaborators?: TripCollaborator[];
   description?: string;
 }
-
-const mockTrips: Trip[] = [
-  {
-    id: 'trip-6',
-    destination: 'Barcelona',
-    country: 'Spain',
-    dates: '',
-    coverImage: 'https://images.unsplash.com/photo-1539037116277-4db20889f2d4?w=600&q=80',
-    status: 'dreaming',
-    days: [],
-  },
-  {
-    id: 'trip-2',
-    destination: 'Tokyo',
-    country: 'Japan',
-    dates: 'May 16 – May 28, 2025',
-    coverImage: '/shibuya-crossing.jpg',
-    status: 'upcoming',
-    days: [
-      {
-        label: 'Day 1 · Thu Apr 10',
-        items: [
-          { id: 'ti-7', name: 'Shibuya Coffee Festival', category: 'Event', image: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&q=80', time: '10:00 AM', booked: true },
-          { id: 'ti-8', name: 'Ichiran Ramen', category: 'Restaurant', image: 'https://images.unsplash.com/photo-1569050467447-ce54b3bbc37d?w=400&q=80', time: '7:00 PM' },
-        ],
-      },
-      {
-        label: 'Day 2 · Fri Apr 11',
-        items: [],
-      },
-    ],
-  },
-  {
-    id: 'trip-4',
-    destination: 'Seattle',
-    country: 'USA',
-    dates: 'Apr 15 – Apr 18, 2025',
-    coverImage: 'https://images.unsplash.com/photo-1502175353174-a7a70e73b362?w=600&q=80',
-    status: 'upcoming',
-    days: [
-      { label: 'Day 1 · Tue Apr 15', items: [] },
-      { label: 'Day 2 · Wed Apr 16', items: [] },
-      { label: 'Day 3 · Thu Apr 17', items: [] },
-      { label: 'Day 4 · Fri Apr 18', items: [] },
-    ],
-  },
-  {
-    id: 'trip-3',
-    destination: 'Miami',
-    country: 'USA',
-    dates: 'Mar 11 – Mar 16, 2026',
-    coverImage: '/miami-IMG_7402.jpg',
-    status: 'past',
-    collaborators: [
-      { id: 'c1', name: 'Sofia R.', avatar: 'https://i.pravatar.cc/150?img=47' },
-      { id: 'c2', name: 'James T.', avatar: 'https://i.pravatar.cc/150?img=12' },
-    ],
-    days: [
-      {
-        label: 'Day 1 · Tue Mar 11',
-        items: [
-          { id: 'ti-9', name: 'Museum Garage', category: 'Attraction', image: '/miami-IMG_7402.jpg', time: '11:00 AM' },
-          { id: 'ti-10', name: 'Bigface Coffee', category: 'Cafe', image: '/miami-bigface-coffee.jpg', time: '9:00 AM' },
-          { id: 'ti-11', name: 'Bodega Taqueria', category: 'Restaurant', image: '/miami-IMG_7463.jpg', time: '1:00 PM', booked: true },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'trip-5',
-    destination: 'San Diego',
-    country: 'USA',
-    dates: 'Feb 6 – Feb 9, 2026',
-    coverImage: 'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=600&q=80',
-    status: 'past',
-    days: [
-      { label: 'Day 1 · Thu Feb 6', items: [] },
-      { label: 'Day 2 · Fri Feb 7', items: [] },
-      { label: 'Day 3 · Sat Feb 8', items: [] },
-      { label: 'Day 4 · Sun Feb 9', items: [] },
-    ],
-  },
-  {
-    id: 'trip-1',
-    destination: 'London',
-    country: 'UK',
-    dates: 'Dec 15 – Dec 22, 2025',
-    coverImage: '/moco-5.jpg',
-    status: 'past',
-    collaborators: [
-      { id: 'c3', name: 'Mia K.', avatar: 'https://i.pravatar.cc/150?img=32' },
-    ],
-    days: [
-      {
-        label: 'Day 1 · Sun Dec 15',
-        items: [
-          { id: 'ti-1', name: 'MOCO Museum', category: 'Attraction', image: '/moco-love.jpg', time: '11:00 AM', booked: true },
-          { id: 'ti-2', name: 'Dishoom Shoreditch', category: 'Restaurant', image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=80', time: '1:30 PM', booked: true },
-          { id: 'ti-3', name: 'Sketch London', category: 'Bar', image: 'https://images.unsplash.com/photo-1561047029-3000c68339ca?w=400&q=80', time: '8:00 PM' },
-        ],
-      },
-      {
-        label: 'Day 2 · Mon Dec 16',
-        items: [
-          { id: 'ti-4', name: 'Borough Market', category: 'Food', image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=80', time: '10:00 AM' },
-          { id: 'ti-5', name: 'Tate Modern', category: 'Attraction', image: 'https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=400&q=80', time: '2:00 PM', booked: true },
-          { id: 'ti-6', name: 'The Shard Bar', category: 'Bar', image: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=400&q=80', time: '7:30 PM' },
-        ],
-      },
-    ],
-  },
-];
-
-const savedPlaceIds = ['place-28', 'place-29', 'place-30', 'place-31', 'place-32', 'place-33'];
 
 const placeCategories: { id: Category | 'all'; label: string; emoji: string }[] = [
   { id: 'all',           label: 'All',           emoji: '✨' },
@@ -726,7 +611,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [selectedEvent, setSelectedEvent] = useState<Trip | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [placeCategory, setPlaceCategory] = useState<Category | 'all'>('all');
-  const [savedPlaceSet, setSavedPlaceSet] = useState<Set<string>>(new Set(isNewUser ? [] : savedPlaceIds));
+  const [savedPlaceSet, setSavedPlaceSet] = useState<Set<string>>(new Set());
   const [colViewMode, setColViewMode] = useState<'list' | 'area'>('list');
   const [colCategoryFilter, setColCategoryFilter] = useState<Category | 'all'>('all');
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
@@ -1921,7 +1806,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   // ── Load real data from Supabase ──────────────────────────────────────────
   useEffect(() => {
     if (!userId) {
-      setPlans(mockTrips);
+      setPlans([]);
       return;
     }
     setPlansLoading(true);
@@ -2209,11 +2094,8 @@ Return ONLY valid JSON, no markdown, no explanation:
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showMap, selectedTrip?.id, selectedTrip?.days.flatMap(d => d.items).map(i => i.id).join(',')]);
 
-  const savedPlaces = isNewUser
-    ? places.filter(p => savedPlaceSet.has(p.id))
-    : places.filter(p => savedPlaceIds.includes(p.id));
-  const myCollections = isNewUser ? [] : collections.filter(c => c.curatorId === 'user-1');
-  const followingCollections = collections.filter(c => c.curatorId !== 'user-1');
+  const savedPlaces: Place[] = [];
+  const myCollections: Collection[] = [];
 
   // ── Plan Detail ───────────────────────────────────────────────
   const parseTimeToMinutes = (t: string): number => {
@@ -4951,8 +4833,8 @@ Return ONLY valid JSON, no markdown, no explanation:
   // ── Collection Detail ─────────────────────────────────────────
   if (selectedCollection) {
     const extraIds = colAdditions[selectedCollection.id] ?? [];
-    const colPlaces = places.filter(p => [...selectedCollection.placeIds, ...extraIds].includes(p.id));
-    const curator = selectedCollection.curatorId ? users.find(u => u.id === selectedCollection.curatorId) : null;
+    const colPlaces: Place[] = [];
+    const curator = null as { avatar: string; name: string; isCreator?: boolean; username: string } | null;
     const isOwn = selectedCollection.curatorId === 'user-1';
     const isPremium = selectedCollection.isPremium && !isOwn;
     const countries = [...new Set(colPlaces.map(p => p.country))].length;
@@ -5181,13 +5063,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             </div>
             <div className="overflow-y-auto flex-1 px-4 py-3 pb-8">
               {(() => {
-                const currentIds = new Set([...selectedCollection.placeIds, ...(colAdditions[selectedCollection.id] ?? [])]);
-                const sl = addSearch.toLowerCase();
-                const candidates = places.filter(p =>
-                  !currentIds.has(p.id) &&
-                  (addCatFilter === 'all' || p.category === addCatFilter) &&
-                  (!addSearch || p.name.toLowerCase().includes(sl) || p.city.toLowerCase().includes(sl))
-                );
+                const candidates: Place[] = [];
                 if (!candidates.length) return <p className="text-sm text-gray-400 text-center py-8">No places found</p>;
                 return (
                   <div className="space-y-2.5">
