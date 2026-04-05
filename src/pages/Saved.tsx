@@ -2428,13 +2428,13 @@ Return ONLY valid JSON, no markdown, no explanation:
               </div>
 
               {bookingsExpanded && (
-                <div className="space-y-2">
+                <div className="divide-y divide-gray-100">
                   {planBookings.map(b => {
                     const meta = BOOKING_META[b.type];
                     return (
                       <div
                         key={b.id}
-                        className="bg-gray-50 rounded-2xl px-4 py-3 flex items-start gap-3 cursor-pointer"
+                        className="flex items-center gap-3 py-2.5 cursor-pointer group"
                         onClick={() => {
                           setBookingType(b.type);
                           setBookingForm(b);
@@ -2443,37 +2443,24 @@ Return ONLY valid JSON, no markdown, no explanation:
                           setShowAddBooking(true);
                         }}
                       >
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.color}`}>
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${meta.color}`}>
                           {meta.icon}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900 truncate">{b.title || meta.label}</p>
-                          {b.type === 'flight' && (
-                            <p className="text-xs text-gray-500 mt-0.5 truncate">
-                              {[b.flightNumber, b.departureAirport && b.arrivalAirport ? `${b.departureAirport} → ${b.arrivalAirport}` : '', b.departureTime].filter(Boolean).join(' · ')}
-                            </p>
-                          )}
-                          {b.type === 'stay' && (
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {b.checkInDate && b.checkOutDate ? `${b.checkInDate} – ${b.checkOutDate}` : b.checkInDate}
-                              {b.address && ` · ${b.address}`}
-                            </p>
-                          )}
-                          {(b.type === 'restaurant' || b.type === 'activity') && (
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {[b.reservationDate, b.reservationTime, b.partySize ? `${b.partySize} people` : ''].filter(Boolean).join(' · ')}
-                            </p>
-                          )}
-                          {b.confirmationNumber && (
-                            <p className="text-[10px] text-gray-400 mt-0.5 font-mono">#{b.confirmationNumber}</p>
-                          )}
+                          <p className="text-xs text-gray-400 truncate">
+                            {b.type === 'flight' && [b.flightNumber, b.departureAirport && b.arrivalAirport ? `${b.departureAirport} → ${b.arrivalAirport}` : '', b.departureTime].filter(Boolean).join(' · ')}
+                            {b.type === 'stay' && [b.checkInDate && b.checkOutDate ? `${b.checkInDate} – ${b.checkOutDate}` : b.checkInDate, b.address].filter(Boolean).join(' · ')}
+                            {(b.type === 'restaurant' || b.type === 'activity') && [b.reservationDate, b.reservationTime, b.partySize ? `${b.partySize} ppl` : ''].filter(Boolean).join(' · ')}
+                            {b.confirmationNumber && <span className="font-mono"> · #{b.confirmationNumber}</span>}
+                          </p>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-                          <ChevronRight size={13} strokeWidth={2} className="text-gray-300" />
-                          <button onClick={e => { e.stopPropagation(); handleDeleteBooking(b.id); }} className="text-gray-300 hover:text-red-400">
-                            <Trash2 size={13} strokeWidth={2} />
-                          </button>
-                        </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDeleteBooking(b.id); }}
+                          className="text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0"
+                        >
+                          <Trash2 size={13} strokeWidth={1.5} />
+                        </button>
                       </div>
                     );
                   })}
