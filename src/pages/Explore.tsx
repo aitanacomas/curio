@@ -404,15 +404,47 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                 <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
               ))}
             </div>
-          ) : filtered.length === 0 ? (
-            <div>
-              {/* No curio posts — show Google Places discover results */}
-              {query.trim().length >= 2 ? (
-                loadingDiscover ? (
+          ) : (
+            <div className="space-y-5">
+              {/* Curio posts */}
+              {filtered.length > 0 && (
+                <div>
+                  {query.trim().length >= 2 && <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">On curio</p>}
                   <div className="grid grid-cols-2 gap-2">
-                    {[...Array(4)].map((_, i) => (
-                      <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
+                    {filtered.map(place => (
+                      <PlaceCard
+                        key={place.placeId}
+                        place={place}
+                        onClick={() => setSelectedPlace(place)}
+                      />
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state (no query or no curio results without a query) */}
+              {filtered.length === 0 && query.trim().length < 2 && (
+                <div className="flex flex-col items-center justify-center py-24 text-center">
+                  <p className="text-3xl mb-3">🌍</p>
+                  <p className="text-sm font-semibold text-gray-900 mb-1">
+                    {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
+                  </p>
+                  <p className="text-xs text-gray-400 max-w-[200px]">
+                    {activeTab === 'Following' ? 'Follow more people to see their places here' : 'Be the first to share a place on curio'}
+                  </p>
+                </div>
+              )}
+
+              {/* Google Places discover — always shown when searching */}
+              {query.trim().length >= 2 && (
+                loadingDiscover ? (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">Discover places</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[...Array(4)].map((_, i) => (
+                        <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
+                      ))}
+                    </div>
                   </div>
                 ) : discoverResults.length > 0 ? (
                   <div>
@@ -439,36 +471,14 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                       ))}
                     </div>
                   </div>
-                ) : (
+                ) : filtered.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-24 text-center">
                     <p className="text-3xl mb-3">🔍</p>
                     <p className="text-sm font-semibold text-gray-900 mb-1">No places found</p>
                     <p className="text-xs text-gray-400 max-w-[200px]">Try a different search term</p>
                   </div>
-                )
-              ) : (
-                <div className="flex flex-col items-center justify-center py-24 text-center">
-                  <p className="text-3xl mb-3">🌍</p>
-                  <p className="text-sm font-semibold text-gray-900 mb-1">
-                    {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
-                  </p>
-                  <p className="text-xs text-gray-400 max-w-[200px]">
-                    {activeTab === 'Following'
-                      ? 'Follow more people to see their places here'
-                      : 'Be the first to share a place on curio'}
-                  </p>
-                </div>
+                ) : null
               )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {filtered.map(place => (
-                <PlaceCard
-                  key={place.placeId}
-                  place={place}
-                  onClick={() => setSelectedPlace(place)}
-                />
-              ))}
             </div>
           )}
         </div>
