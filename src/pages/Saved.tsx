@@ -173,6 +173,7 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
+import { getBookingUrl, isBookable } from '../lib/placeUtils';
 import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, type RealPostPlace, type RealPost, type CollectionCollaborator } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 import PlaceSearch from '../components/PlaceSearch';
@@ -405,7 +406,7 @@ function ItemThumb({ image, name, category, size = 'md' }: { image?: string; nam
 }
 
 function SortableItineraryItem({ item, dayId, userId, onOpen, categoryEmoji, categoryDisplayName, collaborators }: {
-  item: { id: string; name: string; category: string; image?: string; time?: string; timeEnd?: string; checkIn?: string; checkOut?: string; status?: string; booked?: boolean; neighborhood?: string; addedBy?: string | null; addedByName?: string | null; addedByAvatar?: string | null };
+  item: { id: string; name: string; category: string; image?: string; time?: string; timeEnd?: string; checkIn?: string; checkOut?: string; status?: string; booked?: boolean; neighborhood?: string; location?: string; addedBy?: string | null; addedByName?: string | null; addedByAvatar?: string | null };
   dayId: string | null;
   userId?: string;
   onOpen: () => void;
@@ -447,6 +448,14 @@ function SortableItineraryItem({ item, dayId, userId, onOpen, categoryEmoji, cat
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
           {isBooked && <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">✓ Booked</span>}
           {isPending && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">Pending</span>}
+          {!isBooked && isBookable(item.category) && (
+            <button
+              onClick={e => { e.stopPropagation(); window.open(getBookingUrl(item.name, item.location ?? item.neighborhood ?? '', item.category), '_blank'); }}
+              className="text-[10px] font-bold bg-gray-900 text-white px-2.5 py-1 rounded-full"
+            >
+              Book
+            </button>
+          )}
         </div>
       </div>
       {(collaborators?.length ?? 0) > 0 && item.addedBy && (

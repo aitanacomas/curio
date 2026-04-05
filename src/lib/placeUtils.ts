@@ -1,5 +1,23 @@
 import type { Category } from '../types';
 
+const BOOKABLE_CATS = ['restaurant', 'cafe', 'bar', 'treats', 'food', 'nightlife', 'hotel', 'stay', 'experience', 'sports', 'wellness', 'landmark', 'art', 'nature', 'beach'];
+
+export function isBookable(category: string): boolean {
+  return BOOKABLE_CATS.includes(category.toLowerCase());
+}
+
+export function getBookingUrl(name: string, city: string, category: string): string {
+  const q = encodeURIComponent(`${name} ${city}`.trim());
+  const cat = category.toLowerCase();
+  if (['restaurant', 'cafe', 'bar', 'treats', 'food', 'nightlife'].includes(cat))
+    return `https://resy.com/cities/search?query=${q}`;
+  if (['hotel', 'stay'].includes(cat))
+    return `https://www.booking.com/search.html?ss=${q}`;
+  if (['experience', 'sports', 'wellness', 'landmark', 'art', 'nature', 'beach'].includes(cat))
+    return `https://www.viator.com/search/${encodeURIComponent(name)}`;
+  return `https://www.google.com/maps/search/${q}`;
+}
+
 export function googleTypesToCategory(types: string[]): Category {
   const has = (...t: string[]) => types.some(x => t.includes(x));
   if (has('lodging','hotel','motel','resort_hotel','hostel','bed_and_breakfast','extended_stay_hotel','guest_house','inn')) return 'hotel';

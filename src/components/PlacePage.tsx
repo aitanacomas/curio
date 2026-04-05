@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, MapPin, Clock, Phone, Globe, Star, ExternalLink, Bookmark, BookmarkCheck, Loader2 } from 'lucide-react';
 import { getPostsAtPlace, type RealPostPlace, type RealPost } from '../lib/supabase';
+import { getBookingUrl, isBookable } from '../lib/placeUtils';
 import type { AppUser } from '../types';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
@@ -12,19 +13,6 @@ const categoryEmoji: Record<string, string> = {
   sports: '🎾', wellness: '💆', event: '🎟️', flight: '✈️', transport: '🚗',
 };
 
-function getBookingUrl(name: string, city: string, category: string): string {
-  const q = encodeURIComponent(`${name} ${city}`.trim());
-  const cat = category.toLowerCase();
-  if (['restaurant', 'cafe', 'bar', 'treats', 'food', 'nightlife'].includes(cat))
-    return `https://resy.com/cities/search?query=${q}`;
-  if (['hotel', 'stay'].includes(cat))
-    return `https://www.booking.com/search.html?ss=${q}`;
-  if (['experience', 'sports', 'wellness', 'landmark', 'art', 'museum', 'nature', 'beach'].includes(cat))
-    return `https://www.viator.com/search/${encodeURIComponent(name)}`;
-  return `https://www.google.com/maps/search/${q}`;
-}
-
-const BOOKABLE = ['restaurant', 'cafe', 'bar', 'treats', 'food', 'nightlife', 'hotel', 'stay', 'experience', 'sports', 'wellness', 'landmark', 'art', 'nature', 'beach'];
 
 interface Props {
   place: RealPostPlace;
@@ -98,7 +86,7 @@ export default function PlacePage({ place, appUser, isSaved, onClose, onToggleSa
       .finally(() => setLoadingPhotos(false));
   }, [place.name, place.neighborhood, place.city]);
 
-  const bookable = BOOKABLE.includes(place.category.toLowerCase());
+  const bookable = isBookable(place.category);
 
   return (
     <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
