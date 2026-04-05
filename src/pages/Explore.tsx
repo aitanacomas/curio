@@ -229,15 +229,24 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     });
   };
 
-  // Category → Google Places type groups for direct category browsing
-  const categoryToGoogleTypes: Record<string, string[]> = {
-    restaurant: ['restaurant'], cafe: ['cafe', 'coffee_shop'], bar: ['bar', 'pub', 'wine_bar'],
-    treats: ['bakery', 'dessert_shop', 'ice_cream_shop'], nightlife: ['night_club', 'karaoke'],
-    hotel: ['lodging', 'resort_hotel'], nature: ['park', 'national_park', 'hiking_area'],
-    beach: ['beach'], sports: ['gym', 'sports_complex', 'fitness_center'],
-    wellness: ['spa', 'massage', 'yoga_studio'], shop: ['shopping_mall', 'clothing_store'],
-    art: ['art_gallery', 'museum'], landmark: ['historical_landmark', 'museum', 'tourist_attraction'],
-    experience: ['amusement_park', 'zoo', 'aquarium'],
+  // Per-chip search config: specific text query + primary Google Places type
+  const categoryChipSearchConfig: Record<string, { textQuery: string; includedType: string }> = {
+    restaurant:    { textQuery: 'best restaurant',              includedType: 'restaurant' },
+    cafe:          { textQuery: 'best cafe coffee shop',        includedType: 'cafe' },
+    bar:           { textQuery: 'best cocktail bar',            includedType: 'bar' },
+    treats:        { textQuery: 'best bakery pastry shop',      includedType: 'bakery' },
+    nightlife:     { textQuery: 'best nightclub music venue',   includedType: 'night_club' },
+    food:          { textQuery: 'best street food market',      includedType: 'restaurant' },
+    hotel:         { textQuery: 'best boutique hotel',          includedType: 'lodging' },
+    landmark:      { textQuery: 'famous landmark monument',     includedType: 'tourist_attraction' },
+    art:           { textQuery: 'best art gallery museum',      includedType: 'art_gallery' },
+    nature:        { textQuery: 'best national park nature',    includedType: 'park' },
+    beach:         { textQuery: 'best beach',                   includedType: 'beach' },
+    shop:          { textQuery: 'best shopping street market',  includedType: 'shopping_mall' },
+    experience:    { textQuery: 'best things to do attraction', includedType: 'tourist_attraction' },
+    neighbourhood: { textQuery: 'famous neighbourhood district',includedType: 'tourist_attraction' },
+    sports:        { textQuery: 'best sports venue stadium',    includedType: 'stadium' },
+    wellness:      { textQuery: 'best spa wellness retreat',    includedType: 'spa' },
   };
 
   // Google Places discover — always fires (default For You + search + category)
@@ -281,13 +290,13 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         } else if (hasCategoryFilter) {
           // Category chip path — parallel queries across multiple world cities for global variety
           setDiscoverCityPage(0);
-          const googleTypes = categoryToGoogleTypes[activeCategory] ?? ['tourist_attraction'];
-          const includedType = googleTypes[0];
+          const chipCfg = categoryChipSearchConfig[activeCategory] ?? { textQuery: 'popular place', includedType: 'tourist_attraction' };
+          const { textQuery: chipQuery, includedType } = chipCfg;
           const cities = WORLD_CITIES.slice(0, 6);
           const results = await Promise.all(cities.map(city =>
             fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `best ${activeCategory} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
+              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
             }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p))).catch(() => [])
           ));
           const interleaved: RealPostPlace[] = [];
@@ -370,14 +379,14 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
 
         if (activeCategory !== 'all' && query.trim().length < 2) {
           // Category chip — next 6 cities for this category
-          const googleTypes = categoryToGoogleTypes[activeCategory] ?? ['tourist_attraction'];
-          const includedType = googleTypes[0];
+          const chipCfg = categoryChipSearchConfig[activeCategory] ?? { textQuery: 'popular place', includedType: 'tourist_attraction' };
+          const { textQuery: chipQuery, includedType } = chipCfg;
           const cityStart = (nextPage * 6) % WORLD_CITIES.length;
           const cities = [...WORLD_CITIES.slice(cityStart, cityStart + 6), ...WORLD_CITIES.slice(0, Math.max(0, cityStart + 6 - WORLD_CITIES.length))].slice(0, 6);
           const results = await Promise.all(cities.map(city =>
             fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `best ${activeCategory} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
+              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
             }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p))).catch(() => [])
           ));
           const maxLen = Math.max(...results.map(r => r.length));
