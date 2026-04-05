@@ -3,7 +3,10 @@ import UserProfile from './UserProfile';
 import PlacePage from '../components/PlacePage';
 import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
 import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, getGuides, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile, type Guide } from '../lib/supabase';
+import { googleTypesToCategory } from '../lib/placeUtils';
 import GuideDetail from '../components/GuideDetail';
+
+const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -81,6 +84,9 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [discoverResults, setDiscoverResults] = useState<RealPostPlace[]>([]);
+  const [loadingDiscover, setLoadingDiscover] = useState(false);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
@@ -116,6 +122,57 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [query, appUser?.id]);
+
+  // Google Places discover fallback — fires when query has text
+  useEffect(() => {
+    if (discoverTimerRef.current) clearTimeout(discoverTimerRef.current);
+    if (!query.trim() || query.trim().length < 2) { setDiscoverResults([]); return; }
+    discoverTimerRef.current = setTimeout(async () => {
+      setLoadingDiscover(true);
+      try {
+        const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location',
+          },
+          body: JSON.stringify({ textQuery: query.trim(), languageCode: 'en' }),
+        });
+        const data = await res.json();
+        const places: RealPostPlace[] = (data.places ?? []).slice(0, 8).map((p: any) => {
+          const comps: any[] = p.addressComponents ?? [];
+          const find = (...types: string[]) => {
+            const c = comps.find(c => types.some(t => c.types?.includes(t)));
+            return c ? (c.longText || c.shortText || '') : '';
+          };
+          const city = find('postal_town') || find('locality') || find('administrative_area_level_1');
+          const country = find('country');
+          const neighborhood = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
+          const category = googleTypesToCategory(p.types ?? []);
+          const photoName = p.photos?.[0]?.name;
+          const photoUrl = photoName
+            ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}`
+            : null;
+          return {
+            id: p.id ?? `discover_${Math.random()}`,
+            name: p.displayName?.text ?? '',
+            category,
+            neighborhood: neighborhood || null,
+            city,
+            country,
+            photoUrl,
+            position: 0,
+            lat: p.location?.latitude ?? null,
+            lng: p.location?.longitude ?? null,
+          };
+        }).filter((p: RealPostPlace) => p.name);
+        setDiscoverResults(places);
+      } catch { setDiscoverResults([]); }
+      finally { setLoadingDiscover(false); }
+    }, 600);
+    return () => { if (discoverTimerRef.current) clearTimeout(discoverTimerRef.current); };
+  }, [query]);
 
   // Stable per-place pseudo-random tiebreaker (no Math.random in sort)
   const stableNoise = (id: string): number => {
@@ -299,16 +356,60 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center">
-              <p className="text-3xl mb-3">🌍</p>
-              <p className="text-sm font-semibold text-gray-900 mb-1">
-                {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
-              </p>
-              <p className="text-xs text-gray-400 max-w-[200px]">
-                {activeTab === 'Following'
-                  ? 'Follow more people to see their places here'
-                  : 'Be the first to share a place on curio'}
-              </p>
+            <div>
+              {/* No curio posts — show Google Places discover results */}
+              {query.trim().length >= 2 ? (
+                loadingDiscover ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
+                    ))}
+                  </div>
+                ) : discoverResults.length > 0 ? (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">Discover places</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {discoverResults.map(place => (
+                        <button
+                          key={place.id}
+                          onClick={() => setSelectedPlacePage(place)}
+                          className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100 text-left active:scale-[0.98] transition-transform"
+                        >
+                          {place.photoUrl
+                            ? <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center text-4xl">📍</div>
+                          }
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+                          <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                            <p className="text-white text-xs font-bold leading-tight truncate">{place.name}</p>
+                            {(place.city || place.country) && (
+                              <p className="text-white/70 text-[10px] mt-0.5 truncate">{[place.city, place.country].filter(Boolean).join(', ')}</p>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-24 text-center">
+                    <p className="text-3xl mb-3">🔍</p>
+                    <p className="text-sm font-semibold text-gray-900 mb-1">No places found</p>
+                    <p className="text-xs text-gray-400 max-w-[200px]">Try a different search term</p>
+                  </div>
+                )
+              ) : (
+                <div className="flex flex-col items-center justify-center py-24 text-center">
+                  <p className="text-3xl mb-3">🌍</p>
+                  <p className="text-sm font-semibold text-gray-900 mb-1">
+                    {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
+                  </p>
+                  <p className="text-xs text-gray-400 max-w-[200px]">
+                    {activeTab === 'Following'
+                      ? 'Follow more people to see their places here'
+                      : 'Be the first to share a place on curio'}
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
