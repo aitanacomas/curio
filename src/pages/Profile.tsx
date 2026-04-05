@@ -11,7 +11,7 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, getLikedPostsFull, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
 import { googleTypesToCategory } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 import GuideDetail from '../components/GuideDetail';
@@ -322,6 +322,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [pinnedPostId, setPinnedPostId] = useState<string | null>(() =>
     appUser?.id ? localStorage.getItem(`pinned_post_${appUser.id}`) : null
   );
+  const [showLikedPosts, setShowLikedPosts] = useState(false);
+  const [likedPostsFull, setLikedPostsFull] = useState<RealPost[]>([]);
+  const [loadingLikedPosts, setLoadingLikedPosts] = useState(false);
   const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
   const [showInviteSheet, setShowInviteSheet] = useState(false);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -2763,6 +2766,21 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 </button>
               </div>
               <button
+                onClick={() => {
+                  setShowSettings(false);
+                  if (appUser?.id && likedPostsFull.length === 0) {
+                    setLoadingLikedPosts(true);
+                    getLikedPostsFull(appUser.id).then(posts => { setLikedPostsFull(posts); setLoadingLikedPosts(false); });
+                  }
+                  setShowLikedPosts(true);
+                }}
+                className="w-full flex items-center gap-3 py-3.5 border-b border-gray-50"
+              >
+                <Heart size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                <span className="flex-1 text-left text-sm text-gray-900">Posts you've liked</span>
+                <ChevronRight size={14} strokeWidth={1.5} className="text-gray-300" />
+              </button>
+              <button
                 onClick={() => { setShowSettings(false); onLogout?.(); }}
                 className="w-full flex items-center gap-3 py-3.5 text-red-500"
               >
@@ -2770,6 +2788,59 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <span className="text-sm font-medium">Sign Out</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Liked Posts Sheet */}
+      {showLikedPosts && (
+        <div className="fixed inset-0 z-[210] bg-white flex flex-col" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
+            <button onClick={() => setShowLikedPosts(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+              <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            <h2 className="text-base font-bold text-gray-900">Posts you've liked</h2>
+          </div>
+          <div className="flex-1 overflow-y-auto pb-8">
+            {loadingLikedPosts ? (
+              <div className="grid grid-cols-2 gap-2 p-4">
+                {[...Array(6)].map((_, i) => <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />)}
+              </div>
+            ) : likedPostsFull.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 px-6">
+                <span className="text-4xl mb-3">🤍</span>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">No liked posts yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[200px]">Posts you like will appear here</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 p-4">
+                {likedPostsFull.map(post => {
+                  const photo = post.places.find(p => p.photoUrl)?.photoUrl;
+                  const title = post.locationLabel || post.places[0]?.name || 'Post';
+                  const city = post.places[0]?.city || post.places[0]?.country || '';
+                  return (
+                    <div key={post.id} className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100">
+                      {photo
+                        ? <img src={photo} alt={title} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center text-4xl">🗺️</div>
+                      }
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                      <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                        <p className="text-white text-xs font-semibold leading-tight truncate">{title}</p>
+                        {city && <p className="text-white/70 text-xs truncate">{city}</p>}
+                      </div>
+                      <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/40 rounded-full px-1.5 py-0.5">
+                        {post.profile.avatarUrl
+                          ? <img src={post.profile.avatarUrl} className="w-4 h-4 rounded-full object-cover" alt={post.profile.name} />
+                          : <div className="w-4 h-4 rounded-full bg-white/30 flex items-center justify-center text-white text-[8px] font-bold">{post.profile.name[0]?.toUpperCase()}</div>
+                        }
+                        <span className="text-white text-[10px] font-medium">{post.profile.username || post.profile.name}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
