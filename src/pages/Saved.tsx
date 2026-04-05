@@ -838,8 +838,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   // Drag-and-drop in itinerary view
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
-  // Track which plans have had itineraries generated this session
-  const [aiGeneratedPlanIds, setAiGeneratedPlanIds] = useState<Set<string>>(new Set());
   // AI Ask for ideas
   const [showAskAISheet, setShowAskAISheet] = useState(false);
   const [askAIPrompt, setAskAIPrompt] = useState('');
@@ -1724,7 +1722,6 @@ Email: ${bookingEmailText.slice(0, 3000)}` }] }],
       const updatedTrip: Trip = { ...selectedTrip, days: newDays };
       setPlans(prev => prev.map(p => p.id === selectedTrip.id ? updatedTrip : p));
       setSelectedTrip(updatedTrip);
-      setAiGeneratedPlanIds(prev => new Set([...prev, selectedTrip.id]));
       setPlanViewMode('itinerary');
       setShowGenerateSheet(false);
     } catch (e: any) {
@@ -2116,10 +2113,11 @@ Return ONLY valid JSON, no markdown, no explanation:
   // Reset view mode when opening a different plan
   useEffect(() => {
     if (!selectedTrip) return;
-    // Always start in brainstorm — itinerary is reached via AI generate
-    setPlanViewMode('brainstorm');
+    // Auto-detect: if the trip has structured itinerary days, open in itinerary mode
+    const hasItinerary = selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label));
+    setPlanViewMode(hasItinerary ? 'itinerary' : 'brainstorm');
     setShowMap(false);
-    setMapCoords({}); // clear cached coords so geocoding re-runs for the new trip
+    setMapCoords({});
   }, [selectedTrip?.id]);
 
   // Fetch bookings when plan changes
@@ -2394,8 +2392,8 @@ Return ONLY valid JSON, no markdown, no explanation:
         {/* Place list — TRIP only (events returned early above) */}
         <div className="px-4 pt-4 pb-28">
 
-          {/* Mode indicator — only show when AI itinerary exists */}
-          {planViewMode === 'itinerary' && aiGeneratedPlanIds.has(selectedTrip.id) && (
+          {/* Mode indicator — show when trip has structured itinerary days */}
+          {planViewMode === 'itinerary' && selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
             <div className="flex items-center justify-between mb-5">
               <button
                 onClick={() => setPlanViewMode('brainstorm')}
@@ -2482,7 +2480,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                ══════════════════════════════════════ */
             <>
               {/* Itinerary ready banner */}
-              {aiGeneratedPlanIds.has(selectedTrip.id) && (
+              {selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
                 <button
                   onClick={() => setPlanViewMode('itinerary')}
                   className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 rounded-2xl mb-4 border border-gray-100"
@@ -2615,7 +2613,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                     <button onClick={openAskAI} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
                       <Sparkles size={12} strokeWidth={2} /> Need help? Ask AI what to do on your trip
                     </button>
-                    {!aiGeneratedPlanIds.has(selectedTrip.id) && (
+                    {!selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
                       <button
                         onClick={() => { setGenerateSelectedIds(new Set(selectedTrip.days.flatMap(d => d.items).map(i => i.id))); setShowGenerateSheet(true); }}
                         className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-gray-900 text-white text-xs font-semibold"
