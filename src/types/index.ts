@@ -74,6 +74,7 @@ export interface AppUser {
   avatar: string | null;
   bio: string;
   location: string;
+  website?: string;
   isDemo: boolean;
   followingCount: number;
 }

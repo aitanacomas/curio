@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical, Globe } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
 import { currentUser } from '../data/mockData';
 import type { Place, AppUser } from '../types';
@@ -79,10 +79,11 @@ const categoryEmoji: Record<string, string> = {
   street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
 };
 
-function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; isDraggingAny: boolean; onClick: () => void }) {
+function SortablePostCell({ post, isDraggingAny, onClick, likeCount }: { post: RealPost; isDraggingAny: boolean; onClick: () => void; likeCount?: number }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const firstImage = post.places.map(p => p.photoUrl).find(url => url && url.trim());
   if (!firstImage) return null;
+  const collabs = (post.collaborators ?? []).slice(0, 2);
   return (
     <div
       ref={setNodeRef}
@@ -94,12 +95,33 @@ function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; is
     >
       <img src={firstImage} alt="" className="w-full h-full object-cover" draggable={false} onError={e => { (e.currentTarget.closest('[class*="aspect-square"]') as HTMLElement | null)?.style && ((e.currentTarget.closest('[class*="aspect-square"]') as HTMLElement).style.display = 'none'); }} />
       {isDragging && <div className="absolute inset-0 ring-2 ring-gray-900 ring-inset rounded-sm" />}
+      {/* Multi-place indicator */}
       {post.places.length > 1 && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
           <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
             <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
             <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
           </div>
+        </div>
+      )}
+      {/* Bottom bar: like count + collab avatars */}
+      {((likeCount ?? 0) > 0 || collabs.length > 0) && (
+        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-1.5 py-1 bg-gradient-to-t from-black/50 to-transparent">
+          {(likeCount ?? 0) > 0 ? (
+            <span className="text-white text-[10px] font-semibold flex items-center gap-0.5">
+              <Heart size={9} className="fill-white text-white" />
+              {likeCount}
+            </span>
+          ) : <span />}
+          {collabs.length > 0 && (
+            <div className="flex -space-x-1">
+              {collabs.map(c => (
+                c.avatarUrl
+                  ? <img key={c.id} src={c.avatarUrl} className="w-4 h-4 rounded-full border border-white/60 object-cover" />
+                  : <div key={c.id} className="w-4 h-4 rounded-full border border-white/60 bg-gray-400 flex items-center justify-center text-[7px] font-bold text-white">{c.name[0]?.toUpperCase()}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -188,7 +210,7 @@ function SortableEditPlace({ place, i, total, isExpanded, onToggle, onRemove, on
   );
 }
 
-export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: (targetUserId?: string) => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: (targetUserId?: string) => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string; website?: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [showMenu, setShowMenu] = useState(false);
   const [showFollowers, setShowFollowers] = useState<'followers' | 'following' | null>(null);
@@ -199,6 +221,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
   const [editLocation, setEditLocation] = useState('');
+  const [editWebsite, setEditWebsite] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -1261,12 +1284,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         finalAvatarUrl = `${getPublicUrl('avatars', path)}?t=${Date.now()}`;
       }
 
-      const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string } = {
+      const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string; website_url?: string } = {
         name: editName.trim() || displayUser.name,
         username: editUsername.trim().replace('@', '') || displayUser.username,
         bio: editBio.trim(),
         location: editLocation.trim(),
         avatar_url: finalAvatarUrl ?? undefined,
+        website_url: editWebsite.trim() || undefined,
       };
 
       const error = await updateProfile(appUser.id, updates);
@@ -1280,6 +1304,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           avatar: finalAvatarUrl,
           bio: updates.bio ?? '',
           location: updates.location ?? '',
+          website: updates.website_url ?? '',
         });
         setAvatarFile(null);
         setAvatarPreview(null);
@@ -1363,6 +1388,17 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               value={editLocation}
               onChange={e => setEditLocation(e.target.value)}
               placeholder={displayUser.location || 'City, Country'}
+              className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Link</p>
+            <input
+              value={editWebsite}
+              onChange={e => setEditWebsite(e.target.value)}
+              placeholder="yourwebsite.com"
+              autoCapitalize="none"
+              inputMode="url"
               className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
             />
           </div>
@@ -2096,7 +2132,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Profile Header */}
       <div className="px-4 pb-4">
         <div className="flex items-start gap-4">
-          <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
+          <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
             {(avatarPreview ?? displayUser.avatar)
               ? <img src={avatarPreview ?? displayUser.avatar!} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
               : <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-gray-400">{displayUser.name[0]?.toUpperCase()}</div>
@@ -2116,7 +2152,18 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <p className="text-xs text-gray-500 leading-snug">{displayUser.bio}</p>
               </div>
             ) : (
-              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic pt-0.5">Add a bio…</button>
+              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic pt-0.5">Add a bio…</button>
+            )}
+            {appUser?.website && (
+              <a
+                href={appUser.website.startsWith('http') ? appUser.website : `https://${appUser.website}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-blue-500 font-medium pt-0.5"
+              >
+                <Globe size={10} strokeWidth={1.5} />
+                {appUser.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
+              </a>
             )}
           </div>
         </div>
@@ -2184,6 +2231,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       key={post.id}
                       post={post}
                       isDraggingAny={isDraggingPost}
+                      likeCount={realPostLikeCounts[post.id] ?? 0}
                       onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }}
                     />
                   )).filter(Boolean)}
@@ -2607,7 +2655,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <div className="px-4 pt-2 space-y-1">
               {[
-                { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); } },
+                { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); } },
                 { icon: Share2, label: 'Share Profile', action: async () => {
                   setShowMenu(false);
                   const url = `${window.location.origin}/?u=${displayUser.username}`;
@@ -2656,7 +2704,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <div className="px-5 pt-4 space-y-1">
               <button
-                onClick={() => { setShowSettings(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }}
+                onClick={() => { setShowSettings(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); }}
                 className="w-full flex items-center gap-3 py-3.5 border-b border-gray-50"
               >
                 <Edit3 size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
