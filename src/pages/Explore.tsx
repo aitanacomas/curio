@@ -48,6 +48,30 @@ interface FlatPlace {
   post: RealPost;
 }
 
+// World cities rotated through for global discover results
+const WORLD_CITIES = [
+  'Tokyo', 'Paris', 'New York', 'London', 'Mexico City',
+  'Barcelona', 'Rome', 'Bangkok', 'Sydney', 'Dubai',
+  'Istanbul', 'Amsterdam', 'Singapore', 'Buenos Aires', 'Lisbon',
+  'Copenhagen', 'Seoul', 'Berlin', 'Vienna', 'Prague',
+  'Marrakech', 'Kyoto', 'Cape Town', 'Montreal', 'Havana',
+  'Bali', 'Santorini', 'Amalfi Coast', 'Tulum', 'Cartagena',
+  'Taipei', 'Ho Chi Minh City', 'Nairobi', 'Lagos', 'Bogotá',
+  'Athens', 'Budapest', 'Reykjavik', 'Dubrovnik', 'Florence',
+];
+
+// Category searches paired with rotating world cities (8 per page)
+const DEFAULT_CATEGORY_SEARCHES = [
+  { textQuery: 'best restaurant', includedType: 'restaurant' },
+  { textQuery: 'best cafe coffee shop', includedType: 'cafe' },
+  { textQuery: 'famous museum', includedType: 'museum' },
+  { textQuery: 'boutique hotel', includedType: 'lodging' },
+  { textQuery: 'rooftop cocktail bar', includedType: 'bar' },
+  { textQuery: 'art gallery', includedType: 'art_gallery' },
+  { textQuery: 'national park', includedType: 'national_park' },
+  { textQuery: 'famous beach', includedType: 'beach' },
+];
+
 const categoryChips = [
   { id: 'all',          label: 'All',           emoji: '✨' },
   { id: 'restaurant',   label: 'Restaurant',    emoji: '🍽️' },
@@ -85,11 +109,15 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const discoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreDiscoverRef = useRef<() => Promise<void>>(async () => {});
   const [discoverResults, setDiscoverResults] = useState<RealPostPlace[]>([]);
   const [loadingDiscover, setLoadingDiscover] = useState(false);
   const [loadingMoreDiscover, setLoadingMoreDiscover] = useState(false);
   const [discoverGeoState, setDiscoverGeoState] = useState<{ lat: number; lng: number; city: string; country: string; radius: number } | null>(null);
   const [discoverTextToken, setDiscoverTextToken] = useState<string | null>(null);
+  const [discoverDefaultTokens, setDiscoverDefaultTokens] = useState<(string | null)[]>([]);
+  const [discoverCityPage, setDiscoverCityPage] = useState(0);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
@@ -127,19 +155,37 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   }, [query, appUser?.id]);
 
   const GEO_TYPES = new Set(['locality', 'administrative_area_level_1', 'administrative_area_level_2', 'country', 'political', 'colloquial_area', 'continent']);
-  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location';
+  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location,places.rating';
   const HEADERS = { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': FIELD_MASK };
 
   const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace => {
     const comps: any[] = p.addressComponents ?? [];
     const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
-    const city = cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1');
+    const city = normalizeCity(cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1'));
     const country = countryOverride || find('country');
     const neighborhood = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
     const category = googleTypesToCategory(p.types ?? []);
     const photoName = p.photos?.[0]?.name;
     const photoUrl = photoName ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
     return { id: p.id ?? `discover_${Math.random()}`, name: p.displayName?.text ?? '', category, neighborhood: neighborhood || null, city, country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null };
+  };
+
+  // Sort raw Google results by rating descending before mapping
+  const byRating = (places: any[]) => [...places].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+
+  // Normalize city names to consistent short forms
+  const normalizeCity = (city: string): string => {
+    const map: Record<string, string> = {
+      'ciudad de méxico': 'CDMX', 'ciudad de mexico': 'CDMX', 'mexico city': 'CDMX',
+      'new york city': 'New York', 'nyc': 'New York',
+      'los angeles': 'Los Angeles', 'la': 'Los Angeles',
+      'san francisco': 'San Francisco', 'sf': 'San Francisco',
+      'london': 'London', 'greater london': 'London',
+      'paris': 'Paris', 'île-de-france': 'Paris',
+      'tokyo': 'Tokyo', 'tokyo metropolis': 'Tokyo',
+      'bangkok': 'Bangkok', 'krung thep maha nakhon': 'Bangkok',
+    };
+    return map[city.toLowerCase()] ?? city;
   };
 
   const nearbyGroups = [
@@ -153,14 +199,19 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     const results = await Promise.all(nearbyGroups.map(types =>
       fetch('https://places.googleapis.com/v1/places:searchNearby', {
         method: 'POST', headers: HEADERS,
-        body: JSON.stringify({ locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } }, includedTypes: types, maxResultCount: 4, languageCode: 'en', rankPreference: 'POPULARITY' }),
-      }).then(r => r.json()).then(d => (d.places ?? []).slice(0, 4).map((p: any) => mapPlace(p, city, country))).catch(() => [])
+        body: JSON.stringify({ locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } }, includedTypes: types, maxResultCount: 6, languageCode: 'en', rankPreference: 'POPULARITY' }),
+      }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 4).map((p: any) => mapPlace(p, city, country))).catch(() => [])
     ));
     // Interleave results so categories mix: take one from each group in turn
     const maxLen = Math.max(...results.map(r => r.length));
     const interleaved: RealPostPlace[] = [];
     for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) interleaved.push(r[i]); });
-    return interleaved.filter(p => p.name);
+    const seenIds = new Set<string>(); const seenNames = new Set<string>();
+    return interleaved.filter(p => {
+      const nameKey = p.name.toLowerCase().slice(0, 30);
+      if (!p.name || seenIds.has(p.id) || seenNames.has(nameKey)) return false;
+      seenIds.add(p.id); seenNames.add(nameKey); return true;
+    });
   };
 
   // Category → Google Places type groups for direct category browsing
@@ -170,22 +221,23 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     hotel: ['lodging', 'resort_hotel'], nature: ['park', 'national_park', 'hiking_area'],
     beach: ['beach'], sports: ['gym', 'sports_complex', 'fitness_center'],
     wellness: ['spa', 'massage', 'yoga_studio'], shop: ['shopping_mall', 'clothing_store'],
-    art: ['art_gallery', 'museum'], landmark: ['tourist_attraction', 'historical_landmark'],
+    art: ['art_gallery', 'museum'], landmark: ['historical_landmark', 'museum', 'tourist_attraction'],
     experience: ['amusement_park', 'zoo', 'aquarium'],
   };
 
-  // Google Places discover — fires when query has text OR when category chip is active
+  // Google Places discover — always fires (default For You + search + category)
   useEffect(() => {
     if (discoverTimerRef.current) clearTimeout(discoverTimerRef.current);
     const hasQuery = query.trim().length >= 2;
     const hasCategoryFilter = activeCategory !== 'all';
-
-    if (!hasQuery && !hasCategoryFilter) { setDiscoverResults([]); setDiscoverGeoState(null); setDiscoverTextToken(null); return; }
+    const delay = hasQuery || hasCategoryFilter ? 400 : 0;
 
     discoverTimerRef.current = setTimeout(async () => {
       setLoadingDiscover(true);
       setDiscoverGeoState(null);
       setDiscoverTextToken(null);
+      setDiscoverDefaultTokens([]);
+      setDiscoverCityPage(0);
       try {
         if (hasQuery) {
           // Text search path
@@ -211,25 +263,69 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             setDiscoverTextToken(data.nextPageToken ?? null);
             setDiscoverResults(raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(p => p.name));
           }
-        } else {
-          // Category chip path — search for top places of that type globally
+        } else if (hasCategoryFilter) {
+          // Category chip path — parallel queries across multiple world cities for global variety
+          setDiscoverCityPage(0);
           const googleTypes = categoryToGoogleTypes[activeCategory] ?? ['tourist_attraction'];
-          const textQuery = `popular ${activeCategory} places`;
-          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-            method: 'POST', headers: HEADERS,
-            body: JSON.stringify({ textQuery, includedType: googleTypes[0], languageCode: 'en' }),
-          });
-          const data = await res.json();
-          setDiscoverTextToken(data.nextPageToken ?? null);
-          setDiscoverResults((data.places ?? []).slice(0, 10).map((p: any) => mapPlace(p)).filter((p: RealPostPlace) => p.name));
+          const includedType = googleTypes[0];
+          const cities = WORLD_CITIES.slice(0, 6);
+          const results = await Promise.all(cities.map(city =>
+            fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST', headers: HEADERS,
+              body: JSON.stringify({ textQuery: `best ${activeCategory} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p))).catch(() => [])
+          ));
+          const interleaved: RealPostPlace[] = [];
+          const maxLen = Math.max(...results.map(r => r.length));
+          for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) interleaved.push(r[i]); });
+          const seenIds = new Set<string>(); const seenNames = new Set<string>();
+          setDiscoverResults(interleaved.filter(p => {
+            const nameKey = p.name.toLowerCase().slice(0, 30);
+            if (!p.name || seenIds.has(p.id) || seenNames.has(nameKey)) return false;
+            seenIds.add(p.id); seenNames.add(nameKey); return true;
+          }));
+        } else {
+          // Default "For You" — city-specific queries rotated through world cities
+          setDiscoverCityPage(0);
+          const cityOffset = 0;
+          const results = await Promise.all(DEFAULT_CATEGORY_SEARCHES.map(({ textQuery, includedType }, i) => {
+            const city = WORLD_CITIES[(cityOffset * DEFAULT_CATEGORY_SEARCHES.length + i) % WORLD_CITIES.length];
+            return fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST', headers: HEADERS,
+              body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)), token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+          }));
+          setDiscoverDefaultTokens(results.map(r => r.token));
+          const interleaved: RealPostPlace[] = [];
+          const maxLen = Math.max(...results.map(r => r.places.length));
+          for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r.places[i]) interleaved.push(r.places[i]); });
+          const seenIds = new Set<string>(); const seenNames = new Set<string>();
+          setDiscoverResults(interleaved.filter(p => {
+            const nameKey = p.name.toLowerCase().slice(0, 30);
+            if (!p.name || seenIds.has(p.id) || seenNames.has(nameKey)) return false;
+            seenIds.add(p.id); seenNames.add(nameKey); return true;
+          }));
         }
       } catch { setDiscoverResults([]); }
       finally { setLoadingDiscover(false); }
-    }, 400);
+    }, delay);
     return () => { if (discoverTimerRef.current) clearTimeout(discoverTimerRef.current); };
   }, [query, activeCategory]);
 
+  // Infinite scroll — observe sentinel at bottom of grid
+  useEffect(() => { loadMoreDiscoverRef.current = loadMoreDiscover; });
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) loadMoreDiscoverRef.current();
+    }, { threshold: 0.1 });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
   const loadMoreDiscover = async () => {
+    if (loadingMoreDiscover) return;
     setLoadingMoreDiscover(true);
     try {
       if (discoverGeoState) {
@@ -248,6 +344,56 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         setDiscoverTextToken(data.nextPageToken ?? null);
         const more: RealPostPlace[] = (data.places ?? []).map((p: any) => mapPlace(p)).filter((p: RealPostPlace) => p.name);
         setDiscoverResults(prev => [...prev, ...more]);
+      } else {
+        // City rotation load more — covers both default "For You" and category chips
+        const nextPage = discoverCityPage + 1;
+        setDiscoverCityPage(nextPage);
+        const existingIds = new Set(discoverResults.map(p => p.id));
+        const existingNames = new Set(discoverResults.map(p => p.name.toLowerCase().slice(0, 30)));
+
+        let morePlaces: RealPostPlace[] = [];
+
+        if (activeCategory !== 'all' && query.trim().length < 2) {
+          // Category chip — next 6 cities for this category
+          const googleTypes = categoryToGoogleTypes[activeCategory] ?? ['tourist_attraction'];
+          const includedType = googleTypes[0];
+          const cityStart = (nextPage * 6) % WORLD_CITIES.length;
+          const cities = [...WORLD_CITIES.slice(cityStart, cityStart + 6), ...WORLD_CITIES.slice(0, Math.max(0, cityStart + 6 - WORLD_CITIES.length))].slice(0, 6);
+          const results = await Promise.all(cities.map(city =>
+            fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST', headers: HEADERS,
+              body: JSON.stringify({ textQuery: `best ${activeCategory} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p))).catch(() => [])
+          ));
+          const maxLen = Math.max(...results.map(r => r.length));
+          for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) morePlaces.push(r[i]); });
+        } else {
+          // Default "For You" — next city set across all category searches
+          const results = await Promise.all(DEFAULT_CATEGORY_SEARCHES.map(({ textQuery, includedType }, i) => {
+            const token = discoverDefaultTokens[i];
+            if (token) {
+              return fetch('https://places.googleapis.com/v1/places:searchText', {
+                method: 'POST', headers: HEADERS,
+                body: JSON.stringify({ textQuery, includedType, pageToken: token, languageCode: 'en' }),
+              }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)), token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+            }
+            const city = WORLD_CITIES[(nextPage * DEFAULT_CATEGORY_SEARCHES.length + i) % WORLD_CITIES.length];
+            return fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST', headers: HEADERS,
+              body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)), token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+          }));
+          setDiscoverDefaultTokens(results.map(r => r.token));
+          const maxLen = Math.max(...results.map(r => r.places.length));
+          for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r.places[i]) morePlaces.push(r.places[i]); });
+        }
+
+        const deduped = morePlaces.filter(p => {
+          const nameKey = p.name.toLowerCase().slice(0, 30);
+          if (!p.name || existingIds.has(p.id) || existingNames.has(nameKey)) return false;
+          existingIds.add(p.id); existingNames.add(nameKey); return true;
+        });
+        setDiscoverResults(prev => [...prev, ...deduped]);
       }
     } catch {}
     finally { setLoadingMoreDiscover(false); }
@@ -312,6 +458,19 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const filteredDiscover = activeCategory === 'all'
     ? discoverResults
     : discoverResults.filter(p => p.category === activeCategory);
+
+  // Unified interleaved grid — 1 curio : 2 discover so discovery content fills the feed
+  type MixedCard = { type: 'curio'; place: FlatPlace } | { type: 'discover'; place: RealPostPlace };
+  const mixedGrid = (curio: FlatPlace[], discover: RealPostPlace[]): MixedCard[] => {
+    const out: MixedCard[] = [];
+    let ci = 0, di = 0;
+    while (ci < curio.length || di < discover.length) {
+      if (curio[ci]) out.push({ type: 'curio', place: curio[ci++] });
+      if (discover[di]) out.push({ type: 'discover', place: discover[di++] });
+      if (discover[di]) out.push({ type: 'discover', place: discover[di++] });
+    }
+    return out;
+  };
 
   const filtered = query
     ? categoryFiltered.filter(p =>
@@ -439,97 +598,65 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               ))}
             </div>
           ) : (
-            <div className="space-y-5">
-              {/* Curio posts */}
-              {filtered.length > 0 && (
-                <div>
-                  {query.trim().length >= 2 && <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">On curio</p>}
-                  <div className="grid grid-cols-2 gap-2">
-                    {filtered.map(place => (
-                      <PlaceCard
-                        key={place.placeId}
-                        place={place}
-                        onClick={() => setSelectedPlace(place)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Empty state — only when no search and no category filter */}
-              {filtered.length === 0 && query.trim().length < 2 && activeCategory === 'all' && (
+            <div className="space-y-3">
+              {/* Empty state */}
+              {filtered.length === 0 && filteredDiscover.length === 0 && !loadingDiscover && (
                 <div className="flex flex-col items-center justify-center py-24 text-center">
-                  <p className="text-3xl mb-3">🌍</p>
+                  <p className="text-3xl mb-3">{query.trim().length >= 2 || activeCategory !== 'all' ? '🔍' : '🌍'}</p>
                   <p className="text-sm font-semibold text-gray-900 mb-1">
-                    {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
+                    {activeTab === 'Following' && query.trim().length < 2 && activeCategory === 'all'
+                      ? 'No places from people you follow'
+                      : query.trim().length >= 2 || activeCategory !== 'all'
+                      ? 'No places found'
+                      : 'No places yet'}
                   </p>
                   <p className="text-xs text-gray-400 max-w-[200px]">
-                    {activeTab === 'Following' ? 'Follow more people to see their places here' : 'Be the first to share a place on curio'}
+                    {activeTab === 'Following' && query.trim().length < 2 && activeCategory === 'all'
+                      ? 'Follow more people to see their places here'
+                      : query.trim().length >= 2 || activeCategory !== 'all'
+                      ? 'Try a different search term'
+                      : 'Be the first to share a place on curio'}
                   </p>
                 </div>
               )}
 
-              {/* Google Places discover — shown when searching or category chip active */}
-              {(query.trim().length >= 2 || activeCategory !== 'all') && (
-                loadingDiscover ? (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">Discover places</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[...Array(4)].map((_, i) => (
-                        <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
-                      ))}
-                    </div>
+              {/* Unified grid — curio shown immediately, discover mixed in when ready */}
+              <div>
+                {/* Loading skeleton — only when nothing to show at all */}
+                {loadingDiscover && filtered.length === 0 && filteredDiscover.length === 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {[...Array(6)].map((_, i) => (
+                      <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
+                    ))}
                   </div>
-                ) : filteredDiscover.length > 0 ? (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">Discover places</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {filteredDiscover.map(place => (
-                        <button
-                          key={place.id}
-                          onClick={() => setSelectedPlacePage(place)}
-                          className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100 text-left active:scale-[0.98] transition-transform"
-                        >
-                          {place.photoUrl
-                            ? <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
-                            : <div className="w-full h-full flex items-center justify-center text-4xl">{categoryEmoji[place.category] ?? '📍'}</div>
-                          }
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
-                          {/* Category badge */}
-                          <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1">
-                            <span className="text-[11px]">{categoryEmoji[place.category] ?? '📍'}</span>
-                            <span className="text-white text-[10px] font-medium capitalize">{place.category}</span>
-                          </div>
-                          <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                            <p className="text-white text-xs font-bold leading-tight truncate">{place.name}</p>
-                            {(place.city || place.country) && (
-                              <p className="text-white/70 text-[10px] mt-0.5 truncate">{[place.city, place.country].filter(Boolean).join(', ')}</p>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                    {/* Load more */}
-                    {(discoverGeoState || discoverTextToken) && (
-                      <button
-                        onClick={loadMoreDiscover}
-                        disabled={loadingMoreDiscover}
-                        className="w-full mt-3 py-3 rounded-2xl border border-gray-200 text-sm font-semibold text-gray-600 flex items-center justify-center gap-2 active:bg-gray-50 disabled:opacity-50"
-                      >
-                        {loadingMoreDiscover ? (
-                          <><div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> Loading...</>
-                        ) : 'Load more places'}
-                      </button>
+                )}
+                {/* Grid */}
+                {(filtered.length > 0 || filteredDiscover.length > 0) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {mixedGrid(filtered, filteredDiscover).map((card, idx) =>
+                      card.type === 'curio' ? (
+                        <PlaceCard
+                          key={`curio-${card.place.placeId}`}
+                          place={card.place}
+                          onClick={() => setSelectedPlace(card.place)}
+                        />
+                      ) : (
+                        <DiscoverCard
+                          key={`discover-${card.place.id}-${idx}`}
+                          place={card.place}
+                          onClick={() => setSelectedPlacePage(card.place)}
+                        />
+                      )
                     )}
                   </div>
-                ) : filtered.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-24 text-center">
-                    <p className="text-3xl mb-3">🔍</p>
-                    <p className="text-sm font-semibold text-gray-900 mb-1">No places found</p>
-                    <p className="text-xs text-gray-400 max-w-[200px]">Try a different search term</p>
-                  </div>
-                ) : null
-              )}
+                )}
+                {/* Infinite scroll sentinel */}
+                <div ref={loadMoreSentinelRef} className="h-10 flex items-center justify-center mt-1">
+                  {loadingMoreDiscover && (
+                    <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -659,6 +786,33 @@ function PlaceCard({ place, onClick }: { place: FlatPlace; onClick: () => void }
       )}
 
       {/* Place info */}
+      <div className="absolute bottom-0 left-0 right-0 p-2.5">
+        <p className="text-white text-xs font-bold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
+        <p className="text-white/70 text-[10px] truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
+      </div>
+    </button>
+  );
+}
+
+// ── Discover card (Google Places) ────────────────────────────────────────────
+
+function DiscoverCard({ place, onClick }: { place: RealPostPlace; onClick: () => void }) {
+  const emoji = categoryEmoji[place.category];
+  return (
+    <button onClick={onClick} className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-95 transition-transform">
+      {place.photoUrl ? (
+        <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full bg-slate-200 flex items-center justify-center">
+          <span className="text-3xl">{emoji ?? '📍'}</span>
+        </div>
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+      {emoji && (
+        <div className="absolute top-2 right-2 z-10 w-7 h-7 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center">
+          <span className="text-sm leading-none">{emoji}</span>
+        </div>
+      )}
       <div className="absolute bottom-0 left-0 right-0 p-2.5">
         <p className="text-white text-xs font-bold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
         <p className="text-white/70 text-[10px] truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>

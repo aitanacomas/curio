@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Camera, Sparkles, Check, MapPin, X, Heart, MessageCircle, Send, Pencil, Loader2, Plus, GripVertical, RotateCcw, RotateCw, Bookmark } from 'lucide-react';
+import { ArrowLeft, Camera, Sparkles, Check, MapPin, X, Heart, MessageCircle, Send, Pencil, Loader2, Plus, GripVertical, RotateCcw, RotateCw, Bookmark, Mic, MicOff } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -12,7 +12,7 @@ import PlaceSearch from '../components/PlaceSearch';
 import MapView from '../components/MapView';
 import ImageCarousel from '../components/ImageCarousel';
 
-type Step = 'upload' | 'places' | 'preview';
+type Step = 'upload' | 'places' | 'preview' | 'import';
 type Visibility = 'map' | 'profile' | 'feed';
 
 interface IdentifiedPlace {
@@ -100,6 +100,80 @@ async function identifyPlaceWithAI(photoUrl: string): Promise<Partial<Identified
   } catch { return null; }
 }
 
+async function extractPlacesFromText(text: string): Promise<IdentifiedPlace[]> {
+  if (!ANTHROPIC_KEY || !GOOGLE_PLACES_KEY) return [];
+  // Step 1: Claude extracts place mentions
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `Extract all specific named places from this text. Return ONLY a JSON array of objects with fields: name (required), city, country, category (one of: restaurant/cafe/bar/hotel/landmark/art/nature/beach/shop/experience/neighbourhood/sports/wellness/event/treats/nightlife/food). Only include specific named places — not vague references. If none found, return [].
+
+Text: """${text}"""`,
+      }],
+    }),
+  });
+  const aiData = await res.json();
+  const rawText: string = aiData.content?.[0]?.text ?? '';
+  const match = rawText.match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  let extracted: { name: string; city?: string; country?: string; category?: string }[] = [];
+  try { extracted = JSON.parse(match[0]); } catch { return []; }
+
+  // Step 2: Resolve each place via Google Places
+  const resolved = await Promise.all(extracted.filter(p => p.name).map(async (place, i) => {
+    const base: IdentifiedPlace = {
+      id: `import-${Date.now()}-${i}`,
+      photo: '',
+      name: place.name,
+      category: (place.category ?? '') as Category | '',
+      neighborhood: '',
+      city: place.city ?? '',
+      country: place.country ?? '',
+      analyzing: false,
+      expanded: false,
+    };
+    try {
+      const gRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+          'X-Goog-FieldMask': 'places.displayName,places.addressComponents,places.types,places.location,places.photos',
+        },
+        body: JSON.stringify({ textQuery: [place.name, place.city, place.country].filter(Boolean).join(', '), languageCode: 'en' }),
+      });
+      const gData = await gRes.json();
+      const gp = gData.places?.[0];
+      if (!gp) return base;
+      const comps: any[] = gp.addressComponents ?? [];
+      const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
+      const photoName = gp.photos?.[0]?.name;
+      const photoUrl = photoName ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
+      return {
+        ...base,
+        name: shortName(gp.displayName?.text ?? place.name),
+        city: find('postal_town') || find('locality') || find('administrative_area_level_1') || place.city || '',
+        country: find('country') || place.country || '',
+        neighborhood: find('sublocality_level_1') || find('neighborhood') || find('sublocality') || '',
+        category: (googleTypesToCategory(gp.types ?? []) || place.category || '') as Category | '',
+        lat: gp.location?.latitude ?? undefined,
+        lng: gp.location?.longitude ?? undefined,
+        photo: photoUrl,
+      };
+    } catch { return base; }
+  }));
+  return resolved.filter(p => p.name);
+}
 
 async function readExifGps(file: File): Promise<{ lat: number; lng: number } | null> {
   return new Promise(resolve => {
@@ -518,6 +592,11 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
   const [editingPlaces, setEditingPlaces] = useState(false);
   const [editingPhotoId, setEditingPhotoId] = useState<string | null>(null);
   const [aiIdentifyingId, setAiIdentifyingId] = useState<string | null>(null);
+  const [importText, setImportText] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const speechRef = useRef<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const addMoreRef = useRef<HTMLInputElement>(null);
   const carouselStartX = useRef(0);
@@ -606,6 +685,26 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
       setPlaces(prev => prev.map(p => p.id === id ? { ...p, ...result, expanded: false } : p));
     }
     setAiIdentifyingId(null);
+  };
+
+  const handleImport = async () => {
+    if (!importText.trim()) return;
+    setImportLoading(true);
+    setImportError('');
+    try {
+      const extracted = await extractPlacesFromText(importText.trim());
+      if (extracted.length === 0) {
+        setImportError('No specific places found. Try adding more detail.');
+        return;
+      }
+      setPlaces(extracted);
+      setCaption(importText.trim());
+      setStep('places');
+    } catch {
+      setImportError('Something went wrong. Please try again.');
+    } finally {
+      setImportLoading(false);
+    }
   };
 
   // ── Save post to Supabase ──────────────────────────────────────────
@@ -758,6 +857,20 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
             </div>
           </label>
 
+          {/* Import from text */}
+          <button
+            onClick={() => setStep('import')}
+            className="flex items-center gap-4 rounded-3xl bg-gray-50 active:bg-gray-100 transition-colors px-5 py-4 w-full text-left"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center flex-shrink-0">
+              <Sparkles size={20} strokeWidth={1.5} className="text-gray-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-gray-900 text-sm">Import from text</p>
+              <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">Paste a trip recap, blog post, or caption — AI extracts the places</p>
+            </div>
+          </button>
+
           {/* Quick tips */}
           <div className="rounded-2xl bg-gray-50 px-4 py-4 space-y-3">
             {[
@@ -771,6 +884,103 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
               </div>
             ))}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  const handleMic = () => {
+    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    if (isRecording) {
+      speechRef.current?.stop();
+      return;
+    }
+    const recognition = new SR();
+    speechRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    let base = importText;
+    recognition.onresult = (e: any) => {
+      let interim = '';
+      let final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t;
+        else interim += t;
+      }
+      if (final) base = (base + (base ? ' ' : '') + final).trim();
+      setImportText(base + (interim ? (base ? ' ' : '') + interim : ''));
+    };
+    recognition.onend = () => { setIsRecording(false); setImportText(base); };
+    recognition.onerror = () => { setIsRecording(false); };
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  // ── IMPORT ────────────────────────────────────────────────────────
+  if (step === 'import') {
+    return (
+      <div className="min-h-screen bg-white flex flex-col">
+        <div className="px-4 pt-5 pb-3 flex items-center gap-3">
+          <button
+            onClick={() => setStep('upload')}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
+          >
+            <ArrowLeft size={17} strokeWidth={1.5} className="text-gray-700" />
+          </button>
+          <div>
+            <h1 className="text-lg font-bold text-gray-900 leading-tight">Import from text</h1>
+            <p className="text-xs text-gray-400 mt-0.5">AI extracts the places for you</p>
+          </div>
+        </div>
+
+        <div className="px-5 flex-1 flex flex-col gap-4 pb-8">
+          <div className="relative flex-1">
+            <textarea
+              value={importText}
+              onChange={e => setImportText(e.target.value)}
+              placeholder={'Paste any text with place names...\n\nExamples:\n• "Day 2 in Tokyo — breakfast at Fuglen in Tomigaya, then teamLab Planets in Toyosu"\n• A blog post, YouTube description, or your own notes'}
+              className="w-full min-h-[240px] rounded-2xl bg-gray-50 p-4 pr-14 text-sm text-gray-900 placeholder-gray-400 outline-none resize-none leading-relaxed"
+              autoFocus
+            />
+            <button
+              onClick={handleMic}
+              className={`absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center transition-colors ${isRecording ? 'bg-red-500' : 'bg-white shadow-sm border border-gray-200'}`}
+            >
+              {isRecording
+                ? <MicOff size={15} className="text-white" strokeWidth={2} />
+                : <Mic size={15} className="text-gray-500" strokeWidth={1.5} />
+              }
+            </button>
+            {isRecording && (
+              <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-red-50 rounded-full px-2.5 py-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[10px] text-red-500 font-semibold">Listening...</span>
+              </div>
+            )}
+          </div>
+
+          {importError && (
+            <p className="text-sm text-red-500 text-center">{importError}</p>
+          )}
+
+          <button
+            onClick={handleImport}
+            disabled={!importText.trim() || importLoading}
+            className="w-full py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+          >
+            {importLoading ? (
+              <><Loader2 size={16} className="animate-spin" /> Extracting places...</>
+            ) : (
+              <><Sparkles size={16} /> Extract places</>
+            )}
+          </button>
+
+          {!ANTHROPIC_KEY && (
+            <p className="text-xs text-gray-400 text-center">Requires VITE_ANTHROPIC_KEY to be configured</p>
+          )}
         </div>
       </div>
     );
