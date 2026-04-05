@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical, Globe } from 'lucide-react';
+import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical, Globe, Pin } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
 import { currentUser } from '../data/mockData';
 import type { Place, AppUser } from '../types';
@@ -79,7 +79,7 @@ const categoryEmoji: Record<string, string> = {
   street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
 };
 
-function SortablePostCell({ post, isDraggingAny, onClick, likeCount }: { post: RealPost; isDraggingAny: boolean; onClick: () => void; likeCount?: number }) {
+function SortablePostCell({ post, isDraggingAny, onClick, likeCount, isPinned }: { post: RealPost; isDraggingAny: boolean; onClick: () => void; likeCount?: number; isPinned?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
   const firstImage = post.places.map(p => p.photoUrl).find(url => url && url.trim());
   if (!firstImage) return null;
@@ -95,6 +95,12 @@ function SortablePostCell({ post, isDraggingAny, onClick, likeCount }: { post: R
     >
       <img src={firstImage} alt="" className="w-full h-full object-cover" draggable={false} onError={e => { (e.currentTarget.closest('[class*="aspect-square"]') as HTMLElement | null)?.style && ((e.currentTarget.closest('[class*="aspect-square"]') as HTMLElement).style.display = 'none'); }} />
       {isDragging && <div className="absolute inset-0 ring-2 ring-gray-900 ring-inset rounded-sm" />}
+      {/* Pinned indicator */}
+      {isPinned && (
+        <div className="absolute top-1.5 left-1.5 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center">
+          <Pin size={10} strokeWidth={2} className="text-white fill-white" />
+        </div>
+      )}
       {/* Multi-place indicator */}
       {post.places.length > 1 && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
@@ -313,6 +319,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [collectionCoverPhotos, setCollectionCoverPhotos] = useState<Record<string, string[]>>({});
   const [userGuides, setUserGuides] = useState<Guide[]>([]);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [pinnedPostId, setPinnedPostId] = useState<string | null>(() =>
+    appUser?.id ? localStorage.getItem(`pinned_post_${appUser.id}`) : null
+  );
   const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
   const [showInviteSheet, setShowInviteSheet] = useState(false);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -601,6 +610,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </button>
               <button onClick={() => { setPostSentTo(new Set()); setShowPostShareSheet(true); }}>
                 <Send size={21} strokeWidth={1.5} className="text-gray-800" />
+              </button>
+              <button
+                onClick={() => {
+                  const newId = pinnedPostId === selectedRealPost.id ? null : selectedRealPost.id;
+                  setPinnedPostId(newId);
+                  if (appUser?.id) {
+                    if (newId) localStorage.setItem(`pinned_post_${appUser.id}`, newId);
+                    else localStorage.removeItem(`pinned_post_${appUser.id}`);
+                  }
+                }}
+                title={pinnedPostId === selectedRealPost.id ? 'Unpin from profile' : 'Pin to profile'}
+              >
+                <Pin size={20} strokeWidth={1.5} className={pinnedPostId === selectedRealPost.id ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
               </button>
             </div>
             {(() => {
@@ -2230,12 +2252,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             >
               <SortableContext items={realPosts.map(p => p.id)} strategy={rectSortingStrategy}>
                 <div className="grid grid-cols-3 gap-px bg-white border-t border-gray-100">
-                  {realPosts.map(post => (
+                  {[...realPosts].sort((a, b) => a.id === pinnedPostId ? -1 : b.id === pinnedPostId ? 1 : 0).map(post => (
                     <SortablePostCell
                       key={post.id}
                       post={post}
                       isDraggingAny={isDraggingPost}
                       likeCount={realPostLikeCounts[post.id] ?? 0}
+                      isPinned={post.id === pinnedPostId}
                       onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }}
                     />
                   )).filter(Boolean)}
