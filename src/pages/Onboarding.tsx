@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Check } from 'lucide-react';
-import { users } from '../data/mockData';
+import { followUser, unfollowUser, getDiscoverProfiles, type DiscoverProfile } from '../lib/supabase';
 
 const interests = [
   { id: 'cities', label: 'Cities', emoji: '🏙️' },
@@ -11,7 +11,7 @@ const interests = [
   { id: 'fashion', label: 'Fashion', emoji: '👗' },
   { id: 'hotels', label: 'Hotels', emoji: '🏨' },
   { id: 'nightlife', label: 'Nightlife', emoji: '🌙' },
-  { id: 'cafes', label: 'Cafés', emoji: '☕' },
+  { id: 'cafes', label: 'Cafes', emoji: '☕' },
   { id: 'beaches', label: 'Beaches', emoji: '🌊' },
   { id: 'shopping', label: 'Shopping', emoji: '🛍️' },
   { id: 'events', label: 'Events', emoji: '🎭' },
@@ -19,26 +19,40 @@ const interests = [
 
 interface OnboardingProps {
   firstName: string;
+  currentUserId: string;
   onComplete: (followingCount: number) => void;
 }
 
-export default function Onboarding({ firstName, onComplete }: OnboardingProps) {
+export default function Onboarding({ firstName, currentUserId, onComplete }: OnboardingProps) {
   const [step, setStep] = useState<'interests' | 'follow'>('interests');
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
+  const [suggestedUsers, setSuggestedUsers] = useState<DiscoverProfile[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
-  const suggestedUsers = users.filter(u => ['user-2', 'user-3', 'user-4', 'user-5'].includes(u.id));
+  useEffect(() => {
+    setLoadingUsers(true);
+    getDiscoverProfiles(currentUserId).then(profiles => {
+      setSuggestedUsers(profiles.slice(0, 4));
+      setLoadingUsers(false);
+    });
+  }, [currentUserId]);
 
   const toggleInterest = (id: string) => {
     setSelectedInterests(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
-  const toggleFollow = (userId: string) => {
+  const toggleFollow = async (userId: string) => {
     setFollowing(prev => {
       const next = new Set(prev);
       if (next.has(userId)) next.delete(userId); else next.add(userId);
       return next;
     });
+    if (following.has(userId)) {
+      await unfollowUser(currentUserId, userId);
+    } else {
+      await followUser(currentUserId, userId);
+    }
   };
 
   if (step === 'interests') {
@@ -80,18 +94,23 @@ export default function Onboarding({ firstName, onComplete }: OnboardingProps) {
         <p className="text-slate-500 text-sm">Get inspired by people with great taste</p>
       </div>
       <div className="space-y-3 flex-1">
-        {suggestedUsers.map(user => {
+        {loadingUsers ? (
+          <div className="flex justify-center py-8">
+            <div className="w-6 h-6 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin" />
+          </div>
+        ) : suggestedUsers.map(user => {
           const isFollowing = following.has(user.id);
           return (
             <div key={user.id} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50">
-              <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" style={user.avatarPosition ? { objectPosition: user.avatarPosition } : {}} />
+              {user.avatarUrl
+                ? <img src={user.avatarUrl} alt={user.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
+                : <div className="w-12 h-12 rounded-full bg-slate-200 flex-shrink-0 flex items-center justify-center text-lg font-bold text-slate-400">{user.name?.[0]}</div>
+              }
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
                   <p className="text-sm font-semibold text-slate-900 truncate">{user.name}</p>
-                  {user.verified && <span className="text-blue-500 text-xs">✓</span>}
                 </div>
                 <p className="text-xs text-slate-400">@{user.username}</p>
-                <p className="text-xs text-slate-500 truncate mt-0.5">{user.bio}</p>
               </div>
               <button onClick={() => toggleFollow(user.id)}
                 className={`px-4 py-1.5 rounded-full text-xs font-semibold shrink-0 transition-all flex items-center gap-1 ${isFollowing ? 'bg-slate-200 text-slate-600' : 'bg-slate-900 text-white'}`}>

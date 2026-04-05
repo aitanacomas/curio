@@ -13,59 +13,6 @@ const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
 const MapView = lazy(() => import('../components/MapView'));
 
-// Mock comments per post
-const mockComments: Record<string, { userId: string; text: string; time: string }[]> = {
-  'feed-9': [
-    { userId: 'user-1', text: 'that corridor photo is unreal. i need to go back', time: '55m' },
-    { userId: 'user-5', text: 'the bar is genuinely one of the most beautiful rooms i have ever been in', time: '40m' },
-    { userId: 'user-6', text: 'those cocktails with the rose petal… obsessed', time: '28m' },
-    { userId: 'user-7', text: 'adding this to my madrid list immediately', time: '15m' },
-  ],
-  'feed-8': [
-    { userId: 'user-2', text: 'the crystallised porsche stopped me in my tracks. daniel arsham is on another level', time: '15m' },
-    { userId: 'user-5', text: "i don't believe in god but she doesn't mind is everything to me", time: '12m' },
-    { userId: 'user-6', text: 'moco london is so underrated compared to the amsterdam one, glad people are going', time: '8m' },
-    { userId: 'user-7', text: 'adding this to my london list immediately', time: '4m' },
-  ],
-  'feed-7': [
-    { userId: 'user-5', text: 'bodega is SO good, that steak taco is unreal', time: '25m' },
-    { userId: 'user-8', text: 'the ferry view on a clear day is one of my favourite things in the world', time: '18m' },
-    { userId: 'user-6', text: "bob's donuts at the end of a full day is exactly the right call", time: '10m' },
-    { userId: 'user-7', text: 'sfmoma rooftop terrace at golden hour?? dying', time: '5m' },
-  ],
-  'feed-6': [
-    { userId: 'user-5', text: 'Museum Garage is one of my favourite buildings in the US, period', time: '2h' },
-    { userId: 'user-8', text: 'the sneaker lab!! I walked past it 3 times before I found the entrance lol', time: '1h' },
-    { userId: 'user-6', text: 'bigface is literally the only reason i go to the design district', time: '52m' },
-    { userId: 'user-7', text: "need to go to ksubi next time I'm in miami", time: '30m' },
-  ],
-  'feed-1': [
-    { userId: 'user-7', text: 'Casa Simera es un sueño, la mejor terraza de la ciudad', time: '1h' },
-    { userId: 'user-5', text: 'Latte Latte changed my life honestly. That flat white is no joke', time: '45m' },
-    { userId: 'user-6', text: 'The guava roll at Rosetta… I think about it weekly', time: '30m' },
-    { userId: 'user-8', text: 'Malcriado has such a vibe, adding it to my cdmx list immediately', time: '20m' },
-  ],
-  'feed-2': [
-    { userId: 'user-6', text: 'Booked for next Tuesday already 😂', time: '22h' },
-    { userId: 'user-5', text: 'The natural wine list alone is worth it', time: '18h' },
-    { userId: 'user-8', text: 'The terrace at golden hour is something else', time: '12h' },
-  ],
-  'feed-3': [
-    { userId: 'user-8', text: 'Late March is peak — went last year and it was surreal', time: '3d' },
-    { userId: 'user-5', text: 'Put it on my spring Japan trip list!', time: '2d' },
-    { userId: 'user-6', text: 'The light through the blossoms at dusk 🥹', time: '1d' },
-  ],
-  'feed-4': [
-    { userId: 'user-6', text: 'The latte art really does take 10 mins 😍', time: '5d' },
-    { userId: 'user-7', text: 'Worth every minute of the queue', time: '4d' },
-    { userId: 'user-5', text: 'Queue starts at 7am btw 😅', time: '3d' },
-  ],
-  'feed-5': [
-    { userId: 'user-8', text: 'The rooftop terrace at sunset is unreal', time: '6d' },
-    { userId: 'user-6', text: 'Stayed here in February — 10/10 would go back', time: '6d' },
-    { userId: 'user-5', text: 'The restaurant downstairs is equally good', time: '5d' },
-  ],
-};
 
 const mockDMs: Record<string, { from: string; text: string; time: string; mine?: boolean }[]> = {
   'user-2': [
@@ -260,6 +207,15 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeConversationId]);
+
+  // Load comments for the selected post detail view
+  useEffect(() => {
+    if (!selectedPost) return;
+    if (commentsMap[selectedPost.id]) return;
+    getPostComments(selectedPost.id).then(comments => {
+      setCommentsMap(prev => ({ ...prev, [selectedPost.id]: comments }));
+    });
+  }, [selectedPost?.id]);
 
   const toggleLike = (id: string) => {
     setFeed(prev => prev.map(item =>
@@ -689,7 +645,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
     const user = getUserById(selectedPost.userId);
     const postPlaces = getPostPlaces(selectedPost);
     const centerPlace = postPlaces[0];
-    const comments = mockComments[selectedPost.id] ?? [];
+    const comments = commentsMap[selectedPost.id] ?? [];
 
     return (
       <>
@@ -826,15 +782,18 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
             )}
             {comments.length > 0 && (
               <div className="space-y-3 mb-4">
-                {(showAllComments ? comments : comments.slice(0, 2)).map((c, i) => {
-                  const commenter = getUserById(c.userId);
+                {(showAllComments ? comments : comments.slice(0, 2)).map((c) => {
+                  const dateLabel = new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                   return (
-                    <div key={i} className="flex items-start gap-2.5">
-                      <img src={commenter.avatar} alt={commenter.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" style={{ objectPosition: commenter.avatarPosition ?? 'top' }} />
+                    <div key={c.id} className="flex items-start gap-2.5">
+                      {c.profile.avatarUrl
+                        ? <img src={c.profile.avatarUrl} alt={c.profile.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                        : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0 mt-0.5 flex items-center justify-center text-[10px] font-bold text-gray-400">{c.profile.name?.[0]}</div>
+                      }
                       <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl px-3 py-2.5">
                         <div className="flex items-baseline gap-1.5">
-                          <p className="text-xs font-semibold text-gray-900">{commenter.name.split(' ')[0]}</p>
-                          <p className="text-[10px] text-gray-400">{c.time}</p>
+                          <p className="text-xs font-semibold text-gray-900">{c.profile.name.split(' ')[0]}</p>
+                          <p className="text-[10px] text-gray-400">{dateLabel}</p>
                         </div>
                         <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
                       </div>
@@ -856,8 +815,18 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                 placeholder="Add a comment…"
                 className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
               />
-              {commentText.trim() && (
-                <button onClick={() => setCommentText('')} className="text-xs font-bold text-gray-900">Post</button>
+              {commentText.trim() && appUser?.id && (
+                <button
+                  onClick={async () => {
+                    const text = commentText.trim();
+                    setCommentText('');
+                    const newComment = await addComment(appUser.id, selectedPost.id, text);
+                    if (newComment) {
+                      setCommentsMap(prev => ({ ...prev, [selectedPost.id]: [...(prev[selectedPost.id] ?? []), newComment] }));
+                    }
+                  }}
+                  className="text-xs font-bold text-gray-900"
+                >Post</button>
               )}
             </div>
           </div>

@@ -153,6 +153,7 @@ export default function App() {
         <div className="w-full max-w-sm bg-white min-h-screen relative shadow-2xl overflow-y-auto">
           <Onboarding
             firstName={appUser.name.split(' ')[0]}
+            currentUserId={appUser.id}
             onComplete={handleOnboardingComplete}
           />
         </div>

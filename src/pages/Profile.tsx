@@ -5,7 +5,7 @@ import { SortableContext, rectSortingStrategy, verticalListSortingStrategy, useS
 import { CSS } from '@dnd-kit/utilities';
 import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
-import { currentUser, collections, myVisitedPlaceIds, places, users, feedItems } from '../data/mockData';
+import { currentUser, collections, places, users } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
@@ -71,36 +71,11 @@ const MapView = lazy(() => import('../components/MapView'));
 
 type ProfileTab = 'Posts' | 'Map' | 'Collections';
 
-const myPosts = feedItems.filter(f => f.userId === 'user-1');
-
 const categoryEmoji: Record<string, string> = {
   restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
   hotel: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
   shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
   street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
-};
-
-const mockComments: Record<string, { userId: string; text: string; time: string }[]> = {
-  'feed-9': [
-    { userId: 'user-1', text: 'that corridor photo is unreal. i need to go back', time: '55m' },
-    { userId: 'user-5', text: 'the bar is genuinely one of the most beautiful rooms i have ever been in', time: '40m' },
-  ],
-  'feed-8': [
-    { userId: 'user-2', text: 'the crystallised porsche stopped me in my tracks', time: '15m' },
-    { userId: 'user-5', text: "i don't believe in god but she doesn't mind is everything to me", time: '12m' },
-  ],
-  'feed-7': [
-    { userId: 'user-5', text: 'bodega is SO good, that steak taco is unreal', time: '25m' },
-    { userId: 'user-8', text: 'the ferry view on a clear day is one of my favourite things in the world', time: '18m' },
-  ],
-  'feed-6': [
-    { userId: 'user-5', text: 'Museum Garage is one of my favourite buildings in the US, period', time: '2h' },
-    { userId: 'user-8', text: 'the sneaker lab!! I walked past it 3 times before I found the entrance lol', time: '1h' },
-  ],
-  'feed-1': [
-    { userId: 'user-7', text: 'Casa Simera es un sueño, la mejor terraza de la ciudad', time: '1h' },
-    { userId: 'user-5', text: 'Latte Latte changed my life honestly. That flat white is no joke', time: '45m' },
-  ],
 };
 
 function SortablePostCell({ post, isDraggingAny, onClick }: { post: RealPost; isDraggingAny: boolean; onClick: () => void }) {
@@ -189,7 +164,7 @@ function SortableEditPlace({ place, i, total, isExpanded, onToggle, onRemove, on
           />
           <div className="flex gap-2 overflow-x-auto -mx-5 px-5" style={{ scrollbarWidth: 'none' }}>
             {([
-              ['restaurant','🍽️','Restaurant'],['cafe','☕','Café'],['treats','🍰','Treats'],
+              ['restaurant','🍽️','Restaurant'],['cafe','☕','Cafe'],['treats','🍰','Treats'],
               ['bar','🍸','Bar'],['nightlife','🎵','Nightlife'],['food','🍕','Food'],
               ['hotel','🏨','Stay'],['landmark','🏛️','Landmark'],['art','🎨','Art'],
               ['nature','🌿','Nature'],['beach','🏖️','Beach'],['shop','🛍️','Shop'],
@@ -329,6 +304,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [postCollabSearch, setPostCollabSearch] = useState('');
   const [postCollabResults, setPostCollabResults] = useState<FollowProfile[]>([]);
   const [invitingPostCollab, setInvitingPostCollab] = useState<string | null>(null);
+  const [profileLinkCopied, setProfileLinkCopied] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('curio_notifs') !== 'false');
 
   useEffect(() => {
     if (appUser && !appUser.isDemo) {
@@ -464,17 +442,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     });
   }, [showSaveAllPicker]);
 
-  const visitedPlaces = places.filter(p => myVisitedPlaceIds.includes(p.id));
+  const visitedPlaces = realPosts.flatMap(p => p.places).filter(pl => pl.lat != null && pl.lng != null);
   const user = currentUser;
   const myCollections = collections.filter(c => c.curatorId === 'user-1');
   const otherUsers = users.filter(u => u.id !== 'user-1');
 
-  // Compute accurate stats from posts only (places actually visited & shared)
-  const myPostedPlaceIds = new Set(myPosts.flatMap(p => p.placeIds ?? [p.placeId]));
-  const myPostedPlaces = places.filter(p => myPostedPlaceIds.has(p.id));
-  const myPostedCountries = new Set(myPostedPlaces.map(p => p.country));
-  const actualPlacesCount = myPostedPlaceIds.size;
-  const actualCountriesCount = myPostedCountries.size;
+  // Compute accurate stats from real posts
+  const actualPlacesCount = new Set(realPosts.flatMap(p => p.places.map(pl => pl.id))).size;
+  const actualCountriesCount = new Set(realPosts.flatMap(p => p.places.map(pl => pl.country)).filter(Boolean)).size;
 
   const isNewUser = appUser?.isDemo === false;
   const displayUser = isNewUser && appUser ? {
@@ -1605,7 +1580,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     const postUser = getUserById(selectedPost.userId);
     const postPlaces = getPostPlaces(selectedPost);
     const centerPlace = postPlaces[0];
-    const comments = mockComments[selectedPost.id] ?? [];
+    const comments: { userId: string; text: string; time: string }[] = [];
     const isLiked = likedPosts.has(selectedPost.id);
     const isSaved = savedPosts.has(selectedPost.id);
 
@@ -2473,7 +2448,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         {/* Stats */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
-            { value: isNewUser ? realPosts.length : myPosts.length, label: 'Posts', action: null },
+            { value: realPosts.length, label: 'Posts', action: null },
             { value: isNewUser ? (() => { const seen = new Set<string>(); return realPosts.flatMap(p => p.places).filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).length; })() : actualPlacesCount, label: 'Places', action: null },
             { value: isNewUser ? realFollowerCount : displayUser.followersCount, label: 'Followers', action: () => {
               if (isNewUser && appUser) {
@@ -2552,20 +2527,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
           )
         ) : (
-          <div className="grid grid-cols-3 gap-px bg-white">
-            {myPosts.map(post => (
-              <button key={post.id} onClick={() => setSelectedPost(post)} className="aspect-square bg-white relative">
-                <img src={post.images[0]} alt="" className="w-full h-full object-cover" />
-                {post.images.length > 1 && (
-                  <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
-                    <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
-                      <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
-                      <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
-                    </div>
-                  </div>
-                )}
-              </button>
-            ))}
+          <div className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <span className="text-3xl">📍</span>
+            </div>
+            <p className="text-slate-800 font-semibold text-base mb-1.5">No posts yet</p>
+            <p className="text-slate-400 text-sm text-center max-w-[200px] mb-6">Share a place you love and it'll appear here</p>
+            <button onClick={() => onNavigate?.('add')} className="px-6 py-2.5 bg-slate-900 text-white rounded-full text-sm font-semibold">
+              Create first post
+            </button>
           </div>
         )
       )}
@@ -2589,7 +2559,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         const mapPlaces = allPlaces.filter(pl => pl.lat != null && pl.lng != null).map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
         const countriesCount = isNewUser ? new Set(allPlaces.map(pl => pl.country).filter(Boolean)).size : actualCountriesCount;
         const placesCount = isNewUser ? allPlaces.length : actualPlacesCount;
-        const postsCount = isNewUser ? realPosts.length : myPosts.length;
+        const postsCount = realPosts.length;
         const q = mapSearch.trim().toLowerCase();
         const filteredPlaces = q
           ? allPlaces.filter(pl => pl.name.toLowerCase().includes(q) || pl.city.toLowerCase().includes(q) || pl.country.toLowerCase().includes(q))
@@ -2931,8 +2901,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             <div className="px-4 pt-2 space-y-1">
               {[
                 { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); } },
-                { icon: Share2, label: 'Share Profile', action: () => setShowMenu(false) },
-                { icon: Settings, label: 'Settings', action: () => setShowMenu(false) },
+                { icon: Share2, label: 'Share Profile', action: async () => {
+                  setShowMenu(false);
+                  const url = `${window.location.origin}/?u=${displayUser.username}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ title: displayUser.name, text: `Check out ${displayUser.name} on Curio`, url }); } catch {}
+                  } else {
+                    try { await navigator.clipboard.writeText(url); setProfileLinkCopied(true); setTimeout(() => setProfileLinkCopied(false), 2000); } catch {}
+                  }
+                }},
+                { icon: Settings, label: 'Settings', action: () => { setShowMenu(false); setShowSettings(true); } },
                 { icon: Mail, label: 'Messages', action: () => { setShowMenu(false); onOpenMessages?.(); } },
               ].map(item => (
                 <button
@@ -2952,6 +2930,61 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Settings Sheet ── */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[210] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowSettings(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-10">
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-4 border-b border-gray-100">
+              <p className="text-base font-bold text-gray-900">Settings</p>
+              <button onClick={() => setShowSettings(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={14} strokeWidth={2} className="text-gray-600" />
+              </button>
+            </div>
+            <div className="px-5 pt-4 space-y-1">
+              <button
+                onClick={() => { setShowSettings(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setShowEditProfile(true); }}
+                className="w-full flex items-center gap-3 py-3.5 border-b border-gray-50"
+              >
+                <Edit3 size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                <span className="flex-1 text-left text-sm text-gray-900">Edit Profile</span>
+                <ChevronRight size={14} strokeWidth={1.5} className="text-gray-300" />
+              </button>
+              <div className="flex items-center gap-3 py-3.5 border-b border-gray-50">
+                <Bell size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                <span className="flex-1 text-sm text-gray-900">Notifications</span>
+                <button
+                  onClick={() => {
+                    const current = localStorage.getItem('curio_notifs') !== 'false';
+                    localStorage.setItem('curio_notifs', String(!current));
+                    setNotificationsEnabled(!current);
+                  }}
+                  className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${notificationsEnabled ? 'bg-gray-900' : 'bg-gray-200'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${notificationsEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <button
+                onClick={() => { setShowSettings(false); onLogout?.(); }}
+                className="w-full flex items-center gap-3 py-3.5 text-red-500"
+              >
+                <LogOut size={16} strokeWidth={1.5} className="flex-shrink-0" />
+                <span className="text-sm font-medium">Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileLinkCopied && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[500] bg-gray-900 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg">
+          Link copied!
         </div>
       )}
 
