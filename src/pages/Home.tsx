@@ -1155,6 +1155,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                       const catEmoji: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', dining: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙', beach: '🏖️', sports: '🎾', wellness: '💆', street: '🏙️', event: '🎟️' };
                       return (
                       <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
+                        <button onClick={() => setSelectedPlacePage(place)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
                         {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
@@ -1164,6 +1165,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                           </p>
                           {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji[place.category.toLowerCase()] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
                         </div>
+                        </button>
                         {appUser && !appUser.isDemo && (
                           <button
                             onClick={async () => {
@@ -1700,6 +1702,10 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
             </div>
           </div>
         </div>
+      )}
+
+      {selectedPlacePage && (
+        <PlacePage place={selectedPlacePage} onClose={() => setSelectedPlacePage(null)} />
       )}
     </div>
   );

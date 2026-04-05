@@ -77,6 +77,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [query, setQuery] = useState('');
   const [userResults, setUserResults] = useState<FollowProfile[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<FlatPlace | null>(null);
+  const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -320,7 +321,13 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
           userId={appUser?.id}
           userAvatar={appUser?.avatar}
           onViewUser={(uid) => { setSelectedPlace(null); setViewingUserId(uid); }}
+          onOpenPlacePage={pl => setSelectedPlacePage(pl)}
         />
+      )}
+
+      {/* Place Page — rendered at page level so it's not clipped by PostModal */}
+      {selectedPlacePage && (
+        <PlacePage place={selectedPlacePage} onClose={() => setSelectedPlacePage(null)} />
       )}
     </div>
   );
@@ -374,7 +381,7 @@ const modalCatEmoji: Record<string, string> = {
   sports: '🎾', wellness: '💆', street: '🏙️', event: '🎟️', food: '🍕',
 };
 
-function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, userId, userAvatar, onViewUser }: {
+function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, userId, userAvatar, onViewUser, onOpenPlacePage }: {
   place: FlatPlace;
   isFollowing: boolean;
   isOwnPost: boolean;
@@ -383,6 +390,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
   userId?: string;
   userAvatar?: string | null;
   onViewUser?: (userId: string) => void;
+  onOpenPlacePage?: (place: RealPostPlace) => void;
 }) {
   const { post, indexInPost } = place;
   const [currentIndex, setCurrentIndex] = useState(indexInPost);
@@ -415,7 +423,6 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
   const [postSaveColIds, setPostSaveColIds] = useState<Set<string>>(new Set());
   const [allPlacesSaved, setAllPlacesSaved] = useState(false);
   const shareSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const initials = post.profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   // Deduplicate places by name
@@ -681,7 +688,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                       key={pl.id}
                       className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3"
                     >
-                      <button onClick={() => setSelectedPlacePage(pl)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                      <button onClick={() => onOpenPlacePage?.(pl)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
                         {pl.photoUrl
                           ? <img src={pl.photoUrl} alt={pl.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                           : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-xl">{emoji}</span></div>
@@ -1030,13 +1037,6 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
         </div>
       )}
 
-      {/* Place Page overlay */}
-      {selectedPlacePage && (
-        <PlacePage
-          place={selectedPlacePage}
-          onClose={() => setSelectedPlacePage(null)}
-        />
-      )}
     </div>
   );
 }
