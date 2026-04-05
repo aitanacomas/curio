@@ -49,7 +49,7 @@ interface FlatPlace {
 }
 
 // World cities rotated through for global discover results
-const WORLD_CITIES = [
+const WORLD_CITIES_BASE = [
   'Tokyo', 'Paris', 'New York', 'London', 'Mexico City',
   'Barcelona', 'Rome', 'Bangkok', 'Sydney', 'Dubai',
   'Istanbul', 'Amsterdam', 'Singapore', 'Buenos Aires', 'Lisbon',
@@ -59,6 +59,15 @@ const WORLD_CITIES = [
   'Taipei', 'Ho Chi Minh City', 'Nairobi', 'Lagos', 'Bogotá',
   'Athens', 'Budapest', 'Reykjavik', 'Dubrovnik', 'Florence',
 ];
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // Category searches paired with rotating world cities (8 per page)
 const DEFAULT_CATEGORY_SEARCHES = [
@@ -118,6 +127,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [discoverTextToken, setDiscoverTextToken] = useState<string | null>(null);
   const [discoverDefaultTokens, setDiscoverDefaultTokens] = useState<(string | null)[]>([]);
   const [discoverCityPage, setDiscoverCityPage] = useState(0);
+  // Shuffled once per mount so every refresh shows different places
+  const WORLD_CITIES = useMemo(() => shuffleArray(WORLD_CITIES_BASE), []);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
