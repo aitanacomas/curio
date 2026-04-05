@@ -87,6 +87,9 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const discoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [discoverResults, setDiscoverResults] = useState<RealPostPlace[]>([]);
   const [loadingDiscover, setLoadingDiscover] = useState(false);
+  const [loadingMoreDiscover, setLoadingMoreDiscover] = useState(false);
+  const [discoverGeoState, setDiscoverGeoState] = useState<{ lat: number; lng: number; city: string; country: string; radius: number } | null>(null);
+  const [discoverTextToken, setDiscoverTextToken] = useState<string | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
@@ -123,105 +126,132 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [query, appUser?.id]);
 
-  // Google Places discover fallback — fires when query has text
+  const GEO_TYPES = new Set(['locality', 'administrative_area_level_1', 'administrative_area_level_2', 'country', 'political', 'colloquial_area', 'continent']);
+  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location';
+  const HEADERS = { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': FIELD_MASK };
+
+  const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace => {
+    const comps: any[] = p.addressComponents ?? [];
+    const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
+    const city = cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1');
+    const country = countryOverride || find('country');
+    const neighborhood = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
+    const category = googleTypesToCategory(p.types ?? []);
+    const photoName = p.photos?.[0]?.name;
+    const photoUrl = photoName ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
+    return { id: p.id ?? `discover_${Math.random()}`, name: p.displayName?.text ?? '', category, neighborhood: neighborhood || null, city, country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null };
+  };
+
+  const nearbyGroups = [
+    ['restaurant', 'cafe', 'bar', 'night_club', 'bakery'],
+    ['lodging', 'resort_hotel'],
+    ['museum', 'art_gallery', 'tourist_attraction', 'amusement_park', 'zoo'],
+    ['spa', 'shopping_mall', 'park', 'clothing_store'],
+  ];
+
+  const fetchNearby = async (lat: number, lng: number, radius: number, city: string, country: string): Promise<RealPostPlace[]> => {
+    const results = await Promise.all(nearbyGroups.map(types =>
+      fetch('https://places.googleapis.com/v1/places:searchNearby', {
+        method: 'POST', headers: HEADERS,
+        body: JSON.stringify({ locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } }, includedTypes: types, maxResultCount: 4, languageCode: 'en', rankPreference: 'POPULARITY' }),
+      }).then(r => r.json()).then(d => (d.places ?? []).slice(0, 4).map((p: any) => mapPlace(p, city, country))).catch(() => [])
+    ));
+    // Interleave results so categories mix: take one from each group in turn
+    const maxLen = Math.max(...results.map(r => r.length));
+    const interleaved: RealPostPlace[] = [];
+    for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) interleaved.push(r[i]); });
+    return interleaved.filter(p => p.name);
+  };
+
+  // Category → Google Places type groups for direct category browsing
+  const categoryToGoogleTypes: Record<string, string[]> = {
+    restaurant: ['restaurant'], cafe: ['cafe', 'coffee_shop'], bar: ['bar', 'pub', 'wine_bar'],
+    treats: ['bakery', 'dessert_shop', 'ice_cream_shop'], nightlife: ['night_club', 'karaoke'],
+    hotel: ['lodging', 'resort_hotel'], nature: ['park', 'national_park', 'hiking_area'],
+    beach: ['beach'], sports: ['gym', 'sports_complex', 'fitness_center'],
+    wellness: ['spa', 'massage', 'yoga_studio'], shop: ['shopping_mall', 'clothing_store'],
+    art: ['art_gallery', 'museum'], landmark: ['tourist_attraction', 'historical_landmark'],
+    experience: ['amusement_park', 'zoo', 'aquarium'],
+  };
+
+  // Google Places discover — fires when query has text OR when category chip is active
   useEffect(() => {
     if (discoverTimerRef.current) clearTimeout(discoverTimerRef.current);
-    if (!query.trim() || query.trim().length < 2) { setDiscoverResults([]); return; }
+    const hasQuery = query.trim().length >= 2;
+    const hasCategoryFilter = activeCategory !== 'all';
 
-    const GEO_TYPES = new Set(['locality', 'administrative_area_level_1', 'administrative_area_level_2', 'country', 'political', 'colloquial_area', 'continent']);
-
-    const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace => {
-      const comps: any[] = p.addressComponents ?? [];
-      const find = (...types: string[]) => {
-        const c = comps.find((c: any) => types.some(t => c.types?.includes(t)));
-        return c ? (c.longText || c.shortText || '') : '';
-      };
-      const city = cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1');
-      const country = countryOverride || find('country');
-      const neighborhood = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
-      const category = googleTypesToCategory(p.types ?? []);
-      const photoName = p.photos?.[0]?.name;
-      const photoUrl = photoName
-        ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}`
-        : null;
-      return {
-        id: p.id ?? `discover_${Math.random()}`,
-        name: p.displayName?.text ?? '',
-        category,
-        neighborhood: neighborhood || null,
-        city,
-        country,
-        photoUrl: photoUrl ?? '',
-        position: 0,
-        lat: p.location?.latitude ?? null,
-        lng: p.location?.longitude ?? null,
-      };
-    };
+    if (!hasQuery && !hasCategoryFilter) { setDiscoverResults([]); setDiscoverGeoState(null); setDiscoverTextToken(null); return; }
 
     discoverTimerRef.current = setTimeout(async () => {
       setLoadingDiscover(true);
+      setDiscoverGeoState(null);
+      setDiscoverTextToken(null);
       try {
-        // First: text search to find what the user typed
-        const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-            'X-Goog-FieldMask': 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location',
-          },
-          body: JSON.stringify({ textQuery: query.trim(), languageCode: 'en' }),
-        });
-        const data = await res.json();
-        const raw: any[] = data.places ?? [];
-
-        // Detect if the top result is a city/region (not a specific venue)
-        const top = raw[0];
-        const isGeo = top && (top.types ?? []).some((t: string) => GEO_TYPES.has(t));
-
-        if (isGeo && top.location) {
-          // It's a destination — search for popular places nearby instead
-          const { latitude, longitude } = top.location;
-          // Extract city/country from the geo result for labelling
-          const comps: any[] = top.addressComponents ?? [];
-          const find = (...types: string[]) => {
-            const c = comps.find((c: any) => types.some(t => c.types?.includes(t)));
-            return c ? (c.longText || c.shortText || '') : '';
-          };
-          const cityLabel = top.displayName?.text || find('locality') || find('administrative_area_level_1');
-          const countryLabel = find('country');
-
-          const nearbyRes = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location',
-            },
-            body: JSON.stringify({
-              locationRestriction: { circle: { center: { latitude, longitude }, radius: 5000 } },
-              includedTypes: ['restaurant', 'cafe', 'museum', 'tourist_attraction', 'lodging', 'bar', 'night_club', 'spa', 'park', 'shopping_mall'],
-              maxResultCount: 10,
-              languageCode: 'en',
-              rankPreference: 'POPULARITY',
-            }),
+        if (hasQuery) {
+          // Text search path
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST', headers: HEADERS,
+            body: JSON.stringify({ textQuery: query.trim(), languageCode: 'en' }),
           });
-          const nearbyData = await nearbyRes.json();
-          const places: RealPostPlace[] = (nearbyData.places ?? [])
-            .map((p: any) => mapPlace(p, cityLabel, countryLabel))
-            .filter((p: RealPostPlace) => p.name);
-          setDiscoverResults(places);
+          const data = await res.json();
+          const raw: any[] = data.places ?? [];
+          const top = raw[0];
+          const isGeo = top && (top.types ?? []).some((t: string) => GEO_TYPES.has(t));
+
+          if (isGeo && top.location) {
+            const { latitude: lat, longitude: lng } = top.location;
+            const comps: any[] = top.addressComponents ?? [];
+            const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
+            const city = top.displayName?.text || find('locality') || find('administrative_area_level_1');
+            const country = find('country');
+            const radius = 5000;
+            setDiscoverGeoState({ lat, lng, city, country, radius });
+            setDiscoverResults(await fetchNearby(lat, lng, radius, city, country));
+          } else {
+            setDiscoverTextToken(data.nextPageToken ?? null);
+            setDiscoverResults(raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(p => p.name));
+          }
         } else {
-          // Specific venues — use the text search results directly
-          const places: RealPostPlace[] = raw.slice(0, 8)
-            .map((p: any) => mapPlace(p))
-            .filter((p: RealPostPlace) => p.name);
-          setDiscoverResults(places);
+          // Category chip path — search for top places of that type globally
+          const googleTypes = categoryToGoogleTypes[activeCategory] ?? ['tourist_attraction'];
+          const textQuery = `popular ${activeCategory} places`;
+          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST', headers: HEADERS,
+            body: JSON.stringify({ textQuery, includedType: googleTypes[0], languageCode: 'en' }),
+          });
+          const data = await res.json();
+          setDiscoverTextToken(data.nextPageToken ?? null);
+          setDiscoverResults((data.places ?? []).slice(0, 10).map((p: any) => mapPlace(p)).filter((p: RealPostPlace) => p.name));
         }
       } catch { setDiscoverResults([]); }
       finally { setLoadingDiscover(false); }
-    }, 600);
+    }, 400);
     return () => { if (discoverTimerRef.current) clearTimeout(discoverTimerRef.current); };
-  }, [query]);
+  }, [query, activeCategory]);
+
+  const loadMoreDiscover = async () => {
+    setLoadingMoreDiscover(true);
+    try {
+      if (discoverGeoState) {
+        const { lat, lng, city, country, radius } = discoverGeoState;
+        const nextRadius = radius + 5000;
+        setDiscoverGeoState(s => s ? { ...s, radius: nextRadius } : null);
+        const more = await fetchNearby(lat, lng, nextRadius, city, country);
+        const existingIds = new Set(discoverResults.map(p => p.id));
+        setDiscoverResults(prev => [...prev, ...more.filter(p => !existingIds.has(p.id))]);
+      } else if (discoverTextToken) {
+        const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST', headers: HEADERS,
+          body: JSON.stringify({ textQuery: query.trim(), languageCode: 'en', pageToken: discoverTextToken }),
+        });
+        const data = await res.json();
+        setDiscoverTextToken(data.nextPageToken ?? null);
+        const more: RealPostPlace[] = (data.places ?? []).map((p: any) => mapPlace(p)).filter((p: RealPostPlace) => p.name);
+        setDiscoverResults(prev => [...prev, ...more]);
+      }
+    } catch {}
+    finally { setLoadingMoreDiscover(false); }
+  };
 
   // Stable per-place pseudo-random tiebreaker (no Math.random in sort)
   const stableNoise = (id: string): number => {
@@ -278,6 +308,10 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const categoryFiltered = activeCategory === 'all'
     ? tabFiltered
     : tabFiltered.filter(p => p.category === activeCategory);
+
+  const filteredDiscover = activeCategory === 'all'
+    ? discoverResults
+    : discoverResults.filter(p => p.category === activeCategory);
 
   const filtered = query
     ? categoryFiltered.filter(p =>
@@ -422,8 +456,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                 </div>
               )}
 
-              {/* Empty state (no query or no curio results without a query) */}
-              {filtered.length === 0 && query.trim().length < 2 && (
+              {/* Empty state — only when no search and no category filter */}
+              {filtered.length === 0 && query.trim().length < 2 && activeCategory === 'all' && (
                 <div className="flex flex-col items-center justify-center py-24 text-center">
                   <p className="text-3xl mb-3">🌍</p>
                   <p className="text-sm font-semibold text-gray-900 mb-1">
@@ -435,8 +469,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                 </div>
               )}
 
-              {/* Google Places discover — always shown when searching */}
-              {query.trim().length >= 2 && (
+              {/* Google Places discover — shown when searching or category chip active */}
+              {(query.trim().length >= 2 || activeCategory !== 'all') && (
                 loadingDiscover ? (
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">Discover places</p>
@@ -446,11 +480,11 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                       ))}
                     </div>
                   </div>
-                ) : discoverResults.length > 0 ? (
+                ) : filteredDiscover.length > 0 ? (
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 mb-3">Discover places</p>
                     <div className="grid grid-cols-2 gap-2">
-                      {discoverResults.map(place => (
+                      {filteredDiscover.map(place => (
                         <button
                           key={place.id}
                           onClick={() => setSelectedPlacePage(place)}
@@ -458,9 +492,14 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                         >
                           {place.photoUrl
                             ? <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
-                            : <div className="w-full h-full flex items-center justify-center text-4xl">📍</div>
+                            : <div className="w-full h-full flex items-center justify-center text-4xl">{categoryEmoji[place.category] ?? '📍'}</div>
                           }
                           <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+                          {/* Category badge */}
+                          <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1">
+                            <span className="text-[11px]">{categoryEmoji[place.category] ?? '📍'}</span>
+                            <span className="text-white text-[10px] font-medium capitalize">{place.category}</span>
+                          </div>
                           <div className="absolute bottom-0 left-0 right-0 p-2.5">
                             <p className="text-white text-xs font-bold leading-tight truncate">{place.name}</p>
                             {(place.city || place.country) && (
@@ -470,6 +509,18 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
                         </button>
                       ))}
                     </div>
+                    {/* Load more */}
+                    {(discoverGeoState || discoverTextToken) && (
+                      <button
+                        onClick={loadMoreDiscover}
+                        disabled={loadingMoreDiscover}
+                        className="w-full mt-3 py-3 rounded-2xl border border-gray-200 text-sm font-semibold text-gray-600 flex items-center justify-center gap-2 active:bg-gray-50 disabled:opacity-50"
+                      >
+                        {loadingMoreDiscover ? (
+                          <><div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> Loading...</>
+                        ) : 'Load more places'}
+                      </button>
+                    )}
                   </div>
                 ) : filtered.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-24 text-center">

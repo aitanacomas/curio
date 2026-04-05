@@ -26,6 +26,10 @@ export default function PlacePage({ place, appUser, isSaved, onClose, onToggleSa
   const [activeTab, setActiveTab] = useState<'Posts' | 'Photos'>('Posts');
   const [posts, setPosts] = useState<RealPost[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  // Auto-switch to Photos when no curio posts exist
+  useEffect(() => {
+    if (!loadingPosts && posts.length === 0) setActiveTab('Photos');
+  }, [loadingPosts, posts.length]);
   const [googlePhotos, setGooglePhotos] = useState<string[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
   const [openNow, setOpenNow] = useState<boolean | null>(null);
