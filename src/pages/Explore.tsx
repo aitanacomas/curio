@@ -174,7 +174,11 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
     const city = normalizeCity(cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1'));
     const country = countryOverride || find('country');
-    const neighborhood = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
+    const sublocal = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
+    const admin2 = find('administrative_area_level_2');
+    const admin3 = find('administrative_area_level_3');
+    // Use admin subdivisions as neighborhood fallback (e.g. Paris arrondissements, Tokyo wards, Istanbul districts)
+    const neighborhood = sublocal || [admin3, admin2].find(v => v && v.toLowerCase() !== city.toLowerCase()) || '';
     const category = googleTypesToCategory(p.types ?? []);
     const photoName = p.photos?.[0]?.name;
     const photoUrl = photoName ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
