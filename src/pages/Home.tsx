@@ -3,7 +3,7 @@ import { Heart, MessageCircle, Send, MapPin, ArrowLeft, Bookmark, BookmarkCheck,
 import type { Tab } from '../types/index';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { feedItems, users, places, collections } from '../data/mockData';
+import { users, places } from '../data/mockData';
 import type { FeedItem, User, Collection, Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
@@ -50,7 +50,6 @@ interface Props {
 
 export default function Home({ showMessages = false, messagesTargetUserId, onMessagesClose, isNewUser, appUser, onNavigate }: Props) {
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
-  const [feed, setFeed] = useState(feedItems);
   const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Set<string>>(new Set(['place-28', 'place-29', 'place-30', 'place-31', 'place-32']));
   const [showMap, setShowMap] = useState(false);
@@ -61,7 +60,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
   const [linkCopied, setLinkCopied] = useState(false);
   const [showInbox, setShowInbox] = useState(showMessages);
   const [saveTarget, setSaveTarget] = useState<{ type: 'post' | 'place'; id: string } | null>(null);
-  const [myCollections, setMyCollections] = useState<Collection[]>(collections.filter(c => c.curatorId === 'user-1'));
   const [collectionSaves, setCollectionSaves] = useState<Record<string, Set<string>>>({});
   const [newListName, setNewListName] = useState('');
   const [showNewList, setShowNewList] = useState(false);
@@ -220,17 +218,14 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
   }, [selectedPost?.id]);
 
   const toggleLike = (id: string) => {
-    setFeed(prev => prev.map(item =>
-      item.id === id
-        ? { ...item, liked: !item.liked, likes: item.liked ? item.likes - 1 : item.likes + 1 }
-        : item
-    ));
+    setSelectedPost(prev => prev && prev.id === id
+      ? { ...prev, liked: !prev.liked, likes: prev.liked ? prev.likes - 1 : prev.likes + 1 }
+      : prev
+    );
   };
 
   const toggleSave = (id: string) => {
-    setFeed(prev => prev.map(item =>
-      item.id === id ? { ...item, saved: !item.saved } : item
-    ));
+    setSelectedPost(prev => prev && prev.id === id ? { ...prev, saved: !prev.saved } : prev);
   };
 
   const toggleSavePlace = (placeId: string) => {
@@ -273,25 +268,25 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
         next[collectionId] = set;
         return next;
       });
+      if (saveTarget.type === 'place') {
+        addPlaceToCollection(collectionId, saveTarget.id);
+      }
     }
     setSaveTarget(null);
     setShowNewList(false);
     setNewListName('');
   };
 
-  const createAndSave = () => {
-    if (!newListName.trim() || !saveTarget) return;
-    const newCol: Collection = {
-      id: `col-${Date.now()}`,
-      name: newListName.trim(),
-      emoji: '📌',
-      placeIds: [],
-      coverImage: '',
-      description: '',
-      curatorId: 'user-1',
-    };
-    setMyCollections(prev => [...prev, newCol]);
-    setCollectionSaves(prev => ({ ...prev, [newCol.id]: new Set([saveTarget.id]) }));
+  const createAndSave = async () => {
+    if (!newListName.trim() || !saveTarget || !appUser?.id) return;
+    const { data: newCol } = await createCollection(appUser.id, { name: newListName.trim(), emoji: '📌', description: '', cover_image_url: null });
+    if (newCol) {
+      setUserCollections(prev => [...prev, newCol]);
+      setCollectionSaves(prev => ({ ...prev, [newCol.id]: new Set([saveTarget.id]) }));
+      if (saveTarget.type === 'place') {
+        addPlaceToCollection(newCol.id, saveTarget.id);
+      }
+    }
     setSaveTarget(null);
     setShowNewList(false);
     setNewListName('');
@@ -520,50 +515,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
     );
   }
 
-  // ── Story Viewer ────────────────────────────────────────────────
-  if (storyUser) {
-    const latestPost = feedItems.find(f => f.userId === storyUser.id);
-    const latestPlace = latestPost ? getPlaceById(latestPost.placeId) : null;
-    return (
-      <div className="bg-black min-h-screen relative">
-        <button
-          onClick={() => setStoryUser(null)}
-          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/20"
-        >
-          <X size={16} strokeWidth={1.5} className="text-white" />
-        </button>
-        {latestPlace && (
-          <img src={latestPlace.image} alt="" className="w-full h-full object-cover absolute inset-0 opacity-80" />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30" />
-        {/* Story header */}
-        <div className="absolute top-4 left-4 flex items-center gap-2">
-          <img src={storyUser.avatar} alt={storyUser.name} className="w-9 h-9 rounded-full object-cover object-top border-2 border-white" />
-          <div>
-            <p className="text-white text-sm font-semibold">{storyUser.name}</p>
-            <p className="text-white/70 text-xs">{latestPost?.createdAt}</p>
-          </div>
-        </div>
-        {/* Place info at bottom */}
-        {latestPlace && (
-          <div className="absolute bottom-24 left-4 right-4">
-            <p className="text-white/70 text-xs mb-1">Latest place</p>
-            <p className="text-white text-xl font-bold">{latestPlace.name}</p>
-            <p className="text-white/70 text-sm flex items-center gap-1 mt-0.5">
-              <MapPin size={12} strokeWidth={1.5} /> {latestPlace.city}, {latestPlace.country}
-            </p>
-            <button
-              onClick={() => setStoryUser(null)}
-              className="mt-4 px-5 py-2.5 bg-white text-gray-900 rounded-full text-sm font-bold"
-            >
-              See their map →
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // ── Save Sheet Overlay (shared) ──────────────────────────────────
   const saveSheet = saveTarget ? (
     <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
@@ -584,13 +535,13 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
               <p className="text-sm font-semibold text-gray-900 mt-2">All Saved</p>
               <p className="text-xs text-gray-400">Default</p>
             </button>
-            {myCollections.map(col => {
+            {userCollections.map(col => {
               const isSavedToCol = collectionSaves[col.id]?.has(saveTarget.id);
               return (
                 <button key={col.id} onClick={() => saveToCollection(col.id)} className="text-left">
                   <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
-                    {col.coverImage
-                      ? <img src={col.coverImage} alt={col.name} className="w-full h-full object-cover" />
+                    {col.coverImageUrl
+                      ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
                       : <span className="text-4xl flex items-center justify-center w-full h-full">{col.emoji}</span>
                     }
                     {isSavedToCol && (
@@ -602,7 +553,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                     )}
                   </div>
                   <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
-                  <p className="text-xs text-gray-400">{col.placeIds.length} places</p>
+                  <p className="text-xs text-gray-400">{col.placesCount} places</p>
                 </button>
               );
             })}
@@ -864,31 +815,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
           <Mail size={17} strokeWidth={1.5} className="text-gray-700" />
         </button>
       </div>
-
-      {/* Stories Row — only for demo users */}
-      {!isNewUser && (
-        <div className="bg-white px-4 pt-3 pb-3 border-b border-gray-100">
-          <div className="flex gap-4 overflow-x-auto scrollbar-none">
-            {friends.map(friend => (
-              <button
-                key={friend.id}
-                onClick={() => setStoryUser(friend)}
-                className="flex flex-col items-center gap-1.5 flex-shrink-0"
-              >
-                <div className="w-14 h-14 rounded-full p-0.5 bg-gradient-to-tr from-gray-400 to-gray-600">
-                  <img
-                    src={friend.avatar}
-                    alt={friend.name}
-                    className="w-full h-full rounded-full object-cover border-2 border-white"
-                    style={{ objectPosition: friend.avatarPosition ?? 'top' }}
-                  />
-                </div>
-                <span className="text-xs text-gray-600 font-medium">{friend.name.split(' ')[0]}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Feed */}
       <div className="bg-slate-50 space-y-3 px-3 pt-3 pb-8">
@@ -1255,113 +1181,6 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
           </div>
         )}
 
-        {/* Mock feed — only for demo account */}
-        {!isNewUser && feed.map(item => {
-          const user = getUserById(item.userId);
-          const place = getPlaceById(item.placeId);
-          if (!user || !place) return null;
-
-          const postPlaces = getPostPlaces(item);
-          const friendsSavedUsers = (item.friendsSaved ?? [])
-            .map(id => users.find(u => u.id === id))
-            .filter(Boolean);
-
-          return (
-            <div key={item.id} className="bg-white rounded-3xl overflow-hidden shadow-sm">
-              {/* Post header */}
-              <div className="flex items-start gap-3 px-4 pt-3 pb-2">
-                <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-0.5" style={{ objectPosition: user.avatarPosition ?? 'top' }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 leading-tight">
-                    {user.name}
-                  </p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <button
-                      onClick={() => { setSelectedPost(item); setShowAllComments(false); }}
-                      className="flex items-center gap-1 min-w-0"
-                    >
-                      <MapPin size={10} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                      <p className="text-xs text-gray-500 font-medium truncate">
-                        {postPlaces.length === 1
-                          ? `${postPlaces[0].name} · ${postPlaces[0].city}`
-                          : `${postPlaces[0].name} +${postPlaces.length - 1} · ${postPlaces[0].city}`}
-                      </p>
-                    </button>
-                    {place.bookingAvailable && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setBookingPlace(place); }}
-                        className="flex-shrink-0 text-[10px] font-bold text-gray-700 bg-gray-100 rounded-full px-2 py-0.5"
-                      >
-                        Book
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400 flex-shrink-0">{item.createdAt}</p>
-              </div>
-
-              {/* Carousel — tap to open detail */}
-              <div className="cursor-pointer" onClick={() => { setSelectedPost(item); setShowAllComments(false); }}>
-                <ImageCarousel images={item.images} scales={item.id === 'feed-8' ? [1.02, 1, 1, 1, 1.05] : item.id === 'feed-9' ? [1, 1, 1, 1, 1.07, 1] : undefined} />
-              </div>
-
-              {/* Actions */}
-              <div className="px-4 pt-2 pb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-4">
-                    <button onClick={() => toggleLike(item.id)} className="flex items-center gap-1.5">
-                      <Heart
-                        size={22}
-                        strokeWidth={1.5}
-                        className={item.liked ? 'fill-gray-900 text-gray-900' : 'text-gray-700'}
-                      />
-                      <span className="text-xs text-gray-500">{item.likes.toLocaleString()}</span>
-                    </button>
-                    <button onClick={() => { setSelectedPost(item); setShowAllComments(false); }} className="flex items-center gap-1.5">
-                      <MessageCircle size={22} strokeWidth={1.5} className="text-gray-700" />
-                      <span className="text-xs text-gray-500">{item.comments}</span>
-                    </button>
-                    <button
-                      onClick={() => setShareTarget({ type: 'post', label: item.caption.slice(0, 50) + '…', image: item.images[0] })}
-                    >
-                      <Send size={22} strokeWidth={1.5} className="text-gray-700" />
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => item.saved ? toggleSave(item.id) : setSaveTarget({ type: 'post', id: item.id })}
-                    className={`px-5 py-1.5 rounded-full border text-sm font-semibold transition-colors ${
-                      item.saved ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-900 text-gray-900 bg-white'
-                    }`}
-                  >
-                    {item.saved ? 'Saved' : 'Save'}
-                  </button>
-                </div>
-
-                {/* Friends saved */}
-                {friendsSavedUsers.length > 0 && (
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="flex -space-x-1.5">
-                      {friendsSavedUsers.slice(0, 3).map(friend => (
-                        <img key={friend!.id} src={friend!.avatar} alt={friend!.name} className="w-5 h-5 rounded-full object-cover object-top border border-white" />
-                      ))}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      {friendsSavedUsers.length === 1
-                        ? `${friendsSavedUsers[0]!.name.split(' ')[0]} saved this`
-                        : `${friendsSavedUsers[0]!.name.split(' ')[0]} and ${friendsSavedUsers.length - 1} other${friendsSavedUsers.length > 2 ? 's' : ''} saved this`}
-                    </p>
-                  </div>
-                )}
-
-                {/* Caption */}
-                <p className="text-sm text-gray-700 leading-snug line-clamp-2">{item.caption}</p>
-                <button onClick={() => { setSelectedPost(item); setShowAllComments(false); }} className="text-xs font-semibold text-gray-400 mt-1">
-                  See more
-                </button>
-              </div>
-            </div>
-          );
-        })}
       </div>
 
       {saveSheet}

@@ -2123,3 +2123,109 @@ export async function deletePlanBooking(id: string): Promise<void> {
   const { error } = await supabase.from('plan_bookings').delete().eq('id', id);
   if (error) console.error('[deletePlanBooking]', error.message);
 }
+
+// ── Guides ───────────────────────────────────────────────────────────────────
+
+export interface Guide {
+  id: string;
+  userId: string;
+  planId: string | null;
+  title: string;
+  destination: string | null;
+  description: string | null;
+  coverUrl: string | null;
+  publishedAt: string;
+  profile: {
+    name: string;
+    username: string;
+    avatarUrl: string | null;
+  };
+}
+
+export async function getGuides(): Promise<Guide[]> {
+  try {
+    const { data, error } = await supabase
+      .from('guides')
+      .select('*, profiles!user_id(name, username, avatar_url)')
+      .order('published_at', { ascending: false })
+      .limit(50);
+    if (error) return [];
+    return (data ?? []).map((g: any) => ({
+      id: g.id,
+      userId: g.user_id,
+      planId: g.plan_id ?? null,
+      title: g.title,
+      destination: g.destination ?? null,
+      description: g.description ?? null,
+      coverUrl: g.cover_url ?? null,
+      publishedAt: g.published_at,
+      profile: {
+        name: g.profiles?.name ?? 'Unknown',
+        username: g.profiles?.username ?? '',
+        avatarUrl: g.profiles?.avatar_url ?? null,
+      },
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getUserGuides(userId: string): Promise<Guide[]> {
+  try {
+    const { data, error } = await supabase
+      .from('guides')
+      .select('*, profiles!user_id(name, username, avatar_url)')
+      .eq('user_id', userId)
+      .order('published_at', { ascending: false });
+    if (error) return [];
+    return (data ?? []).map((g: any) => ({
+      id: g.id,
+      userId: g.user_id,
+      planId: g.plan_id ?? null,
+      title: g.title,
+      destination: g.destination ?? null,
+      description: g.description ?? null,
+      coverUrl: g.cover_url ?? null,
+      publishedAt: g.published_at,
+      profile: {
+        name: g.profiles?.name ?? 'Unknown',
+        username: g.profiles?.username ?? '',
+        avatarUrl: g.profiles?.avatar_url ?? null,
+      },
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createGuide(guide: {
+  userId: string;
+  planId: string;
+  title: string;
+  destination?: string;
+  description?: string;
+  coverUrl?: string;
+}): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('guides')
+      .insert({
+        user_id: guide.userId,
+        plan_id: guide.planId,
+        title: guide.title,
+        destination: guide.destination ?? null,
+        description: guide.description ?? null,
+        cover_url: guide.coverUrl ?? null,
+      })
+      .select('id')
+      .single();
+    if (error) return null;
+    return data?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteGuide(guideId: string): Promise<void> {
+  await supabase.from('guides').delete().eq('id', guideId);
+}

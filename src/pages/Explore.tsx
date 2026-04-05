@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import UserProfile from './UserProfile';
 import PlacePage from '../components/PlacePage';
 import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
-import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile } from '../lib/supabase';
+import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, getGuides, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile, type Guide } from '../lib/supabase';
+import GuideDetail from '../components/GuideDetail';
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -65,7 +66,7 @@ const categoryChips = [
   { id: 'event',        label: 'Event',         emoji: '🎟️' },
 ];
 
-type FeedTab = 'For You' | 'Following';
+type FeedTab = 'For You' | 'Following' | 'Guides';
 
 export default function Explore({ onOpenMessages, appUser }: Props) {
   const [posts, setPosts] = useState<RealPost[]>([]);
@@ -80,6 +81,9 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [guides, setGuides] = useState<Guide[]>([]);
+  const [loadingGuides, setLoadingGuides] = useState(false);
+  const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -93,6 +97,12 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
       setLoading(false);
     });
   }, [appUser?.id]);
+
+  useEffect(() => {
+    if (activeTab !== 'Guides') return;
+    setLoadingGuides(true);
+    getGuides().then(g => { setGuides(g); setLoadingGuides(false); });
+  }, [activeTab]);
 
   // Debounced user search
   useEffect(() => {
@@ -211,7 +221,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
 
         {/* Tabs */}
         <div className="flex gap-5 mb-3">
-          {(['For You', 'Following'] as FeedTab[]).map(tab => (
+          {(['For You', 'Following', 'Guides'] as FeedTab[]).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -277,38 +287,92 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
       )}
 
 
-      {/* Grid */}
-      <div className="p-3">
-        {loading ? (
-          <div className="grid grid-cols-2 gap-2">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
-            ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <p className="text-3xl mb-3">🌍</p>
-            <p className="text-sm font-semibold text-gray-900 mb-1">
-              {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
-            </p>
-            <p className="text-xs text-gray-400 max-w-[200px]">
-              {activeTab === 'Following'
-                ? 'Follow more people to see their places here'
-                : 'Be the first to share a place on curio'}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            {filtered.map(place => (
-              <PlaceCard
-                key={place.placeId}
-                place={place}
-                onClick={() => setSelectedPlace(place)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Grid — place cards (hidden on Guides tab) */}
+      {activeTab !== 'Guides' && (
+        <div className="p-3">
+          {loading ? (
+            <div className="grid grid-cols-2 gap-2">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <p className="text-3xl mb-3">🌍</p>
+              <p className="text-sm font-semibold text-gray-900 mb-1">
+                {activeTab === 'Following' ? 'No places from people you follow' : 'No places yet'}
+              </p>
+              <p className="text-xs text-gray-400 max-w-[200px]">
+                {activeTab === 'Following'
+                  ? 'Follow more people to see their places here'
+                  : 'Be the first to share a place on curio'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {filtered.map(place => (
+                <PlaceCard
+                  key={place.placeId}
+                  place={place}
+                  onClick={() => setSelectedPlace(place)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Guides list */}
+      {activeTab === 'Guides' && (
+        <div className="p-3 space-y-3">
+          {loadingGuides ? (
+            [...Array(3)].map((_, i) => (
+              <div key={i} className="h-40 bg-gray-100 rounded-2xl animate-pulse" />
+            ))
+          ) : guides.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <p className="text-3xl mb-3">📖</p>
+              <p className="text-sm font-semibold text-gray-900 mb-1">No guides yet</p>
+              <p className="text-xs text-gray-400 max-w-[200px]">Publish a trip from your Saved tab to create a guide</p>
+            </div>
+          ) : (
+            guides.map(guide => (
+              <button
+                key={guide.id}
+                onClick={() => setSelectedGuide(guide)}
+                className="w-full rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-[0.98] transition-transform"
+              >
+                {guide.coverUrl ? (
+                  <div className="relative h-40">
+                    <img src={guide.coverUrl} alt={guide.title} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-3">
+                      <p className="text-white text-base font-bold leading-tight">{guide.title}</p>
+                      {guide.destination && (
+                        <p className="text-white/70 text-xs mt-0.5 flex items-center gap-1">
+                          <MapPin size={10} strokeWidth={1.5} />
+                          {guide.destination}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-24 bg-gray-200 flex items-center justify-center">
+                    <p className="text-4xl">🗺️</p>
+                  </div>
+                )}
+                <div className="px-3 py-2.5 flex items-center gap-2">
+                  {guide.profile.avatarUrl
+                    ? <img src={guide.profile.avatarUrl} alt={guide.profile.name} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-gray-500">{guide.profile.name[0]?.toUpperCase()}</div>
+                  }
+                  <p className="text-xs text-gray-600 font-medium truncate">by @{guide.profile.username}</p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Post modal */}
       {selectedPlace && (
@@ -324,6 +388,9 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
           onOpenPlacePage={pl => setSelectedPlacePage(pl)}
         />
       )}
+
+      {/* Guide detail */}
+      {selectedGuide && <GuideDetail guide={selectedGuide} currentUserId={appUser?.id} onClose={() => setSelectedGuide(null)} />}
 
       {/* Place Page — rendered at page level so it's not clipped by PostModal */}
       {selectedPlacePage && (

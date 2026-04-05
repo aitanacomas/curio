@@ -174,7 +174,7 @@ import { collections, places, users } from '../data/mockData';
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
 import { getBookingUrl, isBookable } from '../lib/placeUtils';
-import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, type RealPostPlace, type RealPost, type CollectionCollaborator } from '../lib/supabase';
+import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 import PlaceSearch from '../components/PlaceSearch';
 
@@ -903,6 +903,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [newPlanCollabInput, setNewPlanCollabInput] = useState('');
   const [newPlanCollabs, setNewPlanCollabs] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const [myGuides, setMyGuides] = useState<Guide[]>([]);
+  const [showPublishGuide, setShowPublishGuide] = useState(false);
+  const [publishGuideTitle, setPublishGuideTitle] = useState('');
+  const [publishGuideDesc, setPublishGuideDesc] = useState('');
+  const [publishingGuide, setPublishingGuide] = useState(false);
 
   const googleTypesToCategory = (types: string[]): string => {
     const has = (...t: string[]) => types.some(x => t.includes(x));
@@ -1908,6 +1913,11 @@ Return ONLY valid JSON, no markdown, no explanation:
     return `${fmt(range.from)} – ${fmt(range.to)}`;
   };
 
+  useEffect(() => {
+    if (!userId) return;
+    getUserGuides(userId).then(setMyGuides);
+  }, [userId]);
+
   // ── Load real data from Supabase ──────────────────────────────────────────
   useEffect(() => {
     if (!userId) {
@@ -2276,7 +2286,13 @@ Return ONLY valid JSON, no markdown, no explanation:
           <button onClick={() => setSelectedTrip(null)} className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
-          <div className="absolute top-4 right-4 flex gap-2">
+          <div className="absolute top-4 right-4 flex gap-2 items-center">
+            <button
+              onClick={() => { setPublishGuideTitle(selectedTrip.destination); setPublishGuideDesc(''); setShowPublishGuide(true); }}
+              className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full"
+            >
+              📖 Guide
+            </button>
             <button onClick={() => { openEditPlan(selectedTrip); }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
               <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
@@ -6194,6 +6210,73 @@ Return ONLY valid JSON, no markdown, no explanation:
           </Suspense>
         </div>
       )}
+
+      {/* Publish as Guide sheet */}
+      {showPublishGuide && (() => {
+        const trip: Trip | null = selectedTrip;
+        if (!trip) return null;
+        return (
+          <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowPublishGuide(false)} />
+            <div className="relative bg-white rounded-t-3xl pb-8">
+              <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+              <div className="flex items-center justify-between px-5 pt-2 pb-4 border-b border-gray-100">
+                <p className="text-base font-bold text-gray-900">Publish as Guide</p>
+                <button onClick={() => setShowPublishGuide(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                  <X size={14} strokeWidth={2} className="text-gray-600" />
+                </button>
+              </div>
+              <div className="px-5 pt-4 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Guide title</p>
+                  <input
+                    value={publishGuideTitle}
+                    onChange={e => setPublishGuideTitle(e.target.value)}
+                    placeholder="e.g. 48 Hours in Lisbon"
+                    className="w-full text-sm text-gray-900 bg-gray-100 rounded-xl px-3 py-2.5 outline-none placeholder-gray-400"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5">Description (optional)</p>
+                  <textarea
+                    value={publishGuideDesc}
+                    onChange={e => setPublishGuideDesc(e.target.value)}
+                    placeholder="Tell people what makes this trip special…"
+                    rows={3}
+                    className="w-full text-sm text-gray-900 bg-gray-100 rounded-xl px-3 py-2.5 outline-none placeholder-gray-400 resize-none"
+                  />
+                </div>
+                <p className="text-xs text-gray-400">Publishing makes this itinerary visible to everyone on Curio.</p>
+                <button
+                  disabled={!publishGuideTitle.trim() || publishingGuide || !userId}
+                  onClick={async () => {
+                    const t = selectedTrip as (Trip | null);
+                    if (!publishGuideTitle.trim() || !userId || !t) return;
+                    setPublishingGuide(true);
+                    const coverUrl = t.coverImage || t.days.flatMap((d: TripDay) => d.items).find((i: TripItem) => i.image)?.image;
+                    const id = await createGuide({
+                      userId: userId,
+                      planId: t.id,
+                      title: publishGuideTitle.trim(),
+                      destination: t.destination,
+                      description: publishGuideDesc.trim() || undefined,
+                      coverUrl: coverUrl || undefined,
+                    });
+                    setPublishingGuide(false);
+                    if (id) {
+                      getUserGuides(userId).then(setMyGuides);
+                      setShowPublishGuide(false);
+                    }
+                  }}
+                  className="w-full py-3 rounded-2xl bg-gray-900 text-white text-sm font-bold disabled:opacity-40"
+                >
+                  {publishingGuide ? 'Publishing…' : 'Publish Guide'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

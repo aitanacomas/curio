@@ -5,7 +5,7 @@ import { SortableContext, rectSortingStrategy, verticalListSortingStrategy, useS
 import { CSS } from '@dnd-kit/utilities';
 import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical } from 'lucide-react';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
-import { currentUser, collections, places, users } from '../data/mockData';
+import { currentUser, places, users } from '../data/mockData';
 import type { FeedItem, Collection, Place, Category, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
@@ -444,7 +444,6 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
   const visitedPlaces = realPosts.flatMap(p => p.places).filter(pl => pl.lat != null && pl.lng != null);
   const user = currentUser;
-  const myCollections = collections.filter(c => c.curatorId === 'user-1');
   const otherUsers = users.filter(u => u.id !== 'user-1');
 
   // Compute accurate stats from real posts
@@ -454,6 +453,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const isNewUser = appUser?.isDemo === false;
   const displayUser = isNewUser && appUser ? {
     ...user,
+    id: appUser.id,
     name: appUser.name,
     username: appUser.username,
     avatar: appUser.avatar || null,
@@ -2716,103 +2716,80 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
       {/* Collections Tab */}
       {activeTab === 'Collections' && (
-        isNewUser ? (
-          <div className="px-4 pt-4 pb-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-sm font-bold text-gray-900">My Collections</p>
-              <button onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setNewColCoverFile(null); setNewColCoverPreview(null); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
-                <Plus size={12} strokeWidth={2.5} /> New
-              </button>
+        <div className="px-4 pt-4 pb-6">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-bold text-gray-900">My Collections</p>
+            <button onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setNewColCoverFile(null); setNewColCoverPreview(null); setShowCreateCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
+              <Plus size={12} strokeWidth={2.5} /> New
+            </button>
+          </div>
+          {realCollections.length > 0 ? (
+            <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+              {realCollections.map(col => (
+                <button key={col.id} className="text-left" onClick={() => {
+                    setSelectedRealCollection(col);
+                    setShowColMap(true);
+                    setColFilter('all');
+                    setCollectionCollaborators([]);
+                    setLoadingCollectionPlaces(true);
+                    getCollectionPlaces(col.id).then(async places => {
+                      const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY);
+                      setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded));
+                      setLoadingCollectionPlaces(false);
+                    });
+                    getCollectionCollaborators(col.id).then(setCollectionCollaborators);
+                  }}>
+                  <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
+                    {col.coverImageUrl
+                      ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
+                      : <span className="text-5xl">{col.emoji || '🗂️'}</span>
+                    }
+                    {col.coverImageUrl && col.emoji && (
+                      <div className="absolute bottom-2 left-2 text-xl leading-none">{col.emoji}</div>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{col.placesCount ?? 0} places</p>
+                </button>
+              ))}
             </div>
-            {realCollections.length > 0 ? (
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 px-6">
+              <span className="text-4xl mb-3">🗂️</span>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
+              <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+            </div>
+          )}
+
+          {/* Shared with me */}
+          {sharedCollections.length > 0 && (
+            <div className="mt-6">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Shared with me</p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-                {realCollections.map(col => (
+                {sharedCollections.map(col => (
                   <button key={col.id} className="text-left" onClick={() => {
-                      setSelectedRealCollection(col);
-                      setShowColMap(true);
-                      setColFilter('all');
-                      setCollectionCollaborators([]);
-                      setLoadingCollectionPlaces(true);
-                      getCollectionPlaces(col.id).then(async places => {
-                        const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY);
-                        setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded));
-                        setLoadingCollectionPlaces(false);
-                      });
-                      getCollectionCollaborators(col.id).then(setCollectionCollaborators);
-                    }}>
+                    setSelectedRealCollection(col);
+                    setShowColMap(true);
+                    setColFilter('all');
+                    setCollectionCollaborators([]);
+                    setLoadingCollectionPlaces(true);
+                    getCollectionPlaces(col.id).then(async places => { const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY); setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded)); setLoadingCollectionPlaces(false); });
+                    getCollectionCollaborators(col.id).then(setCollectionCollaborators);
+                  }}>
                     <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
                       {col.coverImageUrl
-                        ? <img src={col.coverImageUrl} className="w-full h-full object-cover" />
-                        : <span className="text-5xl">{col.emoji || '🗂️'}</span>
-                      }
-                      {col.coverImageUrl && col.emoji && (
-                        <div className="absolute bottom-2 left-2 text-xl leading-none">{col.emoji}</div>
-                      )}
+                        ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                        : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
                     </div>
-                    <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{col.placesCount ?? 0} places</p>
+                    <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
+                    <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>
                   </button>
                 ))}
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 px-6">
-                <span className="text-4xl mb-3">🗂️</span>
-                <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
-                <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
-              </div>
-            )}
+            </div>
+          )}
 
-            {/* Shared with me */}
-            {sharedCollections.length > 0 && (
-              <div className="mt-6">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Shared with me</p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-                  {sharedCollections.map(col => (
-                    <button key={col.id} className="text-left" onClick={() => {
-                      setSelectedRealCollection(col);
-                      setShowColMap(true);
-                      setColFilter('all');
-                      setCollectionCollaborators([]);
-                      setLoadingCollectionPlaces(true);
-                      getCollectionPlaces(col.id).then(async places => { const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY); setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded)); setLoadingCollectionPlaces(false); });
-                      getCollectionCollaborators(col.id).then(setCollectionCollaborators);
-                    }}>
-                      <div className="rounded-xl overflow-hidden aspect-square bg-gray-100 flex items-center justify-center relative">
-                        {col.coverImageUrl
-                          ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
-                          : <span className="text-3xl">{col.emoji || '🗂️'}</span>}
-                      </div>
-                      <p className="text-sm font-semibold text-gray-900 mt-2 truncate">{col.name}</p>
-                      <p className="text-xs text-gray-400">{col.placesCount} place{col.placesCount !== 1 ? 's' : ''}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          </div>
-        ) : (
-        <div className="px-4 pt-4 pb-6">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-            {myCollections.map(col => (
-              <button key={col.id} onClick={() => setSelectedCollection(col)} className="text-left">
-                <div className="rounded-xl overflow-hidden aspect-square relative">
-                  <img src={col.coverImage} alt={col.name} className="w-full h-full object-cover" style={col.id === 'col-8' ? { transform: 'scale(1.11)' } : undefined} />
-                  {col.isPremium && (
-                    <div className="absolute top-2 left-2 bg-amber-400 rounded-full px-2 py-0.5">
-                      <p className="text-xs font-bold text-white">Premium</p>
-                    </div>
-                  )}
-                </div>
-                <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                <p className="text-xs text-gray-400">
-                  {col.placeIds.length} places{col.followerCount ? ` · ${col.followerCount.toLocaleString()} followers` : ''}
-                </p>
-              </button>
-            ))}
-          </div>
         </div>
-        )
       )}
 
       {/* Create Collection Sheet */}
