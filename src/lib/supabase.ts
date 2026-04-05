@@ -797,6 +797,36 @@ export async function getLikedPosts(userId: string): Promise<Set<string>> {
   return new Set((data ?? []).map((r: any) => r.post_id));
 }
 
+export async function getLikedPostsFull(userId: string): Promise<RealPost[]> {
+  const { data: likes } = await supabase
+    .from('post_likes')
+    .select('post_id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  const postIds = (likes ?? []).map((r: any) => r.post_id);
+  if (postIds.length === 0) return [];
+  const { data: posts } = await supabase
+    .from('posts')
+    .select(`id, user_id, caption, location_label, created_at, hashtags, profiles(name, username, avatar_url), post_places(id, name, category, neighborhood, city, country, photo_url, position, lat, lng)`)
+    .in('id', postIds);
+  if (!posts) return [];
+  return posts.map((p: any) => ({
+    id: p.id,
+    userId: p.user_id,
+    caption: p.caption ?? '',
+    locationLabel: p.location_label ?? '',
+    createdAt: p.created_at,
+    hashtags: p.hashtags ?? [],
+    profile: { name: p.profiles?.name ?? 'Unknown', username: p.profiles?.username ?? '', avatarUrl: p.profiles?.avatar_url ?? null },
+    collaborators: [],
+    places: (p.post_places ?? []).sort((a: any, b: any) => a.position - b.position).map((pl: any) => ({
+      id: pl.id, name: pl.name, category: pl.category, neighborhood: pl.neighborhood ?? null,
+      city: pl.city ?? '', country: pl.country ?? '', photoUrl: pl.photo_url ?? null,
+      position: pl.position, lat: pl.lat ?? null, lng: pl.lng ?? null,
+    })),
+  }));
+}
+
 export async function getPostLikeCounts(postIds: string[]): Promise<Record<string, number>> {
   if (postIds.length === 0) return {};
   const { data } = await supabase

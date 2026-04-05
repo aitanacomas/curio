@@ -173,13 +173,13 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
 import { getBookingUrl, isBookable } from '../lib/placeUtils';
-import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide } from '../lib/supabase';
+import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, getLikedPostsFull, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide } from '../lib/supabase';
 import BookingSheet from '../components/BookingSheet';
 import PlaceSearch from '../components/PlaceSearch';
 
 const MapView = lazy(() => import('../components/MapView'));
 
-type SavedTab = 'Places' | 'Collections' | 'Trips' | 'Map';
+type SavedTab = 'Places' | 'Collections' | 'Trips' | 'Map' | 'Liked';
 
 interface TripItem {
   id: string;
@@ -606,6 +606,12 @@ function EventCard({ trip, onClick }: { trip: Trip; onClick: () => void }) {
 
 export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: boolean; userId?: string; userAvatar?: string | null }) {
   const [activeTab, setActiveTab] = useState<SavedTab>('Places');
+  // Load liked posts lazily when tab is first opened
+  useEffect(() => {
+    if (activeTab !== 'Liked' || !userId || likedPosts.length > 0) return;
+    setLoadingLiked(true);
+    getLikedPostsFull(userId).then(posts => { setLikedPosts(posts); setLoadingLiked(false); });
+  }, [activeTab, userId]);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [showEventSheet, setShowEventSheet] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Trip | null>(null);
@@ -762,6 +768,8 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [newColEmoji, setNewColEmoji] = useState('');
   const [newColDesc, setNewColDesc] = useState('');
   const [newColSaving, setNewColSaving] = useState(false);
+  const [likedPosts, setLikedPosts] = useState<RealPost[]>([]);
+  const [loadingLiked, setLoadingLiked] = useState(false);
   const [dbCollections, setDbCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
   const [dbSubscribedCollections, setDbSubscribedCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
   const [selectedRealCollection, setSelectedRealCollection] = useState<import('../lib/supabase').RealCollection | null>(null);
@@ -5117,7 +5125,7 @@ Return ONLY valid JSON, no markdown, no explanation:
 
         {/* Tabs */}
         <div className="flex gap-6 border-b border-gray-100">
-          {([['Places', 'All saved'], ['Collections', 'Collections'], ['Trips', 'My plans'], ['Map', 'Map']] as [SavedTab, string][]).map(([tab, label]) => (
+          {([['Places', 'All saved'], ['Collections', 'Collections'], ['Trips', 'My plans'], ['Liked', 'Liked'], ['Map', 'Map']] as [SavedTab, string][]).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -6073,6 +6081,53 @@ Return ONLY valid JSON, no markdown, no explanation:
             </button>
             </div> {/* end scrollable content */}
           </div>
+        </div>
+      )}
+
+      {/* Liked Tab */}
+      {activeTab === 'Liked' && (
+        <div className="pb-6 px-4 pt-4">
+          {loadingLiked ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => <div key={i} className="h-24 bg-gray-100 rounded-2xl animate-pulse" />)}
+            </div>
+          ) : likedPosts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <span className="text-3xl">🤍</span>
+              </div>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">No liked posts yet</p>
+              <p className="text-slate-400 text-sm text-center max-w-[200px]">Posts you like will appear here</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {likedPosts.map(post => {
+                const photo = post.places.find(p => p.photoUrl)?.photoUrl;
+                const title = post.locationLabel || post.places[0]?.name || 'Post';
+                const city = post.places[0]?.city || post.places[0]?.country || '';
+                return (
+                  <div key={post.id} className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100">
+                    {photo
+                      ? <img src={photo} alt={title} className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center text-4xl">🗺️</div>
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                      <p className="text-white text-xs font-semibold leading-tight truncate">{title}</p>
+                      {city && <p className="text-white/70 text-xs truncate">{city}</p>}
+                    </div>
+                    <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/40 rounded-full px-1.5 py-0.5">
+                      {post.profile.avatarUrl
+                        ? <img src={post.profile.avatarUrl} className="w-4 h-4 rounded-full object-cover" alt={post.profile.name} />
+                        : <div className="w-4 h-4 rounded-full bg-white/30 flex items-center justify-center text-white text-[8px] font-bold">{post.profile.name[0]?.toUpperCase()}</div>
+                      }
+                      <span className="text-white text-[10px] font-medium">{post.profile.username || post.profile.name}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
