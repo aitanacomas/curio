@@ -1112,6 +1112,23 @@ export async function updatePostPlace(id: string, data: { name?: string; neighbo
   else console.log('[updatePostPlace] updated rows:', rows?.length, 'id:', id, 'data:', data);
 }
 
+export async function getSuggestedUsers(excludeId: string, alreadyFollowing: string[]): Promise<FollowProfile[]> {
+  // Users with the most posts, excluding self and already-followed
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, name, username, avatar_url, posts(count)')
+    .neq('id', excludeId)
+    .not('id', 'in', `(${[excludeId, ...alreadyFollowing].join(',')})`)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (!data) return [];
+  // Sort by post count descending
+  return (data as any[])
+    .sort((a, b) => (b.posts?.[0]?.count ?? 0) - (a.posts?.[0]?.count ?? 0))
+    .slice(0, 12)
+    .map(p => ({ id: p.id, name: p.name ?? '', username: p.username ?? '', avatarUrl: p.avatar_url ?? null }));
+}
+
 export async function searchProfiles(query: string, excludeId: string): Promise<FollowProfile[]> {
   if (!query.trim()) return [];
   const { data } = await supabase

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import UserProfile from './UserProfile';
 import PlacePage from '../components/PlacePage';
 import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
-import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, getGuides, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile, type Guide } from '../lib/supabase';
+import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, getSuggestedUsers, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, getGuides, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile, type Guide } from '../lib/supabase';
 import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 import GuideDetail from '../components/GuideDetail';
 
@@ -132,6 +132,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [suggestedUsers, setSuggestedUsers] = useState<FollowProfile[]>([]);
+  const [loadingSuggested, setLoadingSuggested] = useState(false);
   const [exploreSavedPlaces, setExploreSavedPlaces] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -153,6 +155,15 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     setLoadingGuides(true);
     getGuides().then(g => { setGuides(g); setLoadingGuides(false); });
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'Following' || !appUser?.id) return;
+    setLoadingSuggested(true);
+    getSuggestedUsers(appUser.id, [...following]).then(users => {
+      setSuggestedUsers(users);
+      setLoadingSuggested(false);
+    });
+  }, [activeTab, appUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced user search
   useEffect(() => {
@@ -681,23 +692,66 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Empty state */}
-              {filtered.length === 0 && filteredDiscover.length === 0 && !loadingDiscover && (
+              {/* Empty / thin Following state → suggested users */}
+              {activeTab === 'Following' && filtered.length === 0 && query.trim().length < 2 && activeCategory === 'all' && (
+                <div className="px-1 pb-4">
+                  <p className="text-base font-bold text-gray-900 mb-1">Find people to follow</p>
+                  <p className="text-xs text-gray-400 mb-4">Follow creators to see their places here</p>
+                  {loadingSuggested ? (
+                    <div className="space-y-3">
+                      {[...Array(5)].map((_, i) => (
+                        <div key={i} className="flex items-center gap-3">
+                          <div className="w-11 h-11 rounded-full bg-gray-100 animate-pulse flex-shrink-0" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-3 bg-gray-100 rounded animate-pulse w-24" />
+                            <div className="h-2.5 bg-gray-100 rounded animate-pulse w-16" />
+                          </div>
+                          <div className="w-20 h-8 bg-gray-100 rounded-xl animate-pulse" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : suggestedUsers.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-8">No suggestions yet</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {suggestedUsers.map(user => (
+                        <div key={user.id} className="flex items-center gap-3">
+                          <button onClick={() => setViewingUserId(user.id)} className="flex-shrink-0">
+                            {user.avatarUrl
+                              ? <img src={user.avatarUrl} className="w-11 h-11 rounded-full object-cover" alt={user.name} />
+                              : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500">{user.name[0]?.toUpperCase()}</div>
+                            }
+                          </button>
+                          <button onClick={() => setViewingUserId(user.id)} className="flex-1 min-w-0 text-left">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                            <p className="text-xs text-gray-400 truncate">@{user.username}</p>
+                          </button>
+                          <button
+                            onClick={() => toggleFollow(user.id)}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex-shrink-0 ${
+                              following.has(user.id)
+                                ? 'bg-gray-100 text-gray-700'
+                                : 'bg-gray-900 text-white'
+                            }`}
+                          >
+                            {following.has(user.id) ? 'Following' : 'Follow'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Generic empty state for search/category with no results */}
+              {!(activeTab === 'Following' && filtered.length === 0 && query.trim().length < 2 && activeCategory === 'all') && filtered.length === 0 && filteredDiscover.length === 0 && !loadingDiscover && (
                 <div className="flex flex-col items-center justify-center py-24 text-center">
                   <p className="text-3xl mb-3">{query.trim().length >= 2 || activeCategory !== 'all' ? '🔍' : '🌍'}</p>
                   <p className="text-sm font-semibold text-gray-900 mb-1">
-                    {activeTab === 'Following' && query.trim().length < 2 && activeCategory === 'all'
-                      ? 'No places from people you follow'
-                      : query.trim().length >= 2 || activeCategory !== 'all'
-                      ? 'No places found'
-                      : 'No places yet'}
+                    {query.trim().length >= 2 || activeCategory !== 'all' ? 'No places found' : 'No places yet'}
                   </p>
                   <p className="text-xs text-gray-400 max-w-[200px]">
-                    {activeTab === 'Following' && query.trim().length < 2 && activeCategory === 'all'
-                      ? 'Follow more people to see their places here'
-                      : query.trim().length >= 2 || activeCategory !== 'all'
-                      ? 'Try a different search term'
-                      : 'Be the first to share a place on curio'}
+                    {query.trim().length >= 2 || activeCategory !== 'all' ? 'Try a different search term' : 'Be the first to share a place on curio'}
                   </p>
                 </div>
               )}
