@@ -166,7 +166,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   }, [query, appUser?.id]);
 
   const GEO_TYPES = new Set(['locality', 'administrative_area_level_1', 'administrative_area_level_2', 'country', 'political', 'colloquial_area', 'continent']);
-  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location,places.rating';
+  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.formattedAddress,places.types,places.photos,places.location,places.rating';
   const HEADERS = { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': FIELD_MASK };
 
   const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace | null => {
@@ -182,7 +182,22 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     // Use admin subdivisions as neighborhood fallback (e.g. Paris arrondissements, Tokyo wards, Istanbul districts)
     // Drop any value containing non-Latin script (Arabic, Chinese, Cyrillic, etc.) — Google ignores languageCode for some regions
     const rawNeighborhood = sublocal || [admin3, admin2].find(v => v && v.toLowerCase() !== city.toLowerCase()) || '';
-    const neighborhood = isLatin(rawNeighborhood) ? rawNeighborhood : '';
+    let neighborhood = isLatin(rawNeighborhood) ? rawNeighborhood : '';
+    // Final fallback: parse formattedAddress to extract a neighborhood component
+    // e.g. "Café X, Vesterbro, 1700 Copenhagen, Denmark" → "Vesterbro"
+    if (!neighborhood && p.formattedAddress) {
+      const parts = (p.formattedAddress as string).split(',').map((s: string) => s.trim()).filter((s: string) => s);
+      // Skip first part (street/place name), skip last 1-2 parts (country, city+postal)
+      // A middle part that differs from the city and is Latin is likely a neighborhood
+      const candidates = parts.slice(1, -2);
+      for (const part of candidates) {
+        const clean = part.replace(/\d+/g, '').trim(); // strip postal codes
+        if (clean && clean.toLowerCase() !== city.toLowerCase() && isLatin(clean) && clean.length > 2 && clean.length < 40) {
+          neighborhood = clean;
+          break;
+        }
+      }
+    }
     const category = googleTypesToCategory(p.types ?? []);
     // Prefer index 1 (often a user photo) over index 0 (often a business promo/logo image)
     const photoName = (p.photos?.[1] ?? p.photos?.[0])?.name;
