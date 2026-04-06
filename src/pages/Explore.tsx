@@ -184,7 +184,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     const rawNeighborhood = sublocal || [admin3, admin2].find(v => v && v.toLowerCase() !== city.toLowerCase()) || '';
     const neighborhood = isLatin(rawNeighborhood) ? rawNeighborhood : '';
     const category = googleTypesToCategory(p.types ?? []);
-    const photoName = p.photos?.[0]?.name;
+    // Prefer index 1 (often a user photo) over index 0 (often a business promo/logo image)
+    const photoName = (p.photos?.[1] ?? p.photos?.[0])?.name;
     const photoUrl = photoName ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
     const name = p.displayName?.text ?? '';
     // Reject places whose name is not in Latin script
@@ -217,12 +218,13 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     ['spa', 'shopping_mall', 'park', 'clothing_store'],
   ];
 
-  const fetchNearby = async (lat: number, lng: number, radius: number, city: string, country: string): Promise<RealPostPlace[]> => {
-    const results = await Promise.all(nearbyGroups.map(types =>
+  const fetchNearby = async (lat: number, lng: number, radius: number, city: string, country: string, filterType?: string): Promise<RealPostPlace[]> => {
+    const groups = filterType ? [[filterType]] : nearbyGroups;
+    const results = await Promise.all(groups.map(types =>
       fetch('https://places.googleapis.com/v1/places:searchNearby', {
         method: 'POST', headers: HEADERS,
-        body: JSON.stringify({ locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } }, includedTypes: types, maxResultCount: 6, languageCode: 'en', rankPreference: 'POPULARITY' }),
-      }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 4).map((p: any) => mapPlace(p, city, country)).filter(Boolean) as RealPostPlace[]).catch(() => [])
+        body: JSON.stringify({ locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } }, includedTypes: types, maxResultCount: 10, languageCode: 'en', rankPreference: 'POPULARITY' }),
+      }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 8).map((p: any) => mapPlace(p, city, country)).filter(Boolean) as RealPostPlace[]).catch(() => [])
     ));
     // Interleave results so categories mix: take one from each group in turn
     const maxLen = Math.max(...results.map(r => r.length));
@@ -289,7 +291,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             const country = find('country');
             const radius = 5000;
             setDiscoverGeoState({ lat, lng, city, country, radius });
-            setDiscoverResults(await fetchNearby(lat, lng, radius, city, country));
+            const chipType = hasCategoryFilter ? (categoryChipSearchConfig[activeCategory]?.includedType) : undefined;
+            setDiscoverResults(await fetchNearby(lat, lng, radius, city, country, chipType));
           } else {
             setDiscoverTextToken(data.nextPageToken ?? null);
             setDiscoverResults((raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).filter(p => p.name));
@@ -363,7 +366,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         const { lat, lng, city, country, radius } = discoverGeoState;
         const nextRadius = radius + 5000;
         setDiscoverGeoState(s => s ? { ...s, radius: nextRadius } : null);
-        const more = await fetchNearby(lat, lng, nextRadius, city, country);
+        const chipType = activeCategory !== 'all' ? (categoryChipSearchConfig[activeCategory]?.includedType) : undefined;
+        const more = await fetchNearby(lat, lng, nextRadius, city, country, chipType);
         const existingIds = new Set(discoverResults.map(p => p.id));
         setDiscoverResults(prev => [...prev, ...more.filter(p => !existingIds.has(p.id))]);
       } else if (discoverTextToken) {
