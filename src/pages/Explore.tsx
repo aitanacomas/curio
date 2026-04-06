@@ -252,8 +252,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     nature:        { textQuery: 'best national park nature',    includedType: 'park' },
     beach:         { textQuery: 'best beach',                   includedType: 'beach' },
     shop:          { textQuery: 'best shopping street market',  includedType: 'shopping_mall' },
-    experience:    { textQuery: 'best things to do activity',    includedType: 'tourist_attraction' },
-    neighbourhood: { textQuery: 'best neighbourhood area to explore', includedType: 'tourist_attraction' },
+    experience:    { textQuery: 'best things to do unique experience', includedType: 'amusement_park' },
+    neighbourhood: { textQuery: 'most famous neighbourhood area',      includedType: 'park' },
     sports:        { textQuery: 'best sports venue stadium',    includedType: 'stadium' },
     wellness:      { textQuery: 'best spa wellness retreat',    includedType: 'spa' },
   };
@@ -324,16 +324,16 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             setDiscoverResults((raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).filter(p => p.name));
           }
         } else if (hasCategoryFilter) {
-          // Category chip path — parallel queries across multiple world cities for global variety
+          // Category chip path — 20 world cities × 10 results = ~200 places initial load
           setDiscoverCityPage(0);
           const chipCfg = categoryChipSearchConfig[activeCategory] ?? { textQuery: 'popular place', includedType: 'tourist_attraction' };
           const { textQuery: chipQuery, includedType } = chipCfg;
-          const cities = WORLD_CITIES.slice(0, 6);
+          const cities = WORLD_CITIES.slice(0, 20);
           const results = await Promise.all(cities.map(city =>
             fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 3.8, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
+              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 10, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
           ));
           const interleaved: RealPostPlace[] = [];
           const maxLen = Math.max(...results.map(r => r.length));
@@ -352,8 +352,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             const city = WORLD_CITIES[(cityOffset * DEFAULT_CATEGORY_SEARCHES.length + i) % WORLD_CITIES.length];
             return fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 3.8, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+              body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 20, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 20).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
           }));
           setDiscoverDefaultTokens(results.map(r => r.token));
           const interleaved: RealPostPlace[] = [];
@@ -442,16 +442,16 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         let morePlaces: RealPostPlace[] = [];
 
         if (activeCategory !== 'all' && query.trim().length < 2) {
-          // Category chip — next 6 cities for this category
+          // Category chip load-more — next 20 cities
           const chipCfg = categoryChipSearchConfig[activeCategory] ?? { textQuery: 'popular place', includedType: 'tourist_attraction' };
           const { textQuery: chipQuery, includedType } = chipCfg;
-          const cityStart = (nextPage * 6) % WORLD_CITIES.length;
-          const cities = [...WORLD_CITIES.slice(cityStart, cityStart + 6), ...WORLD_CITIES.slice(0, Math.max(0, cityStart + 6 - WORLD_CITIES.length))].slice(0, 6);
+          const cityStart = (nextPage * 20) % WORLD_CITIES.length;
+          const cities = [...WORLD_CITIES.slice(cityStart, cityStart + 20), ...WORLD_CITIES.slice(0, Math.max(0, cityStart + 20 - WORLD_CITIES.length))].slice(0, 20);
           const results = await Promise.all(cities.map(city =>
             fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 3.8, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
+              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 10, languageCode: 'en' }),
+            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
           ));
           const maxLen = Math.max(...results.map(r => r.length));
           for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) morePlaces.push(r[i]); });
