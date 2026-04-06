@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Search, Loader2 } from 'lucide-react';
-import { googleTypesToCategory } from '../lib/placeUtils';
+import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
@@ -84,9 +84,9 @@ export default function PlaceSearch({ onSelect, placeholder = 'Search for this p
       const comps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
       const compVal = (c: typeof comps[0]) => c.longText || c.shortText || '';
       const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? compVal(c) : ''; };
-      const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality');
       const city = find('postal_town') || find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1');
       const country = find('country');
+      const neighborhood = extractNeighborhood(comps, place.formattedAddress, city);
       const lat: number | undefined = place.location?.latitude;
       const lng: number | undefined = place.location?.longitude;
       const address: string | undefined = place.formattedAddress;

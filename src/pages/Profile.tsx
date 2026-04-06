@@ -12,7 +12,7 @@ import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
 import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, getLikedPostsFull, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
-import { googleTypesToCategory } from '../lib/placeUtils';
+import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 import GuideDetail from '../components/GuideDetail';
 
@@ -365,7 +365,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           const searchPlace = async (textQuery: string) => {
             const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.types' },
+              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.formattedAddress,places.types' },
               body: JSON.stringify({ textQuery, languageCode: 'en' }),
             });
             const d = await r.json();
@@ -385,8 +385,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               const types: string[] = place.types ?? [];
               const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
               const findLong = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || '') : ''; };
-              const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality') || find('administrative_area_level_2');
               const resolvedCity = find('postal_town') || find('locality') || findLong('administrative_area_level_1');
+              const neighborhood = extractNeighborhood(comps, place.formattedAddress, resolvedCity);
               const country = findLong('country') || find('country');
               const fix: Record<string, string> = {};
               if (neighborhood && !pl.neighborhood) fix.neighborhood = neighborhood;

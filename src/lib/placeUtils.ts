@@ -1,5 +1,41 @@
 import type { Category } from '../types';
 
+/**
+ * Extract neighborhood/district/area from Google Places address data.
+ * Works for any city worldwide — arrondissements, wards, boroughs, barrios, etc.
+ * Falls back to parsing formattedAddress when addressComponents lack sublocality data.
+ */
+export function extractNeighborhood(
+  comps: { types: string[]; longText?: string; shortText?: string }[],
+  formattedAddress?: string,
+  city?: string
+): string {
+  const isLatin = (s: string) => /^[\u0000-\u024F\s,.\-'()&]+$/.test(s);
+  const find = (...types: string[]) => {
+    const c = comps.find(c => types.some(t => c.types?.includes(t)));
+    return c ? (c.longText || c.shortText || '') : '';
+  };
+  const sublocal = find('sublocality_level_1') || find('neighborhood') || find('sublocality') || find('sublocality_level_2');
+  const admin2 = find('administrative_area_level_2');
+  const admin3 = find('administrative_area_level_3');
+  const raw = sublocal || [admin3, admin2].find(v => v && (!city || v.toLowerCase() !== city.toLowerCase())) || '';
+  let neighborhood = isLatin(raw) ? raw : '';
+
+  // Fallback: parse formattedAddress — works for every city/naming convention worldwide
+  if (!neighborhood && formattedAddress) {
+    const parts = formattedAddress.split(',').map(s => s.trim()).filter(Boolean);
+    const candidates = parts.slice(1, -2);
+    for (const part of candidates) {
+      const clean = part.replace(/\d+/g, '').trim();
+      if (clean && (!city || clean.toLowerCase() !== city.toLowerCase()) && isLatin(clean) && clean.length > 2 && clean.length < 40) {
+        neighborhood = clean;
+        break;
+      }
+    }
+  }
+  return neighborhood;
+}
+
 const BOOKABLE_CATS = ['restaurant', 'cafe', 'bar', 'treats', 'food', 'nightlife', 'hotel', 'stay', 'experience', 'sports', 'wellness', 'landmark', 'art', 'nature', 'beach'];
 
 export function isBookable(category: string): boolean {

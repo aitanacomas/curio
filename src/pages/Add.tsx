@@ -7,7 +7,7 @@ import ReactCrop, { type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import type { Category } from '../types';
 import { supabase, getPublicUrl } from '../lib/supabase';
-import { googleTypesToCategory } from '../lib/placeUtils';
+import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 import MapView from '../components/MapView';
 import ImageCarousel from '../components/ImageCarousel';
@@ -77,7 +77,7 @@ async function identifyPlaceWithAI(photoUrl: string): Promise<Partial<Identified
     if (GOOGLE_PLACES_KEY && result.name) {
       const gRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.displayName,places.addressComponents,places.types,places.location' },
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.displayName,places.addressComponents,places.formattedAddress,places.types,places.location' },
         body: JSON.stringify({ textQuery: [result.name, result.city, result.country].filter(Boolean).join(', '), languageCode: 'en' }),
       });
       const gData = await gRes.json();
@@ -89,7 +89,7 @@ async function identifyPlaceWithAI(photoUrl: string): Promise<Partial<Identified
           name: shortName(place.displayName?.text ?? result.name),
           city: find('postal_town') || find('locality') || find('administrative_area_level_2') || result.city,
           country: find('country') || result.country,
-          neighborhood: find('sublocality_level_1') || find('neighborhood') || find('sublocality'),
+          neighborhood: extractNeighborhood(comps, place.formattedAddress, find('postal_town') || find('locality') || find('administrative_area_level_2') || result.city),
           category: result.category || '',
           lat: place.location?.latitude ?? undefined,
           lng: place.location?.longitude ?? undefined,
@@ -148,7 +148,7 @@ Text: """${text}"""`,
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-          'X-Goog-FieldMask': 'places.displayName,places.addressComponents,places.types,places.location,places.photos',
+          'X-Goog-FieldMask': 'places.displayName,places.addressComponents,places.formattedAddress,places.types,places.location,places.photos',
         },
         body: JSON.stringify({ textQuery: [place.name, place.city, place.country].filter(Boolean).join(', '), languageCode: 'en' }),
       });
@@ -164,7 +164,7 @@ Text: """${text}"""`,
         name: shortName(gp.displayName?.text ?? place.name),
         city: find('postal_town') || find('locality') || find('administrative_area_level_1') || place.city || '',
         country: find('country') || place.country || '',
-        neighborhood: find('sublocality_level_1') || find('neighborhood') || find('sublocality') || '',
+        neighborhood: extractNeighborhood(comps, gp.formattedAddress, find('postal_town') || find('locality') || find('administrative_area_level_1') || place.city || ''),
         category: (googleTypesToCategory(gp.types ?? []) || place.category || '') as Category | '',
         lat: gp.location?.latitude ?? undefined,
         lng: gp.location?.longitude ?? undefined,
@@ -247,7 +247,7 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-        'X-Goog-FieldMask': 'places.displayName,places.types,places.addressComponents',
+        'X-Goog-FieldMask': 'places.displayName,places.types,places.addressComponents,places.formattedAddress',
       },
       body: JSON.stringify({
         locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: 100 } },
@@ -265,9 +265,9 @@ async function lookupPlaceFromGps(lat: number, lng: number): Promise<Partial<Ide
     const addrComps: { types: string[]; longText?: string; shortText?: string }[] = place.addressComponents ?? [];
     const addrVal = (c: typeof addrComps[0]) => c.longText || c.shortText || '';
     const addrFind = (...t: string[]) => { const c = addrComps.find(c => t.some(x => c.types?.includes(x))); return c ? addrVal(c) : ''; };
-    const neighborhood = addrFind('sublocality_level_1') || addrFind('sublocality_level_2') || addrFind('neighborhood') || addrFind('sublocality');
     const city = addrFind('postal_town') || addrFind('locality') || addrFind('administrative_area_level_2') || addrFind('administrative_area_level_1');
     const country = addrFind('country');
+    const neighborhood = extractNeighborhood(addrComps, place.formattedAddress, city);
     return { name, category, neighborhood, city, country, lat, lng };
   } catch { return null; }
 }
@@ -733,7 +733,7 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
         try {
           const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.addressComponents,places.types,places.location' },
+            headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.addressComponents,places.formattedAddress,places.types,places.location' },
             body: JSON.stringify({ textQuery: [p.name, p.city, p.country].filter(Boolean).join(', '), languageCode: 'en' }),
           });
           const data = await res.json();
@@ -743,8 +743,8 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
           const types: string[] = place.types ?? [];
           const find = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || c.shortText || '') : ''; };
           const findLong = (...t: string[]) => { const c = comps.find(c => t.some(x => c.types?.includes(x))); return c ? (c.longText || '') : ''; };
-          const neighborhood = find('sublocality_level_1') || find('sublocality_level_2') || find('neighborhood') || find('sublocality') || find('administrative_area_level_2');
           const city = find('postal_town') || find('locality') || findLong('administrative_area_level_1');
+          const neighborhood = extractNeighborhood(comps, place.formattedAddress, city);
           const country = findLong('country') || find('country');
           const category = googleTypesToCategory(types);
           const lat = p.lat ?? (place.location?.latitude ?? null);
