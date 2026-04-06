@@ -169,20 +169,27 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.types,places.photos,places.location,places.rating';
   const HEADERS = { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': FIELD_MASK };
 
-  const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace => {
+  const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace | null => {
     const comps: any[] = p.addressComponents ?? [];
     const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
-    const city = normalizeCity(cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1'));
+    const rawCity = normalizeCity(cityOverride || find('postal_town') || find('locality') || find('administrative_area_level_1'));
+    const isLatin = (s: string) => /^[\u0000-\u024F\s,.\-'()&]+$/.test(s);
+    const city = isLatin(rawCity) ? rawCity : (cityOverride ?? '');
     const country = countryOverride || find('country');
     const sublocal = find('sublocality_level_1') || find('neighborhood') || find('sublocality');
     const admin2 = find('administrative_area_level_2');
     const admin3 = find('administrative_area_level_3');
     // Use admin subdivisions as neighborhood fallback (e.g. Paris arrondissements, Tokyo wards, Istanbul districts)
-    const neighborhood = sublocal || [admin3, admin2].find(v => v && v.toLowerCase() !== city.toLowerCase()) || '';
+    // Drop any value containing non-Latin script (Arabic, Chinese, Cyrillic, etc.) — Google ignores languageCode for some regions
+    const rawNeighborhood = sublocal || [admin3, admin2].find(v => v && v.toLowerCase() !== city.toLowerCase()) || '';
+    const neighborhood = isLatin(rawNeighborhood) ? rawNeighborhood : '';
     const category = googleTypesToCategory(p.types ?? []);
     const photoName = p.photos?.[0]?.name;
     const photoUrl = photoName ? `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
-    return { id: p.id ?? `discover_${Math.random()}`, name: p.displayName?.text ?? '', category, neighborhood: neighborhood || null, city, country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null };
+    const name = p.displayName?.text ?? '';
+    // Reject places whose name is not in Latin script
+    if (!isLatin(name)) return null;
+    return { id: p.id ?? `discover_${Math.random()}`, name, category, neighborhood: neighborhood || null, city, country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null };
   };
 
   // Sort raw Google results by rating descending before mapping
@@ -215,7 +222,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
       fetch('https://places.googleapis.com/v1/places:searchNearby', {
         method: 'POST', headers: HEADERS,
         body: JSON.stringify({ locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius } }, includedTypes: types, maxResultCount: 6, languageCode: 'en', rankPreference: 'POPULARITY' }),
-      }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 4).map((p: any) => mapPlace(p, city, country))).catch(() => [])
+      }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 4).map((p: any) => mapPlace(p, city, country)).filter(Boolean) as RealPostPlace[]).catch(() => [])
     ));
     // Interleave results so categories mix: take one from each group in turn
     const maxLen = Math.max(...results.map(r => r.length));
@@ -285,7 +292,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             setDiscoverResults(await fetchNearby(lat, lng, radius, city, country));
           } else {
             setDiscoverTextToken(data.nextPageToken ?? null);
-            setDiscoverResults(raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(p => p.name));
+            setDiscoverResults((raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).filter(p => p.name));
           }
         } else if (hasCategoryFilter) {
           // Category chip path — parallel queries across multiple world cities for global variety
@@ -297,7 +304,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
               body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p))).catch(() => [])
+            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
           ));
           const interleaved: RealPostPlace[] = [];
           const maxLen = Math.max(...results.map(r => r.length));
@@ -317,7 +324,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             return fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
               body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)), token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
           }));
           setDiscoverDefaultTokens(results.map(r => r.token));
           const interleaved: RealPostPlace[] = [];
@@ -366,7 +373,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         });
         const data = await res.json();
         setDiscoverTextToken(data.nextPageToken ?? null);
-        const more: RealPostPlace[] = (data.places ?? []).map((p: any) => mapPlace(p)).filter((p: RealPostPlace) => p.name);
+        const more: RealPostPlace[] = ((data.places ?? []).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).filter((p: RealPostPlace) => p.name);
         setDiscoverResults(prev => [...prev, ...more]);
       } else {
         // City rotation load more — covers both default "For You" and category chips
@@ -387,7 +394,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
               body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p))).catch(() => [])
+            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 3).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
           ));
           const maxLen = Math.max(...results.map(r => r.length));
           for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) morePlaces.push(r[i]); });
@@ -399,13 +406,13 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               return fetch('https://places.googleapis.com/v1/places:searchText', {
                 method: 'POST', headers: HEADERS,
                 body: JSON.stringify({ textQuery, includedType, pageToken: token, languageCode: 'en' }),
-              }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)), token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+              }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
             }
             const city = WORLD_CITIES[(nextPage * DEFAULT_CATEGORY_SEARCHES.length + i) % WORLD_CITIES.length];
             return fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
               body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 4.0, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)), token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 5).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
           }));
           setDiscoverDefaultTokens(results.map(r => r.token));
           const maxLen = Math.max(...results.map(r => r.places.length));
