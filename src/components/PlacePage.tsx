@@ -39,12 +39,12 @@ export default function PlacePage({ place, appUser, isSaved, onClose, onToggleSa
   const [selectedPost, setSelectedPost] = useState<RealPost | null>(null);
   const [photoIndex, setPhotoIndex] = useState(0);
 
-  // All photos combined: curio first, then Google
-  const curioPhotos = posts.flatMap(p => p.places.filter(pl => pl.photoUrl).map(pl => ({ url: pl.photoUrl, type: 'curio' as const, post: p })));
-  const allPhotos = [
-    ...curioPhotos.map(c => c.url),
-    ...googlePhotos,
-  ];
+  // Only photos of THIS specific place from curio posts
+  const curioPhotos = posts
+    .map(p => p.places.find(pl => pl.name === place.name && pl.photoUrl))
+    .filter((pl): pl is NonNullable<typeof pl> => !!pl)
+    .map(pl => pl.photoUrl);
+  const allPhotos = [...curioPhotos, ...googlePhotos];
 
   useEffect(() => {
     setLoadingPosts(true);
@@ -111,7 +111,7 @@ export default function PlacePage({ place, appUser, isSaved, onClose, onToggleSa
       <div className="relative bg-white rounded-t-3xl overflow-hidden flex flex-col" style={{ maxHeight: '94vh' }}>
 
         {/* Hero photo carousel */}
-        <div className="relative flex-shrink-0 bg-gray-100" style={{ height: 240 }}>
+        <div className="relative flex-shrink-0 bg-gray-100 rounded-t-3xl overflow-hidden" style={{ height: 240 }}>
           {loadingPhotos && allPhotos.length === 0 ? (
             <div className="w-full h-full flex items-center justify-center">
               <Loader2 size={22} className="animate-spin text-gray-300" />
@@ -168,58 +168,49 @@ export default function PlacePage({ place, appUser, isSaved, onClose, onToggleSa
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto">
           {/* Header */}
-          <div className="px-5 pt-4 pb-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <h2 className="text-xl font-bold text-gray-900 leading-tight">{placeName}</h2>
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  <span className="text-sm">{categoryEmoji[place.category] ?? '📍'}</span>
-                  <span className="text-xs text-gray-500 capitalize">{place.category}</span>
-                  {(place.neighborhood || place.city) && (
-                    <>
-                      <span className="text-gray-300">·</span>
-                      <span className="flex items-center gap-0.5 text-xs text-gray-400">
-                        <MapPin size={9} strokeWidth={1.5} />
-                        {[place.neighborhood, place.city].filter(Boolean).join(', ')}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <div className="px-5 pt-5 pb-4 border-b border-gray-100">
+            <h2 className="text-xl font-bold text-gray-900 leading-tight">{placeName}</h2>
 
-          {/* Info strip */}
-          <div className="px-5 pb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-gray-100">
-            {rating !== null && (
-              <div className="flex items-center gap-1">
-                <Star size={11} className="fill-amber-400 text-amber-400" />
-                <span className="text-xs font-semibold text-gray-700">{rating.toFixed(1)}</span>
+            {/* Location line */}
+            <p className="text-sm text-gray-400 mt-0.5">
+              {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+            </p>
+
+            {/* Key facts row */}
+            <div className="flex items-center gap-3 mt-3 flex-wrap">
+              {rating !== null && (
+                <div className="flex items-center gap-1">
+                  <Star size={12} className="fill-amber-400 text-amber-400" />
+                  <span className="text-sm font-semibold text-gray-800">{rating.toFixed(1)}</span>
+                </div>
+              )}
+              {openNow !== null && (
+                <span className={`text-xs font-semibold ${openNow ? 'text-green-600' : 'text-red-500'}`}>
+                  {openNow ? 'Open now' : 'Closed'}
+                </span>
+              )}
+              {todayHours && (
+                <span className="text-xs text-gray-400">{todayHours}</span>
+              )}
+            </div>
+
+            {/* Links row — only if present */}
+            {(phone || website) && (
+              <div className="flex items-center gap-3 mt-2">
+                {phone && (
+                  <a href={`tel:${phone}`} className="flex items-center gap-1 text-xs text-gray-500">
+                    <Phone size={11} strokeWidth={1.5} />
+                    <span>{phone}</span>
+                  </a>
+                )}
+                {website && (
+                  <a href={website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-500">
+                    <Globe size={11} strokeWidth={1.5} />
+                    <span className="truncate max-w-[140px]">{website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</span>
+                    <ExternalLink size={9} strokeWidth={1.5} />
+                  </a>
+                )}
               </div>
-            )}
-            {openNow !== null && (
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${openNow ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                {openNow ? 'Open now' : 'Closed'}
-              </span>
-            )}
-            {todayHours && (
-              <div className="flex items-center gap-1 text-xs text-gray-400">
-                <Clock size={10} strokeWidth={1.5} />
-                <span>{todayHours}</span>
-              </div>
-            )}
-            {phone && (
-              <a href={`tel:${phone}`} className="flex items-center gap-1 text-xs text-gray-400">
-                <Phone size={10} strokeWidth={1.5} />
-                <span>{phone}</span>
-              </a>
-            )}
-            {website && (
-              <a href={website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-500">
-                <Globe size={10} strokeWidth={1.5} />
-                <span className="truncate max-w-[120px]">{website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}</span>
-                <ExternalLink size={9} strokeWidth={1.5} />
-              </a>
             )}
           </div>
 
