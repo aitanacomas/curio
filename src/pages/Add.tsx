@@ -11,6 +11,7 @@ import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
 import MapView from '../components/MapView';
 import ImageCarousel from '../components/ImageCarousel';
+import CreateGuideSheet from '../components/CreateGuideSheet';
 
 type Step = 'upload' | 'places' | 'preview' | 'import';
 type Visibility = 'map' | 'profile' | 'feed';
@@ -580,6 +581,7 @@ function SortablePlaceRow({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Add({ userId, userAvatar, username, onComplete }: Props) {
+  const [mode, setMode] = useState<'choose' | 'post' | 'guide'>('choose');
   const [step, setStep] = useState<Step>('upload');
   const [places, setPlaces] = useState<IdentifiedPlace[]>([]);
   const [caption, setCaption] = useState('');
@@ -812,6 +814,55 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
     { value: 'feed', label: 'Everyone' },
   ];
 
+  // ── CHOOSE mode ───────────────────────────────────────────────────
+  if (mode === 'choose') {
+    return (
+      <div className="min-h-screen bg-white flex flex-col">
+          <div className="px-5 pt-14 mb-8">
+          <h1 className="text-3xl font-black text-gray-900 tracking-tight">Create</h1>
+          <p className="text-sm text-gray-400 mt-1">What would you like to share?</p>
+        </div>
+        <div className="px-5 flex flex-col gap-3">
+          <button
+            onClick={() => setMode('post')}
+            className="flex items-center gap-4 rounded-2xl border border-gray-100 p-4 text-left active:bg-gray-50 transition-colors"
+          >
+            <span className="text-2xl flex-shrink-0">📸</span>
+            <div>
+              <p className="text-base font-bold text-gray-900">Post</p>
+              <p className="text-sm text-gray-400 mt-0.5">Share photos from your travels</p>
+            </div>
+          </button>
+          <button
+            onClick={() => setMode('guide')}
+            className="flex items-center gap-4 rounded-2xl border border-gray-100 p-4 text-left active:bg-gray-50 transition-colors"
+          >
+            <span className="text-2xl flex-shrink-0">📖</span>
+            <div>
+              <p className="text-base font-bold text-gray-900">Guide</p>
+              <p className="text-sm text-gray-400 mt-0.5">Curate your favourite spots in a city</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── GUIDE mode ────────────────────────────────────────────────────
+  if (mode === 'guide') {
+    return (
+      <div className="min-h-screen bg-white">
+        <CreateGuideSheet
+          userId={userId}
+          onClose={() => setMode('choose')}
+          onCreated={(guide) => {
+            onComplete({ visibility: 'feed', placesCount: guide.places?.length ?? 0 });
+          }}
+        />
+      </div>
+    );
+  }
+
   // ── Photo editor overlay ───────────────────────────────────────────
   const editingPlace = editingPhotoId ? places.find(p => p.id === editingPhotoId) : null;
   if (editingPlace) {
@@ -829,7 +880,7 @@ export default function Add({ userId, userAvatar, username, onComplete }: Props)
     return (
       <div className="min-h-screen bg-white flex flex-col">
         <div className="flex items-center px-4 pt-5 pb-3">
-          <button onClick={() => onComplete({ visibility, placesCount: 0 })} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+          <button onClick={() => setMode('choose')} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
             <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
           </button>
         </div>

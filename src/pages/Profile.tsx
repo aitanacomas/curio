@@ -11,10 +11,12 @@ import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, getLikedPostsFull, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, getLikedPostsFull, getSubscribedGuides, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
 import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 import PlaceSearch from '../components/PlaceSearch';
+import PlacePage from '../components/PlacePage';
 import GuideDetail from '../components/GuideDetail';
+import CreateGuideSheet from '../components/CreateGuideSheet';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
@@ -166,9 +168,9 @@ function SortableEditPlace({ place, i, total, isExpanded, onToggle, onRemove, on
         </div>
         {/* Info */}
         <button className="flex-1 min-w-0 text-left" onClick={onToggle}>
-          <p className="text-[15px] font-semibold text-gray-900 truncate leading-tight">{place.name || <span className="text-gray-400 italic text-sm">Unnamed place</span>}</p>
-          <p className="text-[13px] text-gray-400 truncate mt-0.5">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
-          <p className="text-[11px] text-gray-300 mt-0.5">{isExpanded ? 'Tap to collapse' : 'Tap to edit'}</p>
+          <p className="text-sm font-semibold text-gray-900 truncate leading-tight">{place.name || <span className="text-gray-400 italic text-sm">Unnamed place</span>}</p>
+          <p className="text-xs text-gray-400 truncate mt-0.5">{[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}</p>
+          <p className="text-xs text-gray-300 mt-0.5">{isExpanded ? 'Tap to collapse' : 'Tap to edit'}</p>
         </button>
         {/* Remove */}
         <button onClick={onRemove} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 active:bg-gray-200 flex-shrink-0">
@@ -318,7 +320,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [sharedCollections, setSharedCollections] = useState<RealCollection[]>([]);
   const [collectionCoverPhotos, setCollectionCoverPhotos] = useState<Record<string, string[]>>({});
   const [userGuides, setUserGuides] = useState<Guide[]>([]);
+  const [showCreateGuide, setShowCreateGuide] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [editingGuide, setEditingGuide] = useState<Guide | null>(null);
+  const [guidePlacePage, setGuidePlacePage] = useState<RealPostPlace | null>(null);
+  const [subscribedGuides, setSubscribedGuides] = useState<Guide[]>([]);
+  const [guidesSubTab, setGuidesSubTab] = useState<'mine' | 'following'>('mine');
   const [pinnedPostId, setPinnedPostId] = useState<string | null>(() =>
     appUser?.id ? localStorage.getItem(`pinned_post_${appUser.id}`) : null
   );
@@ -429,6 +436,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       });
       getSharedCollections(appUser.id).then(setSharedCollections);
       getUserGuides(appUser.id).then(setUserGuides);
+      getSubscribedGuides(appUser.id).then(setSubscribedGuides);
       getLikedPosts(appUser.id).then(setLikedRealPosts);
       getSavedPosts(appUser.id).then(setSavedRealPosts);
       getSavedPlaceIds(appUser.id).then(setPostPlaceSavedIds);
@@ -866,7 +874,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {showEditPost && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowEditPost(false)} />
-          <div className="relative bg-white rounded-t-[2rem] max-h-[94vh] flex flex-col">
+          <div className="relative bg-white rounded-t-3xl max-h-[94vh] flex flex-col">
             {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-0 flex-shrink-0">
               <div className="w-9 h-1 rounded-full bg-gray-200" />
@@ -918,7 +926,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   onChange={e => setEditPostCaption(e.target.value)}
                   rows={3}
                   placeholder="Write a caption…"
-                  className="w-full text-[15px] text-gray-900 leading-relaxed outline-none resize-none placeholder-gray-300 bg-transparent"
+                  className="w-full text-sm text-gray-900 leading-relaxed outline-none resize-none placeholder-gray-300 bg-transparent"
                 />
                 {/* Hashtags inline below caption */}
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
@@ -926,7 +934,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <button
                       key={tag}
                       onClick={() => setEditPostHashtags(prev => prev.filter(t => t !== tag))}
-                      className="flex items-center gap-1 text-[13px] font-medium text-orange-500"
+                      className="flex items-center gap-1 text-sm font-medium text-orange-500"
                     >
                       #{tag} <X size={9} strokeWidth={2.5} className="text-orange-300" />
                     </button>
@@ -943,7 +951,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                       }
                     }}
                     placeholder="# add tag"
-                    className="text-[13px] font-medium text-gray-400 bg-transparent outline-none placeholder-gray-300 min-w-[60px]"
+                    className="text-sm font-medium text-gray-400 bg-transparent outline-none placeholder-gray-300 min-w-[60px]"
                     style={{ width: `${Math.max(60, (editTagInput.length + 5) * 8)}px` }}
                   />
                 </div>
@@ -988,7 +996,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
               {/* Collaborators */}
               <div className="px-5 pt-4 pb-4 border-b border-gray-100">
-                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">With</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">With</p>
                 {postCollaborators.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-3">
                     {postCollaborators.map(c => (
@@ -1506,7 +1514,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                             setListFollowPending(null);
                           }
                         }}
-                        className={`text-[11px] font-semibold rounded-full px-3 py-1.5 flex-shrink-0 flex items-center gap-1 disabled:opacity-50 transition-colors ${
+                        className={`text-xs font-semibold rounded-full px-3 py-1.5 flex-shrink-0 flex items-center gap-1 disabled:opacity-50 transition-colors ${
                           isFollowing
                             ? 'border border-gray-300 text-gray-500 bg-white'
                             : 'bg-gray-900 text-white'
@@ -2358,11 +2366,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   <div className="flex gap-6">
                     <div>
                       <p className="text-base font-black text-white">{countriesCount}</p>
-                      <p className="text-[11px] text-white/70">Countries visited</p>
+                      <p className="text-xs text-white/70">Countries visited</p>
                     </div>
                     <div>
                       <p className="text-base font-black text-white">{placesCount}</p>
-                      <p className="text-[11px] text-white/70">Places</p>
+                      <p className="text-xs text-white/70">Places</p>
                     </div>
                   </div>
                 </div>
@@ -2559,39 +2567,92 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Guides Tab */}
       {activeTab === 'Guides' && (
         <div className="px-4 pt-4 pb-6">
-          {userGuides.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-6">
-              <span className="text-4xl mb-3">📖</span>
-              <p className="text-slate-800 font-semibold text-base mb-1.5">No guides yet</p>
-              <p className="text-slate-400 text-sm text-center max-w-[200px]">Publish a trip from your plans to create a public travel guide</p>
+          {/* Sub-tab toggle + create button */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center bg-gray-100 rounded-xl p-0.5 gap-0.5">
+              <button
+                onClick={() => setGuidesSubTab('mine')}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-[10px] transition-colors ${guidesSubTab === 'mine' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+              >
+                Mine {userGuides.length > 0 && `(${userGuides.length})`}
+              </button>
+              <button
+                onClick={() => setGuidesSubTab('following')}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-[10px] transition-colors ${guidesSubTab === 'following' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+              >
+                Following {subscribedGuides.length > 0 && `(${subscribedGuides.length})`}
+              </button>
             </div>
+            {appUser && guidesSubTab === 'mine' && (
+              <button
+                onClick={() => setShowCreateGuide(true)}
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 active:bg-gray-200"
+              >
+                <Plus size={14} strokeWidth={2} className="text-gray-700" />
+              </button>
+            )}
+          </div>
+
+          {guidesSubTab === 'mine' ? (
+            userGuides.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-6">
+                <span className="text-4xl mb-3">📖</span>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">No guides yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[200px]">Publish a trip from your plans to create a public travel guide</p>
+                {appUser && (
+                  <button onClick={() => setShowCreateGuide(true)} className="mt-4 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-full">
+                    Create your first guide
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {userGuides.map(guide => (
+                  <button key={guide.id} onClick={() => setSelectedGuide(guide)} className="w-full text-left flex gap-3 bg-gray-50 rounded-2xl overflow-hidden active:scale-[0.98] transition-transform">
+                    {guide.coverUrl ? <img src={guide.coverUrl} alt={guide.title} className="w-20 h-20 object-cover flex-shrink-0" /> : <div className="w-20 h-20 bg-gray-200 flex items-center justify-center flex-shrink-0 text-3xl">🗺️</div>}
+                    <div className="flex-1 min-w-0 py-3 pr-3">
+                      <p className="text-sm font-bold text-gray-900 truncate">{guide.title}</p>
+                      {guide.destination && <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><MapPin size={10} strokeWidth={1.5} />{guide.destination}</p>}
+                      {guide.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{guide.description}</p>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )
           ) : (
-            <div className="space-y-3">
-              {userGuides.map(guide => (
-                <button
-                  key={guide.id}
-                  onClick={() => setSelectedGuide(guide)}
-                  className="w-full text-left flex gap-3 bg-gray-50 rounded-2xl overflow-hidden active:scale-[0.98] transition-transform"
-                >
-                  {guide.coverUrl ? (
-                    <img src={guide.coverUrl} alt={guide.title} className="w-20 h-20 object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-20 h-20 bg-gray-200 flex items-center justify-center flex-shrink-0 text-3xl">🗺️</div>
-                  )}
-                  <div className="flex-1 min-w-0 py-3 pr-3">
-                    <p className="text-sm font-bold text-gray-900 truncate">{guide.title}</p>
-                    {guide.destination && (
-                      <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                        <MapPin size={10} strokeWidth={1.5} />{guide.destination}
-                      </p>
-                    )}
-                    {guide.description && (
-                      <p className="text-xs text-gray-500 mt-1 line-clamp-2">{guide.description}</p>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
+            subscribedGuides.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-6">
+                <span className="text-4xl mb-3">🔖</span>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">No followed guides yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[220px]">Follow guides from other travellers to keep them here</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {subscribedGuides.map(guide => (
+                  <button key={guide.id} onClick={() => setSelectedGuide(guide)} className="w-full text-left flex gap-3 bg-gray-50 rounded-2xl overflow-hidden active:scale-[0.98] transition-transform">
+                    {guide.coverUrl ? <img src={guide.coverUrl} alt={guide.title} className="w-20 h-20 object-cover flex-shrink-0" /> : <div className="w-20 h-20 bg-gray-200 flex items-center justify-center flex-shrink-0 text-3xl">🗺️</div>}
+                    <div className="flex-1 min-w-0 py-3 pr-3">
+                      <p className="text-sm font-bold text-gray-900 truncate">{guide.title}</p>
+                      {guide.destination && <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><MapPin size={10} strokeWidth={1.5} />{guide.destination}</p>}
+                      {guide.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{guide.description}</p>}
+                      <p className="text-xs text-gray-400 mt-0.5">by {guide.profile.name}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )
+          )}
+
+          {/* Create Guide Sheet */}
+          {showCreateGuide && appUser && (
+            <CreateGuideSheet
+              userId={appUser.id}
+              onClose={() => setShowCreateGuide(false)}
+              onCreated={(guide) => {
+                setUserGuides(prev => [guide, ...prev]);
+                setShowCreateGuide(false);
+              }}
+            />
           )}
         </div>
       )}
@@ -2602,11 +2663,46 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           guide={selectedGuide}
           currentUserId={appUser.id}
           onClose={() => setSelectedGuide(null)}
+          onEditGuide={() => { setEditingGuide(selectedGuide); setSelectedGuide(null); }}
+          onPlaceClick={(place) => setGuidePlacePage(place)}
           onDeleteGuide={async (id) => {
             await deleteGuide(id);
             setUserGuides(prev => prev.filter(g => g.id !== id));
             setSelectedGuide(null);
           }}
+        />
+      )}
+
+      {editingGuide && appUser && (
+        <CreateGuideSheet
+          userId={appUser.id}
+          editingGuide={editingGuide}
+          onClose={() => setEditingGuide(null)}
+          onCreated={() => setEditingGuide(null)}
+          onUpdated={(updated) => {
+            setUserGuides(prev => prev.map(g => g.id === updated.id ? { ...g, ...updated } : g));
+            setEditingGuide(null);
+          }}
+        />
+      )}
+
+      {guidePlacePage && (
+        <PlacePage
+          place={guidePlacePage}
+          appUser={appUser}
+          onClose={() => setGuidePlacePage(null)}
+          isSaved={postPlaceSavedIds.has(guidePlacePage.id)}
+          onToggleSave={async () => {
+            if (!appUser?.id || !guidePlacePage) return;
+            if (postPlaceSavedIds.has(guidePlacePage.id)) {
+              setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(guidePlacePage.id); return n; });
+              await unsavePlace(appUser.id, guidePlacePage.id);
+            } else {
+              setPostPlaceSavedIds(prev => new Set(prev).add(guidePlacePage.id));
+              await savePlace(appUser.id, guidePlacePage.id);
+            }
+          }}
+          onSelectPlace={(p) => setGuidePlacePage(p)}
         />
       )}
 

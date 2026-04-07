@@ -8,13 +8,20 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-const createDotIcon = () =>
+const createDotIcon = (selected = false) =>
   L.divIcon({
-    html: `<div style="width:14px;height:14px;background:#F97316;border:2.5px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(249,115,22,0.5)"></div>`,
+    html: `<div style="width:${selected ? 18 : 14}px;height:${selected ? 18 : 14}px;background:${selected ? '#ea580c' : '#F97316'};border:${selected ? '3px' : '2.5px'} solid white;border-radius:50%;box-shadow:0 2px 8px rgba(249,115,22,${selected ? '0.7' : '0.5'})"></div>`,
     className: '',
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
+    iconSize: [selected ? 18 : 14, selected ? 18 : 14],
+    iconAnchor: [selected ? 9 : 7, selected ? 9 : 7],
   });
+
+export interface MapBounds {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
 
 interface MapPlace {
   id: string;
@@ -52,6 +59,12 @@ function FitWorld() {
     map.setView([center.lat, 0], zoom, { animate: false });
     map.setMinZoom(zoom);
   }, [map]);
+  return null;
+}
+
+function FitCity({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => { map.setView(center, zoom, { animate: false }); }, [map, center, zoom]);
   return null;
 }
 
@@ -97,6 +110,22 @@ function MapReadyCallback({ onMapReady }: { onMapReady: (map: L.Map) => void }) 
   return null;
 }
 
+function BoundsListener({ onBoundsChange }: { onBoundsChange: (b: MapBounds) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    const emit = () => {
+      const b = map.getBounds();
+      onBoundsChange({ north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
+    };
+    map.on('moveend', emit);
+    map.on('zoomend', emit);
+    // Emit initial bounds after map is ready
+    const t = setTimeout(emit, 100);
+    return () => { map.off('moveend', emit); map.off('zoomend', emit); clearTimeout(t); };
+  }, [map, onBoundsChange]);
+  return null;
+}
+
 interface Props {
   places: MapPlace[];
   center?: [number, number];
@@ -104,9 +133,13 @@ interface Props {
   height?: string;
   onMapReady?: (map: L.Map) => void;
   hideZoomControls?: boolean;
+  onPlaceClick?: (place: MapPlace) => void;
+  onBoundsChange?: (bounds: MapBounds) => void;
+  selectedId?: string;
+  fitCity?: { center: [number, number]; zoom: number };
 }
 
-export default function MapView({ places, center = [20, 10], zoom = 2, height = '300px', onMapReady, hideZoomControls = false }: Props) {
+export default function MapView({ places, center = [20, 10], zoom = 2, height = '300px', onMapReady, hideZoomControls = false, onPlaceClick, onBoundsChange, selectedId, fitCity }: Props) {
   return (
     <MapContainer
       center={center}
@@ -120,19 +153,29 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       maxBoundsViscosity={1.0}
     >
       <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
-      <TileLayer url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png" minZoom={5} />
-      {places.length === 0 && <FitWorld />}
+      <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}" minZoom={5} />
+      {places.length === 0 && !fitCity && <FitWorld />}
+      {places.length === 0 && fitCity && <FitCity center={fitCity.center} zoom={fitCity.zoom} />}
       {places.length > 1 && <FitBounds places={places} />}
       {!hideZoomControls && <ZoomControls />}
       {onMapReady && <MapReadyCallback onMapReady={onMapReady} />}
-      {places.map(place => (
-        <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon()}>
-          <Popup>
-            <div className="text-sm font-medium">{place.name.split(',')[0].trim()}</div>
-            <div className="text-xs text-gray-500">{[(place.neighbourhood ?? place.neighborhood), place.city].filter(Boolean).join(', ') || place.country}</div>
-          </Popup>
-        </Marker>
-      ))}
+      {onBoundsChange && <BoundsListener onBoundsChange={onBoundsChange} />}
+      {places.map(place => {
+        const selected = place.id === selectedId;
+        return onPlaceClick ? (
+          <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon(selected)}
+            eventHandlers={{ click: () => onPlaceClick(place) }}
+            zIndexOffset={selected ? 1000 : 0}
+          />
+        ) : (
+          <Marker key={place.id} position={[place.lat, place.lng]} icon={createDotIcon(selected)}>
+            <Popup>
+              <div className="text-sm font-medium">{place.name.split(',')[0].trim()}</div>
+              <div className="text-xs text-gray-500">{[(place.neighbourhood ?? place.neighborhood), place.city].filter(Boolean).join(', ') || place.country}</div>
+            </Popup>
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }

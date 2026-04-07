@@ -1081,7 +1081,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
               'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
               'X-Goog-FieldMask': 'places.id,places.photos,places.types,places.displayName,places.formattedAddress,places.addressComponents,places.location',
             },
-            body: JSON.stringify({ textQuery: address ? `${name} ${address}` : name }),
+            body: JSON.stringify({ textQuery: address ? `${name} ${address}` : name, languageCode: 'en' }),
           });
           const searchData = await searchRes.json();
           const found = searchData.places?.[0];

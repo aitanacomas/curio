@@ -18,19 +18,44 @@ export function extractNeighborhood(
   const sublocal = find('sublocality_level_1') || find('neighborhood') || find('sublocality') || find('sublocality_level_2');
   const admin2 = find('administrative_area_level_2');
   const admin3 = find('administrative_area_level_3');
-  const raw = sublocal || [admin3, admin2].find(v => v && (!city || v.toLowerCase() !== city.toLowerCase())) || '';
-  let neighborhood = isLatin(raw) ? raw : '';
+  // Reject non-Latin text (e.g. Amharic, Arabic script) and pure numbers (e.g. "4", "13" from Japanese ward IDs)
+  const isUsable = (v: string) => isLatin(v) && !/^\d+$/.test(v.trim()) && v.trim().length > 1;
+  const usableSublocal = isUsable(sublocal) ? sublocal : '';
+  const raw = usableSublocal || [admin3, admin2].find(v => v && isUsable(v) && (!city || v.toLowerCase() !== city.toLowerCase())) || '';
+  let neighborhood = raw ? raw : '';
+
+  // Paris-specific: extract arrondissement from postal code (75001–75020)
+  if (!neighborhood) {
+    const postalCode = find('postal_code');
+    if (postalCode && city && city.toLowerCase().includes('paris')) {
+      const m = postalCode.match(/^750(\d{2})$/);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (num >= 1 && num <= 20) {
+          const suffix = num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th';
+          neighborhood = `${num}${suffix} Arr.`;
+        }
+      }
+    }
+  }
 
   // Fallback: parse formattedAddress — works for every city/naming convention worldwide
   if (!neighborhood && formattedAddress) {
     const parts = formattedAddress.split(',').map(s => s.trim()).filter(Boolean);
     const candidates = parts.slice(1, -2);
     for (const part of candidates) {
-      const clean = part.replace(/\d+/g, '').trim();
-      if (clean && (!city || clean.toLowerCase() !== city.toLowerCase()) && isLatin(clean) && clean.length > 2 && clean.length < 40) {
-        neighborhood = clean;
-        break;
-      }
+      // Strip leading digits (e.g. "75003 Paris" → "Paris")
+      const stripped = part.replace(/^\d+\s*/, '').trim();
+      let clean = stripped || part.replace(/\d+/g, '').trim();
+      // Strip Japanese chōme address prefix (e.g. "6-chōme-4 Iidabashi" → "Iidabashi")
+      const chomeStripped = clean.replace(/^[-\d\s]*ch[oō]me[-\d\s]*/i, '').trim();
+      if (chomeStripped) clean = chomeStripped;
+      // Skip if starts with hyphen/digit (unresolved address fragment), non-Latin, too short/long, or equals city
+      if (!clean || clean.startsWith('-') || /^\d/.test(clean)) continue;
+      if (!isLatin(clean) || clean.length <= 2 || clean.length >= 40) continue;
+      if (city && clean.toLowerCase() === city.toLowerCase()) continue;
+      neighborhood = clean;
+      break;
     }
   }
   return neighborhood;

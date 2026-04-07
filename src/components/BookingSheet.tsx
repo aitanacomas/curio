@@ -94,11 +94,11 @@ export default function BookingSheet({ place, onClose }: Props) {
           {place.price && (
             <div className="mx-4 mb-4 bg-gray-50 rounded-2xl px-4 py-3.5 flex items-center justify-between">
               <div>
-                <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider">Starting from</p>
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Starting from</p>
                 <p className="text-lg font-black text-gray-900">{place.price.replace('from ', '')}</p>
               </div>
               <div className="text-right">
-                <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider">Curio saves</p>
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Curio saves</p>
                 <p className="text-sm font-bold text-gray-900">{place.savedCount.toLocaleString()}</p>
               </div>
             </div>

@@ -6,9 +6,10 @@ interface Props {
   sublabels?: string[];
   scales?: number[];
   onClick?: () => void;
+  onIndexChange?: (index: number) => void;
 }
 
-export default function ImageCarousel({ images, labels, sublabels, scales, onClick }: Props) {
+export default function ImageCarousel({ images, labels, sublabels, scales, onClick, onIndexChange }: Props) {
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -18,6 +19,7 @@ export default function ImageCarousel({ images, labels, sublabels, scales, onCli
     if (scrollRef.current) {
       const i = Math.round(scrollRef.current.scrollLeft / scrollRef.current.offsetWidth);
       setIndex(i);
+      onIndexChange?.(i);
     }
   };
 
@@ -28,7 +30,7 @@ export default function ImageCarousel({ images, labels, sublabels, scales, onCli
   };
 
   return (
-    <div className="relative overflow-hidden select-none" onClick={onClick}>
+    <div className={`relative overflow-hidden select-none${onClick ? ' cursor-pointer active:opacity-95' : ''}`} onClick={onClick}>
       {/* Scroll strip — native CSS snap for reliable iOS swiping */}
       <div
         ref={scrollRef}

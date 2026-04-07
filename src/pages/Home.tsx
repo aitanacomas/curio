@@ -6,7 +6,10 @@ import UserProfile from './UserProfile';
 import type { AppUser } from '../types';
 import ImageCarousel from '../components/ImageCarousel';
 import PlacePage from '../components/PlacePage';
-import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getOrCreateConversation, getConversations, sendMessage, getMessages, geocodeMissingPlaces, getPostComments, addComment, savePlace, unsavePlace, getSavedPlaceIds, searchProfiles, createCollection, type RealPost, type RealPostPlace, type RealCollection, type Conversation, type Message, type PostComment, type FollowProfile } from '../lib/supabase';
+import ErrorBoundary from '../components/ErrorBoundary';
+import { supabase, getFeedPosts, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, getUserCollections, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getOrCreateConversation, getConversations, sendMessage, getMessages, deleteConversation, geocodeMissingPlaces, getPostComments, addComment, savePlace, unsavePlace, getSavedPlaceIds, searchProfiles, createCollection, getGuides, type RealPost, type RealPostPlace, type RealCollection, type Conversation, type Message, type PostComment, type FollowProfile, type Guide } from '../lib/supabase';
+import GuideDetail from '../components/GuideDetail';
+import CreateGuideSheet from '../components/CreateGuideSheet';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
@@ -62,6 +65,27 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
   const [homeShareLinkCopied, setHomeShareLinkCopied] = useState(false);
   const shareSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [allSavedPlaceIds, setAllSavedPlaceIds] = useState<Set<string>>(new Set());
+  const [carouselIndex, setCarouselIndex] = useState<Record<string, number>>({});
+  const [feedGuides, setFeedGuides] = useState<Guide[]>([]);
+  const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [editingGuide, setEditingGuide] = useState<Guide | null>(null);
+  const [inboxSearch, setInboxSearch] = useState('');
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatSearch, setNewChatSearch] = useState('');
+  const [newChatResults, setNewChatResults] = useState<FollowProfile[]>([]);
+  const [searchingNewChat, setSearchingNewChat] = useState(false);
+  const [convToDelete, setConvToDelete] = useState<string | null>(null);
+  const [swipedConvId, setSwipedConvId] = useState<string | null>(null);
+  const [favoriteConvIds, setFavoriteConvIds] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('curio_fav_convs') ?? '[]')); }
+    catch { return new Set(); }
+  });
+  const swipeTouchRef = useRef<{ x: number; id: string } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newChatSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch guides for feed
+  useEffect(() => { getGuides().then(setFeedGuides); }, []);
 
   // Fetch real posts from Supabase on mount + re-fetch when any post is updated
   useEffect(() => {
@@ -168,6 +192,17 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
   if (showInbox && activeConversationId) {
     const chatUser = activeConversationUser;
     const initials = (chatUser?.name ?? '').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+
+    const formatMsgTime = (iso: string) => {
+      const d = new Date(iso);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const isThisWeek = now.getTime() - d.getTime() < 7 * 24 * 60 * 60 * 1000;
+      if (isToday) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      if (isThisWeek) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    };
+
     return (
       <div className="bg-white min-h-screen flex flex-col">
         <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
@@ -182,23 +217,51 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
             <p className="text-xs text-gray-400">@{chatUser?.username}</p>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
           {loadingMessages && <p className="text-center text-xs text-gray-400 py-8">Loading…</p>}
           {!loadingMessages && messages.length === 0 && (
-            <p className="text-center text-xs text-gray-400 py-12">No messages yet — say hello!</p>
+            <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
+              <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                {chatUser?.avatarUrl
+                  ? <img src={chatUser.avatarUrl} className="w-full h-full rounded-full object-cover" alt="" />
+                  : <span className="text-lg font-bold text-gray-400">{initials || '?'}</span>}
+              </div>
+              <p className="text-sm font-semibold text-gray-900 mb-1">{chatUser?.name}</p>
+              <p className="text-xs text-gray-400">@{chatUser?.username}</p>
+              <p className="text-xs text-gray-400 mt-3">Say hello!</p>
+            </div>
           )}
-          {messages.map((msg) => {
+          {messages.map((msg, idx) => {
             const isMine = msg.senderId === appUser?.id;
+            const prev = messages[idx - 1];
+            const next = messages[idx + 1];
+            const showTime = !next || new Date(next.createdAt).getTime() - new Date(msg.createdAt).getTime() > 5 * 60 * 1000;
+            const isFirstInGroup = !prev || prev.senderId !== msg.senderId || new Date(msg.createdAt).getTime() - new Date(prev.createdAt).getTime() > 5 * 60 * 1000;
+            const isLastInGroup = !next || next.senderId !== msg.senderId || new Date(next.createdAt).getTime() - new Date(msg.createdAt).getTime() > 5 * 60 * 1000;
             return (
-              <div key={msg.id} className={`flex items-end gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
-                {!isMine && (
-                  chatUser?.avatarUrl
-                    ? <img src={chatUser.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0 mb-0.5" />
-                    : <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500 flex-shrink-0 mb-0.5">{initials || '?'}</div>
-                )}
-                <div className={`max-w-[72%] px-4 py-2.5 rounded-2xl text-sm leading-snug ${isMine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
-                  {msg.text}
+              <div key={msg.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} ${isFirstInGroup ? 'mt-3' : 'mt-0.5'}`}>
+                <div className={`flex items-end gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
+                  <div className="w-7 flex-shrink-0">
+                    {!isMine && isLastInGroup && (
+                      chatUser?.avatarUrl
+                        ? <img src={chatUser.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
+                        : <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-500">{initials || '?'}</div>
+                    )}
+                  </div>
+                  <div className={`max-w-[72%] px-4 py-2.5 text-sm leading-snug ${
+                    isMine
+                      ? `bg-gray-900 text-white ${isFirstInGroup ? 'rounded-tl-2xl rounded-tr-2xl' : 'rounded-tl-2xl'} ${isLastInGroup ? 'rounded-bl-2xl rounded-br-sm' : 'rounded-bl-2xl rounded-br-2xl'}`
+                      : `bg-gray-100 text-gray-900 ${isFirstInGroup ? 'rounded-tl-2xl rounded-tr-2xl' : 'rounded-tr-2xl'} ${isLastInGroup ? 'rounded-br-2xl rounded-bl-sm' : 'rounded-br-2xl rounded-bl-2xl'}`
+                  }`}>
+                    {msg.text}
+                  </div>
                 </div>
+                {showTime && (
+                  <p className={`text-[10px] text-gray-400 mt-1 ${isMine ? 'pr-9' : 'pl-9'}`}>
+                    {formatMsgTime(msg.createdAt)}
+                    {isMine && <span className="ml-1 text-gray-300">✓</span>}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -243,16 +306,81 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
 
   // ── Inbox View ───────────────────────────────────────────────────
   if (showInbox) {
+    const formatConvTime = (iso: string) => {
+      const d = new Date(iso);
+      const now = new Date();
+      const diff = now.getTime() - d.getTime();
+      if (diff < 60000) return 'now';
+      if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+      if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      if (diff < 7 * 24 * 3600000) return d.toLocaleDateString([], { weekday: 'short' });
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    };
+
+    const toggleFavorite = (convId: string) => {
+      setFavoriteConvIds(prev => {
+        const next = new Set(prev);
+        if (next.has(convId)) next.delete(convId); else next.add(convId);
+        localStorage.setItem('curio_fav_convs', JSON.stringify([...next]));
+        return next;
+      });
+      setSwipedConvId(null);
+    };
+
+    const handleDeleteConv = async (convId: string) => {
+      await deleteConversation(convId);
+      setConversations(prev => prev.filter(c => c.id !== convId));
+      setConvToDelete(null);
+      setSwipedConvId(null);
+    };
+
+    const baseConvs = inboxSearch.trim()
+      ? conversations.filter(c => c.otherUser.name.toLowerCase().includes(inboxSearch.toLowerCase()) || c.otherUser.username.toLowerCase().includes(inboxSearch.toLowerCase()))
+      : conversations;
+
+    // Favorites pinned at top
+    const filteredConvs = [
+      ...baseConvs.filter(c => favoriteConvIds.has(c.id)),
+      ...baseConvs.filter(c => !favoriteConvIds.has(c.id)),
+    ];
+
     return (
       <div className="bg-white min-h-screen">
-        <div className="sticky top-0 z-10 bg-white flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
-          <button onClick={() => { setShowInbox(false); onMessagesClose?.(); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
-            <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
-          </button>
-          <h2 className="text-base font-bold text-gray-900 flex-1">Messages</h2>
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-white px-4 pt-5 pb-3 border-b border-gray-100">
+          <div className="flex items-center gap-3 mb-3">
+            <button onClick={() => { setShowInbox(false); onMessagesClose?.(); setInboxSearch(''); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+              <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            <h2 className="text-base font-bold text-gray-900 flex-1">Messages</h2>
+            <button
+              onClick={() => { setShowNewChat(true); setNewChatSearch(''); setNewChatResults([]); }}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-700">
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+            </button>
+          </div>
+          {/* Search bar */}
+          <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+            <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+            <input
+              value={inboxSearch}
+              onChange={e => setInboxSearch(e.target.value)}
+              placeholder="Search messages…"
+              className="flex-1 bg-transparent text-sm outline-none text-gray-900 placeholder-gray-400"
+            />
+            {inboxSearch && (
+              <button onClick={() => setInboxSearch('')}>
+                <X size={13} className="text-gray-400" />
+              </button>
+            )}
+          </div>
         </div>
+
         {loadingConversations && (
-          <div className="space-y-0 divide-y divide-gray-50">
+          <div className="divide-y divide-gray-50">
             {[0,1,2].map(i => (
               <div key={i} className="flex items-center gap-3 px-4 py-3.5 animate-pulse">
                 <div className="w-12 h-12 rounded-full bg-gray-100 flex-shrink-0" />
@@ -264,51 +392,224 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
             ))}
           </div>
         )}
+
         {!loadingConversations && conversations.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 px-8 text-center">
+          <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
             <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
               <Send size={22} strokeWidth={1.5} className="text-gray-400" />
             </div>
             <p className="text-sm font-semibold text-gray-900 mb-1">No messages yet</p>
-            <p className="text-xs text-gray-400 leading-relaxed">Tap the chat icon on someone's profile to start a conversation.</p>
+            <p className="text-xs text-gray-400 leading-relaxed mb-5">Start a conversation with someone you follow.</p>
+            <button
+              onClick={() => { setShowNewChat(true); setNewChatSearch(''); setNewChatResults([]); }}
+              className="bg-gray-900 text-white text-sm font-semibold rounded-full px-5 py-2.5"
+            >
+              New message
+            </button>
           </div>
         )}
-        <div className="divide-y divide-gray-50">
-          {conversations.map(conv => {
+
+        {!loadingConversations && conversations.length > 0 && filteredConvs.length === 0 && (
+          <p className="text-center text-xs text-gray-400 py-10">No conversations found</p>
+        )}
+
+        <div className="divide-y divide-gray-50 overflow-hidden">
+          {filteredConvs.map(conv => {
             const u = conv.otherUser;
             const ini = u.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+            const isSwiped = swipedConvId === conv.id;
+            const isFav = favoriteConvIds.has(conv.id);
             return (
-              <button
-                key={conv.id}
-                onClick={async () => {
-                  setActiveConversationUser(u);
-                  setActiveConversationId(conv.id);
-                }}
-                className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 text-left"
-              >
-                {u.avatarUrl
-                  ? <img src={u.avatarUrl} alt={u.name} className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
-                  : <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{ini || '?'}</div>}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className={`text-sm ${conv.unread ? 'font-bold text-gray-900' : 'font-semibold text-gray-900'}`}>{u.name}</p>
-                    {conv.unread && <div className="w-2 h-2 rounded-full bg-gray-900 flex-shrink-0" />}
-                  </div>
-                  <p className={`text-xs truncate mt-0.5 ${conv.unread ? 'text-gray-700 font-medium' : 'text-gray-400'}`}>
-                    {conv.lastMessage ? conv.lastMessage.text : 'No messages yet'}
-                  </p>
+              <div key={conv.id} className="relative overflow-hidden">
+                {/* Action buttons revealed on swipe */}
+                <div className="absolute right-0 top-0 bottom-0 flex">
+                  <button
+                    onClick={() => toggleFavorite(conv.id)}
+                    className="w-16 flex flex-col items-center justify-center gap-1 text-white text-[10px] font-semibold"
+                    style={{ background: '#F59E0B' }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill={isFav ? 'white' : 'none'} stroke="white" strokeWidth="1.8">
+                      <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>
+                    </svg>
+                    {isFav ? 'Unfav' : 'Fav'}
+                  </button>
+                  <button
+                    onClick={() => setConvToDelete(conv.id)}
+                    className="w-16 flex flex-col items-center justify-center gap-1 bg-red-500 text-white text-[10px] font-semibold"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/><path d="M9,6V4h6v2"/>
+                    </svg>
+                    Delete
+                  </button>
                 </div>
-              </button>
+
+                {/* Row content — slides left to reveal actions */}
+                <div
+                  style={{
+                    transform: isSwiped ? 'translateX(-128px)' : 'translateX(0)',
+                    transition: 'transform 0.22s ease',
+                  }}
+                  onTouchStart={e => {
+                    swipeTouchRef.current = { x: e.touches[0].clientX, id: conv.id };
+                    if (swipedConvId && swipedConvId !== conv.id) setSwipedConvId(null);
+                  }}
+                  onTouchEnd={e => {
+                    if (!swipeTouchRef.current) return;
+                    const diff = e.changedTouches[0].clientX - swipeTouchRef.current.x;
+                    if (swipeTouchRef.current.id === conv.id) {
+                      if (diff < -40) setSwipedConvId(conv.id);
+                      else if (diff > 20) setSwipedConvId(null);
+                    }
+                    swipeTouchRef.current = null;
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      if (isSwiped) { setSwipedConvId(null); return; }
+                      setActiveConversationUser(u);
+                      setActiveConversationId(conv.id);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 bg-white active:bg-gray-50 text-left"
+                  >
+                    <div className="relative flex-shrink-0">
+                      {u.avatarUrl
+                        ? <img src={u.avatarUrl} alt={u.name} className="w-12 h-12 rounded-full object-cover" />
+                        : <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500">{ini || '?'}</div>}
+                      {isFav && (
+                        <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-400 rounded-full flex items-center justify-center">
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className={`text-sm truncate ${conv.unread ? 'font-bold text-gray-900' : 'font-semibold text-gray-900'}`}>{u.name}</p>
+                        {conv.lastMessage && (
+                          <span className="text-[10px] text-gray-400 flex-shrink-0">{formatConvTime(conv.lastMessage.createdAt)}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className={`text-xs truncate flex-1 ${conv.unread ? 'text-gray-700 font-medium' : 'text-gray-400'}`}>
+                          {conv.lastMessage ? conv.lastMessage.text : 'No messages yet'}
+                        </p>
+                        {conv.unread && <div className="w-2 h-2 rounded-full bg-gray-900 flex-shrink-0" />}
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>
+
+        {/* Delete confirmation sheet */}
+        {convToDelete && (
+          <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setConvToDelete(null)} />
+            <div className="relative bg-white rounded-t-3xl px-4 pt-5 pb-8">
+              <p className="text-sm font-semibold text-gray-900 text-center mb-1">Delete conversation?</p>
+              <p className="text-xs text-gray-400 text-center mb-5">This will remove the chat for both sides.</p>
+              <button
+                onClick={() => handleDeleteConv(convToDelete)}
+                className="w-full bg-red-500 text-white text-sm font-semibold rounded-2xl py-3.5 mb-2"
+              >
+                Delete
+              </button>
+              <button
+                onClick={() => setConvToDelete(null)}
+                className="w-full bg-gray-100 text-gray-700 text-sm font-semibold rounded-2xl py-3.5"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* New Chat sheet */}
+        {showNewChat && (
+          <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewChat(false)} />
+            <div className="relative bg-white rounded-t-3xl" style={{ maxHeight: '85vh' }}>
+              <div className="px-4 pt-5 pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-3 mb-3">
+                  <button onClick={() => setShowNewChat(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                    <X size={14} strokeWidth={2} className="text-gray-700" />
+                  </button>
+                  <p className="text-sm font-bold text-gray-900 flex-1">New message</p>
+                </div>
+                <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+                  <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                  <input
+                    autoFocus
+                    value={newChatSearch}
+                    onChange={e => {
+                      const q = e.target.value;
+                      setNewChatSearch(q);
+                      if (newChatSearchRef.current) clearTimeout(newChatSearchRef.current);
+                      if (!q.trim()) { setNewChatResults([]); return; }
+                      setSearchingNewChat(true);
+                      newChatSearchRef.current = setTimeout(async () => {
+                        const results = await searchProfiles(q, appUser?.id ?? '');
+                        setNewChatResults(results);
+                        setSearchingNewChat(false);
+                      }, 300);
+                    }}
+                    placeholder="Search people…"
+                    className="flex-1 bg-transparent text-sm outline-none text-gray-900 placeholder-gray-400"
+                  />
+                </div>
+              </div>
+              <div className="overflow-y-auto" style={{ maxHeight: 'calc(85vh - 130px)' }}>
+                {searchingNewChat && (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="w-5 h-5 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
+                  </div>
+                )}
+                {!searchingNewChat && newChatSearch && newChatResults.length === 0 && (
+                  <p className="text-center text-xs text-gray-400 py-8">No people found</p>
+                )}
+                {!searchingNewChat && !newChatSearch && (
+                  <p className="text-center text-xs text-gray-400 py-8">Search for someone to message</p>
+                )}
+                {newChatResults.map(user => {
+                  const ini = user.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+                  return (
+                    <button
+                      key={user.id}
+                      onClick={async () => {
+                        if (!appUser?.id) return;
+                        const convId = await getOrCreateConversation(appUser.id, user.id);
+                        if (!convId) return;
+                        setShowNewChat(false);
+                        setActiveConversationUser({ id: user.id, name: user.name, username: user.username, avatarUrl: user.avatarUrl });
+                        setActiveConversationId(convId);
+                        // Refresh conversations list
+                        getConversations(appUser.id).then(setConversations);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 text-left"
+                    >
+                      {user.avatarUrl
+                        ? <img src={user.avatarUrl} alt={user.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                        : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{ini}</div>}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                        <p className="text-xs text-gray-400">@{user.username}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   // ── Feed View ────────────────────────────────────────────────────
   return (
-    <div className="bg-gray-50 min-h-screen">
+    <div className="bg-white min-h-screen">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white px-4 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
         <h1 className="text-3xl font-black text-gray-900 tracking-tight">curio</h1>
@@ -320,17 +621,97 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
         </button>
       </div>
 
-      {/* Feed */}
-      <div className="bg-slate-50 space-y-3 px-3 pt-3 pb-8">
-        {/* Real posts from Supabase */}
-        {realPosts.map(post => {
-          const images = post.places.map(p => p.photoUrl).filter(Boolean);
-          const firstPlace = post.places[0];
-          if (!images.length || !firstPlace) return null;
-          const sn = (name: string) => name.split(',')[0].trim();
-          const locationLabel = post.locationLabel || (post.places.length === 1
-            ? `${sn(firstPlace.name)} · ${firstPlace.city}`
-            : `${sn(firstPlace.name)} +${post.places.length - 1} · ${firstPlace.city}`);
+      {/* Feed — vertical scroll */}
+      <div className="pt-3 pb-8">
+
+        {/* Empty state */}
+        {isNewUser && realPosts.length === 0 && (
+          <div className="px-5 pt-8 pb-6">
+            <div className="mb-6">
+              <p className="text-slate-800 font-bold text-lg mb-1">Welcome{appUser?.name ? `, ${appUser.name.split(' ')[0]}` : ''}</p>
+              <p className="text-slate-400 text-sm">Here's how to get started on curio</p>
+            </div>
+            <div className="space-y-3">
+              <button onClick={() => setShowFindPeople(true)} className="w-full flex items-center gap-4 bg-slate-50 rounded-2xl px-4 py-4 text-left active:bg-slate-100 transition-colors">
+                <div className="w-11 h-11 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0"><Users size={20} strokeWidth={1.5} className="text-white" /></div>
+                <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-slate-900">Find people to follow</p><p className="text-xs text-slate-400 mt-0.5">Discover travellers with great taste</p></div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-slate-300 flex-shrink-0"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <button onClick={() => onNavigate?.('add')} className="w-full flex items-center gap-4 bg-slate-50 rounded-2xl px-4 py-4 text-left active:bg-slate-100 transition-colors">
+                <div className="w-11 h-11 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0"><Plus size={20} strokeWidth={1.5} className="text-white" /></div>
+                <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-slate-900">Share your first place</p><p className="text-xs text-slate-400 mt-0.5">Post a restaurant, hotel, or spot you love</p></div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-slate-300 flex-shrink-0"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {[
+          ...realPosts.map(p => ({ type: 'post' as const, id: p.id, ts: new Date(p.createdAt).getTime(), data: p })),
+          ...feedGuides.map(g => ({ type: 'guide' as const, id: g.id, ts: new Date(g.publishedAt).getTime(), data: g })),
+        ].sort((a, b) => b.ts - a.ts).map(item => {
+          if (item.type === 'guide') {
+            const guide = item.data;
+            const timeAgo = (() => {
+              const diff = Date.now() - item.ts;
+              const mins = Math.floor(diff / 60000);
+              if (mins < 60) return `${mins}m`;
+              const hrs = Math.floor(mins / 60);
+              if (hrs < 24) return `${hrs}h`;
+              return `${Math.floor(hrs / 24)}d`;
+            })();
+            return (
+              <div key={`guide-${guide.id}`} className="mb-7 mx-4">
+                <button
+                  onClick={() => setSelectedGuide(guide)}
+                  className="w-full text-left active:opacity-90 transition-opacity"
+                >
+                  <div className="relative rounded-[22px] overflow-hidden shadow-md" style={{ height: 300 }}>
+                    {guide.coverUrl
+                      ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                      : <div className="absolute inset-0 bg-gradient-to-br from-gray-700 to-gray-900" />
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/70" />
+                    {/* Author top */}
+                    <div className="absolute top-0 left-0 right-0 px-4 pt-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {guide.profile.avatarUrl
+                          ? <img src={guide.profile.avatarUrl} alt={guide.profile.name} className="w-8 h-8 rounded-full object-cover border border-white/30" />
+                          : <div className="w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">{guide.profile.name[0]?.toUpperCase()}</div>
+                        }
+                        <span className="text-white text-sm font-semibold drop-shadow">{guide.profile.username || guide.profile.name}</span>
+                      </div>
+                      <span className="text-white/70 text-xs drop-shadow">{timeAgo}</span>
+                    </div>
+                    {/* Guide badge + title bottom */}
+                    <div className="absolute bottom-0 left-0 right-0 px-4 pb-4">
+                      <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full border border-white/20 inline-block mb-1.5">📖 Guide</span>
+                      <h3 className="text-white text-xl font-black leading-tight drop-shadow">{guide.title}</h3>
+                      <div className="flex items-center gap-1 mt-1">
+                        {guide.destination && (
+                          <span className="text-white/70 text-xs flex items-center gap-0.5">
+                            <MapPin size={9} strokeWidth={1.5} className="inline" />{guide.destination}
+                          </span>
+                        )}
+                        {guide.destination && guide.places && guide.places.length > 0 && (
+                          <span className="text-white/40 text-xs">·</span>
+                        )}
+                        {guide.places && guide.places.length > 0 && (
+                          <span className="text-white/70 text-xs">{guide.places.length} place{guide.places.length !== 1 ? 's' : ''}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            );
+          }
+
+          const post = item.data;
+          const images = post.places.map(p => p.photoUrl).filter(Boolean) as string[];
+          if (!images.length) return null;
+          const placeLabels = post.places.map(p => p.name.split(',')[0].trim());
+          const placeSublabels = post.places.map(p => [p.neighborhood, p.city].filter(Boolean).join(', ') || p.country);
           const timeAgo = (() => {
             const diff = Date.now() - new Date(post.createdAt).getTime();
             const mins = Math.floor(diff / 60000);
@@ -340,352 +721,251 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
             return `${Math.floor(hrs / 24)}d`;
           })();
           const avatarSrc = post.profile.avatarUrl ?? '/aitana-avatar.jpg';
-          const isSaved = savedRealPosts.has(post.id);
           const isLiked = likedRealPosts.has(post.id);
+          const allPlacesSaved = post.places.length > 0 && post.places.every(p => allSavedPlaceIds.has(p.id));
+          const commentCount = commentsMap[post.id]?.length ?? 0;
+          const uniquePlaceCount = (() => {
+            const seen = new Set<string>();
+            return post.places.filter(p => { const k = p.name.split(',')[0].trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).length;
+          })();
+
           return (
-            <div key={post.id} className="bg-white rounded-3xl overflow-hidden">
-              {/* Photo with overlaid profile info */}
-              <div className="relative">
+            <div key={post.id} className="mb-7">
+              {/* ── Photo card ── */}
+              <div className="mx-4 relative rounded-[22px] overflow-hidden shadow-md">
+                {/* Author overlay at top */}
+                <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/45 to-transparent pointer-events-none" style={{ height: 72 }} />
+                <div className="absolute top-0 left-0 right-0 z-10 px-4 pt-4 flex items-center justify-between">
+                  <button onClick={() => setViewingUserId(post.userId)} className="flex items-center gap-2 active:opacity-75">
+                    <img src={avatarSrc} alt={post.profile.name} className="w-8 h-8 rounded-full object-cover object-top border border-white/30" />
+                    <span className="text-white text-sm font-semibold drop-shadow">{post.profile.username || post.profile.name}</span>
+                  </button>
+                  <span className="text-white/70 text-xs drop-shadow">{timeAgo}</span>
+                </div>
+                {/* Carousel with place name labels + dots */}
                 <ImageCarousel
                   images={images}
-                  labels={post.places.map(p => p.name.split(',')[0].trim())}
-                  sublabels={post.places.map(p => [p.city, p.country].filter(Boolean).join(', '))}
+                  labels={placeLabels}
+                  sublabels={placeSublabels}
+                  onIndexChange={(i) => setCarouselIndex(prev => ({ ...prev, [post.id]: i }))}
+                  onClick={() => {
+                    const idx = carouselIndex[post.id] ?? 0;
+                    const placesWithPhotos = post.places.filter(p => p.photoUrl);
+                    setSelectedPlacePage(placesWithPhotos[idx] ?? post.places[0]);
+                  }}
                 />
-                {/* Profile overlay — top left (owner + collaborators) */}
-                <button
-                  onClick={() => setViewingUserId(post.userId)}
-                  className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/25 backdrop-blur-md rounded-full pl-1 pr-3 py-1 active:opacity-75"
-                >
-                  <img src={avatarSrc} alt={post.profile.name} className="w-6 h-6 rounded-full object-cover object-top border border-white/40 flex-shrink-0" />
-                  {(post.collaborators ?? []).slice(0, 2).map(c => (
-                    c.avatarUrl
-                      ? <img key={c.id} src={c.avatarUrl} alt={c.name} className="-ml-2 w-6 h-6 rounded-full object-cover border border-white/40 flex-shrink-0" />
-                      : <div key={c.id} className="-ml-2 w-6 h-6 rounded-full bg-white/20 border border-white/40 flex items-center justify-center flex-shrink-0"><span className="text-white text-[9px] font-bold">{c.name[0]?.toUpperCase()}</span></div>
-                  ))}
-                  <span className="text-white text-xs font-semibold leading-none ml-0.5">
-                    {(post.collaborators ?? []).length > 0
-                      ? `${post.profile.username || post.profile.name} & ${(post.collaborators ?? []).map(c => c.username || c.name).join(' & ')}`
-                      : (post.profile.username || post.profile.name)}
-                  </span>
-                </button>
-                {/* Time — top right */}
-                <span className="absolute top-4 right-4 text-white/60 text-[10px] font-medium">{timeAgo}</span>
               </div>
 
-              {/* Below-photo content */}
-              <div className="px-4 pt-3 pb-4">
+              {/* ── Info strip below card ── */}
+              <div className="mx-7 pt-3">
                 {/* Actions row */}
-                {(() => {
-                  const allPlacesSaved = post.places.length > 0 && post.places.every(p => allSavedPlaceIds.has(p.id));
-                  const commentCount = commentsMap[post.id]?.length ?? 0;
-                  return (
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <button
-                        className="flex items-center gap-1.5"
-                        onClick={() => {
-                          if (!appUser || appUser.isDemo) return;
-                          setLikedRealPosts(prev => { const n = new Set(prev); isLiked ? n.delete(post.id) : n.add(post.id); return n; });
-                          setRealPostLikeCounts(prev => ({ ...prev, [post.id]: (prev[post.id] ?? 0) + (isLiked ? -1 : 1) }));
-                          isLiked ? unlikePost(appUser.id, post.id) : likePost(appUser.id, post.id);
-                        }}
-                      >
-                        <Heart size={19} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-500'} />
-                        <span className="text-xs text-gray-400">{realPostLikeCounts[post.id] ?? 0}</span>
-                      </button>
-                      <button
-                        className="flex items-center gap-1.5"
-                        onClick={async () => {
-                          if (showCommentsPostId === post.id) { setShowCommentsPostId(null); return; }
-                          setShowCommentsPostId(post.id);
-                          if (!commentsMap[post.id]) {
-                            setLoadingComments(true);
-                            const comments = await getPostComments(post.id);
-                            setCommentsMap(prev => ({ ...prev, [post.id]: comments }));
-                            setLoadingComments(false);
-                          }
-                        }}
-                      >
-                        <MessageCircle size={19} strokeWidth={1.5} className={showCommentsPostId === post.id ? 'text-gray-900' : 'text-gray-500'} />
-                        <span className="text-xs text-gray-400">{commentCount}</span>
-                      </button>
-                      <button onClick={() => setShowSharePostId(showSharePostId === post.id ? null : post.id)}>
-                        <Send size={19} strokeWidth={1.5} className={showSharePostId === post.id ? 'text-gray-900' : 'text-gray-500'} />
-                      </button>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        if (!appUser || appUser.isDemo) return;
-                        if (allPlacesSaved) {
-                          for (const p of post.places) {
-                            setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(p.id); return n; });
-                            unsavePlace(appUser.id, p.id);
-                          }
-                        } else {
-                          for (const p of post.places) {
-                            setAllSavedPlaceIds(prev => new Set(prev).add(p.id));
-                            savePlace(appUser.id, p.id);
-                          }
-                          // Show "Also add to collection?" sheet
-                          setShowPostSaveSheet({ postId: post.id, placeIds: post.places.map(p => p.id) });
-                        }
-                      }}
-                    >
-                      {allPlacesSaved
-                        ? <BookmarkCheck size={19} strokeWidth={1.5} className="text-gray-900" />
-                        : <Bookmark size={19} strokeWidth={1.5} className="text-gray-500" />
+                <div className="flex items-center gap-4">
+                  <button
+                    className="flex items-center gap-1.5 active:scale-90 transition-transform"
+                    onClick={() => {
+                      if (!appUser || appUser.isDemo) return;
+                      setLikedRealPosts(prev => { const n = new Set(prev); isLiked ? n.delete(post.id) : n.add(post.id); return n; });
+                      setRealPostLikeCounts(prev => ({ ...prev, [post.id]: (prev[post.id] ?? 0) + (isLiked ? -1 : 1) }));
+                      isLiked ? unlikePost(appUser.id, post.id) : likePost(appUser.id, post.id);
+                    }}
+                  >
+                    <Heart size={20} strokeWidth={1.5} className={isLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-600'} />
+                    {(realPostLikeCounts[post.id] ?? 0) > 0 && <span className="text-sm text-gray-600">{realPostLikeCounts[post.id]}</span>}
+                  </button>
+                  <button
+                    className="flex items-center gap-1.5 active:scale-90 transition-transform"
+                    onClick={async () => {
+                      if (showCommentsPostId === post.id) { setShowCommentsPostId(null); return; }
+                      setShowCommentsPostId(post.id);
+                      if (!commentsMap[post.id]) {
+                        setLoadingComments(true);
+                        const comments = await getPostComments(post.id);
+                        setCommentsMap(prev => ({ ...prev, [post.id]: comments }));
+                        setLoadingComments(false);
                       }
+                    }}
+                  >
+                    <MessageCircle size={20} strokeWidth={1.5} className="text-gray-600" />
+                    {commentCount > 0 && <span className="text-sm text-gray-600">{commentCount}</span>}
+                  </button>
+                  <button className="active:scale-90 transition-transform" onClick={() => setShowSharePostId(showSharePostId === post.id ? null : post.id)}>
+                    <Send size={20} strokeWidth={1.5} className="text-gray-600" />
+                  </button>
+                  <button
+                    className="ml-auto active:scale-90 transition-transform"
+                    onClick={async () => {
+                      if (!appUser || appUser.isDemo) return;
+                      if (allPlacesSaved) {
+                        for (const p of post.places) { setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(p.id); return n; }); unsavePlace(appUser.id, p.id); }
+                      } else {
+                        for (const p of post.places) { setAllSavedPlaceIds(prev => new Set(prev).add(p.id)); savePlace(appUser.id, p.id); }
+                        setShowPostSaveSheet({ postId: post.id, placeIds: post.places.map(p => p.id) });
+                      }
+                    }}
+                  >
+                    {allPlacesSaved ? <BookmarkCheck size={20} strokeWidth={1.5} className="text-gray-900" /> : <Bookmark size={20} strokeWidth={1.5} className="text-gray-600" />}
+                  </button>
+                </div>
+
+                {/* Caption */}
+                {post.caption && <p className="text-sm text-gray-700 mt-2 leading-snug">{post.caption}</p>}
+
+                {/* Places button — only show when multiple unique places */}
+                {uniquePlaceCount > 1 && (
+                  <div className="flex items-center gap-3 mt-2.5">
+                    <button
+                      onClick={() => setExpandedPlacesPostId(p => p === post.id ? null : post.id)}
+                      className="flex items-center gap-1.5 text-gray-500 active:opacity-70"
+                    >
+                      <MapPin size={13} strokeWidth={1.5} className="text-gray-400" />
+                      <span className="text-sm text-gray-500">{uniquePlaceCount} places</span>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 4.5l3 3 3-3" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
                   </div>
-                  );
-                })()}
-                {/* Caption */}
-                {post.caption && <p className="text-sm text-gray-800 leading-snug mt-2.5">{post.caption}</p>}
+                )}
 
-                {/* Comments section */}
+                {/* Inline comments */}
                 {showCommentsPostId === post.id && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
-                    {loadingComments && !commentsMap[post.id] ? (
-                      <div className="space-y-2 mb-3">
-                        {[0,1].map(i => <div key={i} className="h-6 bg-gray-50 rounded-lg animate-pulse" />)}
+                    {loadingComments && <p className="text-xs text-gray-400 py-2">Loading…</p>}
+                    {(commentsMap[post.id] ?? []).map(c => (
+                      <div key={c.id} className="flex items-start gap-2 mb-2">
+                        {c.profile.avatarUrl
+                          ? <img src={c.profile.avatarUrl} className="w-6 h-6 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                          : <div className="w-6 h-6 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-gray-400 mt-0.5">{c.profile.name?.[0]}</div>}
+                        <div>
+                          <span className="text-xs font-semibold text-gray-900">{c.profile.name} </span>
+                          <span className="text-xs text-gray-600">{c.text}</span>
+                        </div>
                       </div>
-                    ) : (commentsMap[post.id] ?? []).length > 0 ? (
-                      <div className="space-y-2.5 mb-3">
-                        {(commentsMap[post.id] ?? []).map(c => (
-                          <div key={c.id} className="flex items-start gap-2">
-                            {c.profile.avatarUrl
-                              ? <img src={c.profile.avatarUrl} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                              : <div className="w-6 h-6 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-gray-400">{c.profile.name?.[0]}</div>}
-                            <div>
-                              <span className="text-xs font-semibold text-gray-900">{c.profile.name} </span>
-                              <span className="text-xs text-gray-600">{c.text}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-400 mb-3">No comments yet. Be the first!</p>
-                    )}
+                    ))}
                     {appUser && !appUser.isDemo && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={homeCommentText}
-                          onChange={e => setHomeCommentText(e.target.value)}
-                          placeholder="Add a comment…"
-                          className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none"
+                      <div className="flex items-center gap-2 mt-2">
+                        <input value={homeCommentText} onChange={e => setHomeCommentText(e.target.value)}
+                          placeholder="Add a comment…" className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none"
                           onKeyDown={async e => {
                             if (e.key === 'Enter' && homeCommentText.trim()) {
-                              const text = homeCommentText.trim();
-                              setHomeCommentText('');
+                              const text = homeCommentText.trim(); setHomeCommentText('');
                               const saved = await addComment(appUser.id, post.id, text);
                               if (saved) setCommentsMap(prev => ({ ...prev, [post.id]: [...(prev[post.id] ?? []), saved] }));
                             }
-                          }}
-                        />
-                        <button
-                          onClick={async () => {
-                            if (!homeCommentText.trim() || !appUser) return;
-                            const text = homeCommentText.trim();
-                            setHomeCommentText('');
-                            const saved = await addComment(appUser.id, post.id, text);
-                            if (saved) setCommentsMap(prev => ({ ...prev, [post.id]: [...(prev[post.id] ?? []), saved] }));
-                          }}
-                          className="text-xs font-semibold text-white px-3 py-2 bg-gray-900 rounded-xl"
-                        >Post</button>
+                          }} />
+                        <button onClick={async () => {
+                          if (!homeCommentText.trim() || !appUser) return;
+                          const text = homeCommentText.trim(); setHomeCommentText('');
+                          const saved = await addComment(appUser.id, post.id, text);
+                          if (saved) setCommentsMap(prev => ({ ...prev, [post.id]: [...(prev[post.id] ?? []), saved] }));
+                        }} className="text-xs font-semibold text-white px-3 py-2 bg-gray-900 rounded-xl">Post</button>
                       </div>
                     )}
                   </div>
                 )}
               </div>
-
-              {/* Places section — below the main card content */}
-              <div className="px-4 pb-4">
-                {/* Places toggle */}
-                {post.places.length > 0 && (() => {
-                  const uniquePlaces = post.places.filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i);
-                  return (
-                  <>
-                  <div className="mt-2 flex items-center justify-between">
-                    <button
-                      onClick={() => setExpandedPlacesPostId(p => p === post.id ? null : post.id)}
-                      className="text-xs font-semibold text-gray-400 flex items-center gap-1"
-                    >
-                      <MapPin size={10} strokeWidth={1.5} className="text-gray-400" />
-                      {uniquePlaces.length} place{uniquePlaces.length !== 1 ? 's' : ''}
-                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className={`transition-transform ${expandedPlacesPostId === post.id ? 'rotate-180' : ''}`}>
-                        <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </button>
-                    {(() => {
-                      const mapOpen = mapOpenPostId === post.id;
-                      return (
-                        <button
-                          onClick={async () => {
-                            if (mapOpen) { setMapOpenPostId(null); return; }
-                            setExpandedPlacesPostId(post.id);
-                            setMapOpenPostId(post.id);
-                            // Geocode ALL missing coords — update map pin by pin as each resolves
-                            const missing = uniquePlaces.filter(p => p.lat == null || p.lng == null);
-                            if (missing.length > 0) {
-                              setGeocodingPostId(post.id);
-                              await geocodeMissingPlaces(
-                                post.places,
-                                GOOGLE_PLACES_KEY,
-                                (updated) => {
-                                  const coordMap: Record<string, { lat: number; lng: number }> = {};
-                                  updated.forEach(pl => { if (pl.lat != null) coordMap[pl.id] = { lat: pl.lat!, lng: pl.lng! }; });
-                                  setRealPosts(prev => prev.map(rp => ({
-                                    ...rp,
-                                    places: rp.places.map(pl => coordMap[pl.id] ? { ...pl, ...coordMap[pl.id] } : pl),
-                                  })));
-                                }
-                              );
-                              setGeocodingPostId(null);
-                            }
-                          }}
-                          className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${mapOpen ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
-                        >
-                          <Map size={11} strokeWidth={1.5} />
-                          {mapOpen ? 'Hide map' : 'View on map'}
-                        </button>
-                      );
-                    })()}
-                  </div>
-                  {expandedPlacesPostId === post.id && (
-                  <div className="mt-2 space-y-2">
-                    {/* Map — above the place cards */}
-                    {mapOpenPostId === post.id && (() => {
-                      const isGeocoding = geocodingPostId === post.id;
-                      const mapPlaces = uniquePlaces.filter(p => p.lat && p.lng).map(p => ({
-                        id: p.id, name: p.name.split(',')[0].trim(), lat: p.lat!, lng: p.lng!,
-                        category: p.category, image: p.photoUrl, neighbourhood: p.neighborhood ?? '', city: p.city ?? '', country: p.country ?? '',
-                        savedCount: 0, bookingAvailable: false, rating: null,
-                      }));
-                      if (isGeocoding && mapPlaces.length === 0) return (
-                        <div className="rounded-2xl bg-gray-50 h-28 flex flex-col items-center justify-center gap-1 animate-pulse">
-                          <Map size={18} strokeWidth={1.5} className="text-gray-300" />
-                          <p className="text-xs text-gray-400">Loading map…</p>
-                        </div>
-                      );
-                      if (mapPlaces.length === 0) return (
-                        <div className="rounded-2xl bg-gray-50 h-28 flex flex-col items-center justify-center gap-1">
-                          <Map size={18} strokeWidth={1.5} className="text-gray-300" />
-                          <p className="text-xs text-gray-400">Map not available for these places</p>
-                        </div>
-                      );
-                      return (
-                        <div className="rounded-2xl overflow-hidden">
-                          <Suspense fallback={<div className="h-44 bg-gray-100 animate-pulse rounded-2xl" />}>
-                            <MapView places={mapPlaces} height="176px" />
-                          </Suspense>
-                        </div>
-                      );
-                    })()}
-                    {uniquePlaces.map(place => {
-                      const catEmoji: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', dining: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙', beach: '🏖️', sports: '🎾', wellness: '💆', street: '🏙️', event: '🎟️' };
-                      return (
-                      <div key={place.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-                        <button onClick={() => setSelectedPlacePage(place)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                        {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{place.name.split(',')[0].trim()}</p>
-                          <p className="text-xs text-gray-400 flex items-center gap-0.5 truncate mt-0.5">
-                            <MapPin size={9} strokeWidth={1.5} className="flex-shrink-0" />
-                            {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
-                          </p>
-                          {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji[place.category.toLowerCase()] ?? '📍'} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
-                        </div>
-                        </button>
-                        {appUser && !appUser.isDemo && (
-                          <button
-                            onClick={async () => {
-                              const isSavedToAll = allSavedPlaceIds.has(place.id);
-                              if (isSavedToAll) {
-                                setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
-                                unsavePlace(appUser.id, place.id);
-                              } else {
-                                setAllSavedPlaceIds(prev => new Set(prev).add(place.id));
-                                savePlace(appUser.id, place.id);
-                                // Show optional collection picker
-                                setAddToColPlace({ id: place.id, name: place.name });
-                                setLoadingPlaceCollections(true);
-                                getPlaceCollectionIds(place.id).then(ids => {
-                                  setPlaceInCollections(ids);
-                                  setLoadingPlaceCollections(false);
-                                });
-                              }
-                            }}
-                            className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${allSavedPlaceIds.has(place.id) ? 'bg-gray-900 border-gray-900' : 'border-gray-200 bg-white'}`}
-                          >
-                            {allSavedPlaceIds.has(place.id)
-                              ? <BookmarkCheck size={13} strokeWidth={1.5} className="text-white" />
-                              : <Bookmark size={13} strokeWidth={1.5} className="text-gray-400" />}
-                          </button>
-                        )}
-                      </div>
-                      );
-                    })}
-
-                  </div>
-                  )}
-                  </>
-                  );
-                })()}
-              </div>
             </div>
           );
         })}
 
-        {/* Empty state for real users with no posts yet */}
-        {isNewUser && realPosts.length === 0 && (
-          <div className="px-5 pt-8 pb-6">
-            <div className="mb-6">
-              <p className="text-slate-800 font-bold text-lg mb-1">
-                Welcome{appUser?.name ? `, ${appUser.name.split(' ')[0]}` : ''}
-              </p>
-              <p className="text-slate-400 text-sm">Here's how to get started on curio</p>
-            </div>
+      </div>
 
-            {/* Action cards */}
-            <div className="space-y-3">
-              {/* Find people */}
-              <button
-                onClick={() => setShowFindPeople(true)}
-                className="w-full flex items-center gap-4 bg-slate-50 rounded-2xl px-4 py-4 text-left active:bg-slate-100 transition-colors"
-              >
-                <div className="w-11 h-11 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
-                  <Users size={20} strokeWidth={1.5} className="text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">Find people to follow</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Discover travellers with great taste</p>
-                </div>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-slate-300 flex-shrink-0">
-                  <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
 
-              {/* Add a post */}
-              <button
-                onClick={() => onNavigate?.('add')}
-                className="w-full flex items-center gap-4 bg-slate-50 rounded-2xl px-4 py-4 text-left active:bg-slate-100 transition-colors"
-              >
-                <div className="w-11 h-11 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
-                  <Plus size={20} strokeWidth={1.5} className="text-white" />
+      {/* Places bottom sheet — map at top + list */}
+      {expandedPlacesPostId && (() => {
+        const post = realPosts.find(p => p.id === expandedPlacesPostId);
+        if (!post) return null;
+        const mapPlaces = post.places.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name, neighbourhood: p.neighborhood, city: p.city, country: p.country }));
+        return (
+          <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+            <div className="absolute inset-0 bg-black/40" onClick={() => setExpandedPlacesPostId(null)} />
+            <div className="relative bg-white rounded-t-3xl max-h-[85vh] flex flex-col">
+              <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+              {/* Header */}
+              <div className="px-5 pb-3 flex items-center justify-between">
+                <p className="text-base font-bold text-gray-900">{(() => { const s = new Set<string>(); return post.places.filter(p => { const k = p.name.split(',')[0].trim().toLowerCase(); if (s.has(k)) return false; s.add(k); return true; }).length; })()} places</p>
+                <button onClick={() => setExpandedPlacesPostId(null)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                  <X size={14} strokeWidth={2} className="text-gray-500" />
+                </button>
+              </div>
+              {/* Map */}
+              {mapPlaces.length > 0 && (
+                <div className="mx-4 mb-3 rounded-2xl overflow-hidden">
+                  <Suspense fallback={<div className="h-44 bg-gray-100 animate-pulse rounded-2xl" />}>
+                    <MapView places={mapPlaces} height="160px" />
+                  </Suspense>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">Share your first place</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Post a restaurant, hotel, or spot you love</p>
-                </div>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-slate-300 flex-shrink-0">
-                  <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
+              )}
+              {/* Place list — deduplicated by name */}
+              <div className="flex-1 overflow-y-auto pb-8 border-t border-gray-100">
+                {(() => {
+                  const seen = new Set<string>();
+                  return post.places.filter(p => {
+                    const key = p.name.split(',')[0].trim().toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  });
+                })().map((p, i) => {
+                  const isSavedPlace = allSavedPlaceIds.has(p.id);
+                  return (
+                    <div key={p.id} className="flex items-center gap-3 px-5 py-3 border-b border-gray-50 last:border-0">
+                      <span className="text-xs font-bold text-gray-300 w-4 text-center flex-shrink-0">{i + 1}</span>
+                      <button onClick={() => { setSelectedPlacePage(p); setExpandedPlacesPostId(null); }} className="flex-shrink-0 active:opacity-70">
+                        {p.photoUrl
+                          ? <img src={p.photoUrl} className="w-14 h-14 rounded-2xl object-cover" />
+                          : <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-2xl">📍</div>}
+                      </button>
+                      <button onClick={() => { setSelectedPlacePage(p); setExpandedPlacesPostId(null); }} className="flex-1 min-w-0 text-left active:opacity-70">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{p.name.split(',')[0].trim()}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 truncate">{[p.neighborhood, p.city].filter(Boolean).join(', ') || p.country}</p>
+                      </button>
+                      <button
+                        className="flex-shrink-0 w-8 h-8 flex items-center justify-center active:scale-90 transition-transform"
+                        onClick={async () => {
+                          if (!appUser || appUser.isDemo) return;
+                          if (isSavedPlace) {
+                            setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(p.id); return n; });
+                            unsavePlace(appUser.id, p.id);
+                          } else {
+                            setAllSavedPlaceIds(prev => new Set(prev).add(p.id));
+                            savePlace(appUser.id, p.id);
+                          }
+                        }}
+                      >
+                        {isSavedPlace
+                          ? <BookmarkCheck size={18} strokeWidth={1.5} className="text-gray-900" />
+                          : <Bookmark size={18} strokeWidth={1.5} className="text-gray-400" />}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        )}
+        );
+      })()}
 
-      </div>
+      {/* Guide detail overlay */}
+      {selectedGuide && (
+        <GuideDetail
+          guide={selectedGuide}
+          currentUserId={appUser?.id}
+          onClose={() => setSelectedGuide(null)}
+          onEditGuide={() => { setEditingGuide(selectedGuide); setSelectedGuide(null); }}
+          onPlaceClick={(place) => setSelectedPlacePage(place)}
+        />
+      )}
+
+      {editingGuide && appUser && (
+        <CreateGuideSheet
+          userId={appUser.id}
+          editingGuide={editingGuide}
+          onClose={() => setEditingGuide(null)}
+          onCreated={() => setEditingGuide(null)}
+          onUpdated={(updated) => {
+            setFeedGuides(prev => prev.map(g => g.id === updated.id ? { ...g, ...updated } : g));
+            setEditingGuide(null);
+          }}
+        />
+      )}
 
       {/* Collection picker sheet */}
       {addToColPlace && (
@@ -1025,21 +1305,26 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
       )}
 
       {selectedPlacePage && (
-        <PlacePage
-          place={selectedPlacePage}
-          onClose={() => setSelectedPlacePage(null)}
-          isSaved={allSavedPlaceIds.has(selectedPlacePage.id)}
-          onToggleSave={async () => {
-            if (!appUser?.id || !selectedPlacePage) return;
-            if (allSavedPlaceIds.has(selectedPlacePage.id)) {
-              setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(selectedPlacePage.id); return n; });
-              await unsavePlace(appUser.id, selectedPlacePage.id);
-            } else {
-              setAllSavedPlaceIds(prev => new Set(prev).add(selectedPlacePage.id));
-              await savePlace(appUser.id, selectedPlacePage.id);
-            }
-          }}
-        />
+        <ErrorBoundary fallback={null} key={selectedPlacePage.id}>
+          <PlacePage
+            place={selectedPlacePage}
+            appUser={appUser}
+            onClose={() => setSelectedPlacePage(null)}
+            isSaved={allSavedPlaceIds.has(selectedPlacePage.id)}
+            onToggleSave={async () => {
+              if (!appUser?.id || !selectedPlacePage) return;
+              if (allSavedPlaceIds.has(selectedPlacePage.id)) {
+                setAllSavedPlaceIds(prev => { const n = new Set(prev); n.delete(selectedPlacePage.id); return n; });
+                await unsavePlace(appUser.id, selectedPlacePage.id);
+              } else {
+                setAllSavedPlaceIds(prev => new Set(prev).add(selectedPlacePage.id));
+                await savePlace(appUser.id, selectedPlacePage.id);
+              }
+            }}
+            onViewUser={(userId) => { setSelectedPlacePage(null); setViewingUserId(userId); }}
+            onSelectPlace={(p) => setSelectedPlacePage(p)}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );

@@ -1,12 +1,18 @@
-import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import UserProfile from './UserProfile';
 import PlacePage from '../components/PlacePage';
-import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, Heart, MessageCircle, Send, Plus, Check } from 'lucide-react';
+import { Search, X, Mail, MapPin, Bookmark, BookmarkCheck, Map, LayoutGrid, Heart, MessageCircle, Send, Plus, Check, ChevronRight } from 'lucide-react';
 import { getFeedPosts, getFollowing, followUser, unfollowUser, searchProfiles, getSuggestedUsers, savePlace, unsavePlace, likePost, unlikePost, savePost, unsavePost, getPostComments, addComment, getSavedPlaces, getUserCollections, addPlaceToCollection, createCollection, getConversations, getOrCreateConversation, sendMessage, removePlaceFromCollection, buildTasteProfile, getGuides, type RealPost, type RealPostPlace, type FollowProfile, type PostComment, type RealCollection, type Conversation, type TasteProfile, type Guide } from '../lib/supabase';
 import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
 import GuideDetail from '../components/GuideDetail';
+import CreateGuideSheet from '../components/CreateGuideSheet';
+import SecretGuideSheet, { type SecretGuide } from '../components/SecretGuideSheet';
+import type { MapBounds } from '../components/MapView';
+import { SECRET_GUIDES } from '../lib/secretGuides';
+
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
+const UNSPLASH_KEY = import.meta.env.VITE_UNSPLASH_KEY as string;
 
 const MapView = lazy(() => import('../components/MapView'));
 
@@ -48,17 +54,82 @@ interface FlatPlace {
   post: RealPost;
 }
 
-// World cities rotated through for global discover results
+// Cities rotated through for For You discover results — only the 30 curated featured cities.
+// Users can search any city via the search bar to explore beyond this list.
 const WORLD_CITIES_BASE = [
-  'Tokyo', 'Paris', 'New York', 'London', 'Mexico City',
-  'Barcelona', 'Rome', 'Bangkok', 'Sydney', 'Dubai',
-  'Istanbul', 'Amsterdam', 'Singapore', 'Buenos Aires', 'Lisbon',
-  'Copenhagen', 'Seoul', 'Berlin', 'Vienna', 'Prague',
-  'Marrakech', 'Kyoto', 'Cape Town', 'Montreal', 'Havana',
-  'Bali', 'Santorini', 'Amalfi Coast', 'Tulum', 'Cartagena',
-  'Taipei', 'Ho Chi Minh City', 'Nairobi', 'Lagos', 'Bogotá',
-  'Athens', 'Budapest', 'Reykjavik', 'Dubrovnik', 'Florence',
+  'London', 'Los Angeles', 'Madrid', 'New York', 'Paris',
+  'Adelaide', 'Amsterdam', 'Bali', 'Barcelona', 'Berlin',
+  'Mexico City', 'Copenhagen', 'Dubai', 'Hamburg', 'Lisbon',
+  'Melbourne', 'Miami', 'Milan', 'Montreal', 'Munich',
+  'Rio de Janeiro', 'San Francisco', 'São Paulo', 'Seoul', 'Singapore',
+  'Stockholm', 'Sydney', 'Tokyo', 'Toronto', 'Zurich',
 ];
+
+// Approximate coordinates for each city — used to pass locationBias to Places API
+// so results are actually in the right city regardless of user's IP location.
+const CITY_COORDS: Record<string, [number, number]> = {
+  // Europe
+  'London': [51.5074, -0.1278],
+  'Paris': [48.8566, 2.3522], 'Barcelona': [41.3851, 2.1734], 'Rome': [41.9028, 12.4964],
+  'Amsterdam': [52.3676, 4.9041], 'Lisbon': [38.7169, -9.1399], 'Copenhagen': [55.6761, 12.5683],
+  'Berlin': [52.5200, 13.4050], 'Hamburg': [53.5511, 9.9937], 'Munich': [48.1351, 11.5820], 'Vienna': [48.2082, 16.3738], 'Prague': [50.0755, 14.4378],
+  'Budapest': [47.4979, 19.0402], 'Athens': [37.9838, 23.7275], 'Reykjavik': [64.1355, -21.8954],
+  'Dubrovnik': [42.6507, 18.0944], 'Florence': [43.7696, 11.2558], 'Milan': [45.4654, 9.1859],
+  'Venice': [45.4408, 12.3155], 'Madrid': [40.4168, -3.7038], 'Seville': [37.3891, -5.9845],
+  'Porto': [41.1579, -8.6291], 'Bruges': [51.2093, 3.2247], 'Edinburgh': [55.9533, -3.1883],
+  'Dublin': [53.3498, -6.2603], 'Oslo': [59.9139, 10.7522], 'Stockholm': [59.3293, 18.0686],
+  'Helsinki': [60.1699, 24.9384], 'Zurich': [47.3769, 8.5417], 'Geneva': [46.2044, 6.1432],
+  'Lyon': [45.7640, 4.8357], 'Marseille': [43.2965, 5.3698], 'Nice': [43.7102, 7.2620],
+  'Monaco': [43.7384, 7.4246], 'Valletta': [35.8997, 14.5147], 'Split': [43.5081, 16.4402],
+  'Ljubljana': [46.0569, 14.5058], 'Tallinn': [59.4370, 24.7536], 'Riga': [56.9496, 24.1052],
+  'Vilnius': [54.6872, 25.2797], 'Krakow': [50.0647, 19.9450], 'Warsaw': [52.2297, 21.0122],
+  'Sofia': [42.6977, 23.3219], 'Bucharest': [44.4268, 26.1025], 'Thessaloniki': [40.6401, 22.9444],
+  'Palermo': [38.1157, 13.3615], 'Naples': [40.8518, 14.2681],
+  // Americas
+  'New York': [40.7128, -74.0060], 'Mexico City': [19.4326, -99.1332], 'CDMX': [19.4326, -99.1332], 'Buenos Aires': [-34.6037, -58.3816],
+  'Montreal': [45.5017, -73.5673], 'Havana': [23.1136, -82.3666], 'Tulum': [20.2114, -87.4654],
+  'Cartagena': [10.3910, -75.4794], 'Bogotá': [4.7110, -74.0721], 'Rio de Janeiro': [-22.9068, -43.1729],
+  'São Paulo': [-23.5558, -46.6396], 'Lima': [-12.0464, -77.0428], 'Santiago': [-33.4489, -70.6693],
+  'Medellín': [6.2442, -75.5812], 'Oaxaca': [17.0732, -96.7266], 'Los Angeles': [34.0522, -118.2437],
+  'San Francisco': [37.7749, -122.4194], 'Miami': [25.7617, -80.1918], 'Chicago': [41.8781, -87.6298],
+  'New Orleans': [29.9511, -90.0715], 'Nashville': [36.1627, -86.7816], 'Austin': [30.2672, -97.7431],
+  'Vancouver': [49.2827, -123.1207], 'Toronto': [43.6532, -79.3832], 'Quebec City': [46.8139, -71.2082],
+  'Cancún': [21.1619, -86.8515], 'Puerto Vallarta': [20.6534, -105.2253], 'Cusco': [-13.5320, -71.9675],
+  'Montevideo': [-34.9011, -56.1645], 'Quito': [-0.1807, -78.4678], 'La Paz': [-16.5000, -68.1193],
+  'Asunción': [-25.2637, -57.5759],
+  // Asia
+  'Tokyo': [35.6762, 139.6503], 'Bangkok': [13.7563, 100.5018], 'Dubai': [25.2048, 55.2708],
+  'Istanbul': [41.0082, 28.9784], 'Seoul': [37.5665, 126.9780], 'Singapore': [1.3521, 103.8198],
+  'Kyoto': [35.0116, 135.7681], 'Taipei': [25.0330, 121.5654], 'Ho Chi Minh City': [10.8231, 106.6297],
+  'Bali': [-8.3405, 115.0920], 'Hanoi': [21.0285, 105.8542], 'Chiang Mai': [18.7883, 98.9853],
+  'Hong Kong': [22.3193, 114.1694], 'Kuala Lumpur': [3.1390, 101.6869], 'Jakarta': [-6.2088, 106.8456],
+  'Manila': [14.5995, 120.9842], 'Osaka': [34.6937, 135.5023], 'Sapporo': [43.0642, 141.3469],
+  'Fukuoka': [33.5904, 130.4017], 'Mumbai': [19.0760, 72.8777], 'Delhi': [28.7041, 77.1025],
+  'Jaipur': [26.9124, 75.7873], 'Goa': [15.2993, 74.1240], 'Bangalore': [12.9716, 77.5946],
+  'Colombo': [6.9271, 79.8612], 'Kathmandu': [27.7172, 85.3240], 'Dhaka': [23.8103, 90.4125],
+  'Yangon': [16.8661, 96.1951], 'Phnom Penh': [11.5564, 104.9282], 'Luang Prabang': [19.8846, 102.1338],
+  'Muscat': [23.5880, 58.3829], 'Doha': [25.2854, 51.5310], 'Abu Dhabi': [24.4539, 54.3773],
+  'Amman': [31.9454, 35.9284], 'Beirut': [33.8938, 35.5018], 'Tel Aviv': [32.0853, 34.7818],
+  'Tbilisi': [41.6938, 44.8015], 'Yerevan': [40.1872, 44.5152], 'Almaty': [43.2220, 76.8512],
+  'Tashkent': [41.2995, 69.2401], 'Bishkek': [42.8746, 74.5698],
+  // Africa
+  'Cape Town': [-33.9249, 18.4241], 'Nairobi': [-1.2921, 36.8219], 'Lagos': [6.5244, 3.3792],
+  'Marrakech': [31.6295, -7.9811], 'Casablanca': [33.5731, -7.5898], 'Cairo': [30.0444, 31.2357],
+  'Accra': [5.6037, -0.1870], 'Addis Ababa': [9.0320, 38.7469], 'Kigali': [-1.9441, 30.0619],
+  'Dar es Salaam': [-6.7924, 39.2083], 'Zanzibar': [-6.1659, 39.2026], 'Tunis': [36.8065, 10.1815],
+  'Algiers': [36.7372, 3.0865], 'Johannesburg': [-26.2041, 28.0473], 'Durban': [-29.8587, 31.0218],
+  'Dakar': [14.7645, -17.3660],
+  // Oceania
+  'Sydney': [-33.8688, 151.2093], 'Melbourne': [-37.8136, 144.9631], 'Brisbane': [-27.4698, 153.0251],
+  'Auckland': [-36.8485, 174.7633], 'Wellington': [-41.2865, 174.7762], 'Queenstown': [-45.0312, 168.6626],
+  'Perth': [-31.9505, 115.8605], 'Adelaide': [-34.9285, 138.6007], 'Christchurch': [-43.5321, 172.6362],
+  // Islands
+  'Santorini': [36.3932, 25.4615], 'Amalfi Coast': [40.6338, 14.6018], 'Maldives': [3.2028, 73.2207],
+  'Phuket': [7.8804, 98.3923], 'Lombok': [-8.6500, 116.3242], 'Mykonos': [37.4467, 25.3289],
+  'Ibiza': [38.9067, 1.4206], 'Mallorca': [39.6953, 3.0176], 'Corsica': [42.0396, 9.0129],
+  'Sardinia': [40.1209, 9.0129], 'Malta': [35.8997, 14.5147], 'Cyprus': [35.1264, 33.4299],
+  'Crete': [35.2401, 24.8093],
+};
 
 function shuffleArray<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -68,6 +139,114 @@ function shuffleArray<T>(arr: T[]): T[] {
   }
   return a;
 }
+
+const isLatinScript = (s: string) => /^[\u0000-\u024F\s,.\-'()&/:!?@#%+*[\]{}|~`^$]+$/.test(s);
+
+// Scenic/panoramic queries — tuned for atmospheric, aesthetic city cover shots
+// Hardcoded cover photos — these always take priority over API fetches.
+// Drop in any URL (Unsplash direct link, hosted image, etc.) for a city to lock it in.
+const PX = (id: number) =>
+  `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1`;
+
+const CITY_COVER_OVERRIDES: Record<string, string> = {
+  'London':        PX(460672),
+  'Los Angeles':   PX(3652252),
+  'Madrid':        PX(32469373),
+  'New York':      PX(13259678),
+  'Paris':         PX(165804),
+  'Adelaide':      PX(3883319),
+  'Amsterdam':     PX(851039),
+  'Bali':          PX(15451778),
+  'Barcelona':     PX(1388030),
+  'Berlin':        PX(19096569),
+  'CDMX':          PX(12316041),
+  'Copenhagen':    PX(3783530),
+  'Dubai':         PX(10593605),
+  'Hamburg':       PX(36051425),
+  'Lisbon':        PX(5069524),
+  'Melbourne':     PX(18163161),
+  'Miami':         PX(29360684),
+  'Milan':         PX(8430364),
+  'Montreal':      PX(33825324),
+  'Munich':        PX(30944546),
+  'Rio de Janeiro':PX(24742342),
+  'San Francisco': PX(1485894),
+  'São Paulo':     PX(29566356),
+  'Seoul':         PX(29343916),
+  'Singapore':     PX(1907050),
+  'Stockholm':     PX(32158615),
+  'Sydney':        PX(7549817),
+  'Tokyo':         PX(19035807),
+  'Toronto':       PX(374870),
+  'Zurich':        PX(32008182),
+};
+
+const CITY_PHOTO_QUERIES: Record<string, string> = {
+  'London':        'London skyline Thames aerial city',
+  'Los Angeles':   'Los Angeles aerial skyline coast California',
+  'Madrid':        'Madrid aerial cityscape Spain',
+  'New York':      'New York City Manhattan skyline aerial',
+  'Paris':         'Paris Eiffel Tower aerial Seine cityscape',
+  'Adelaide':      'Adelaide South Australia city skyline',
+  'Amsterdam':     'Amsterdam canals aerial Netherlands city',
+  'Bali':          'Bali rice terraces temple tropical Indonesia',
+  'Barcelona':     'Barcelona aerial Sagrada Familia Mediterranean',
+  'Berlin':        'Berlin aerial cityscape Germany',
+  'CDMX':          'Mexico City aerial skyline urban',
+  'Copenhagen':    'Copenhagen Nyhavn colorful canal Denmark',
+  'Dubai':         'Dubai aerial Burj Khalifa skyline desert',
+  'Hamburg':       'Hamburg Speicherstadt port aerial Germany',
+  'Lisbon':        'Lisbon aerial city hills Portugal',
+  'Melbourne':     'Melbourne aerial cityscape Australia skyline',
+  'Miami':         'Miami Beach aerial ocean city',
+  'Milan':         'Milan Duomo cathedral Italy cityscape',
+  'Montreal':      'Montreal aerial city Canada skyline',
+  'Munich':        'Munich aerial Bavaria Germany city',
+  'Rio de Janeiro':'Rio de Janeiro aerial Christ Redeemer Brazil',
+  'San Francisco': 'San Francisco Golden Gate Bridge aerial bay',
+  'São Paulo':     'São Paulo aerial skyline Brazil city',
+  'Seoul':         'Seoul aerial cityscape South Korea',
+  'Singapore':     'Singapore Marina Bay aerial skyline night',
+  'Stockholm':     'Stockholm aerial archipelago Sweden city',
+  'Sydney':        'Sydney Opera House Harbour Bridge aerial',
+  'Tokyo':         'Tokyo aerial city skyline Japan',
+  'Toronto':       'Toronto CN Tower skyline Canada aerial',
+  'Zurich':        'Zurich aerial Switzerland lake Alps',
+};
+
+// Curated featured cities for the Activities tab
+const FEATURED_CITIES = [
+  { id: 'london',      name: 'London',        country: 'UK' },
+  { id: 'la',          name: 'Los Angeles',   country: 'USA' },
+  { id: 'madrid',      name: 'Madrid',        country: 'Spain' },
+  { id: 'nyc',         name: 'New York',      country: 'USA' },
+  { id: 'paris',       name: 'Paris',         country: 'France' },
+  { id: 'adelaide',    name: 'Adelaide',      country: 'Australia' },
+  { id: 'amsterdam',   name: 'Amsterdam',     country: 'Netherlands' },
+  { id: 'bali',        name: 'Bali',          country: 'Indonesia' },
+  { id: 'barcelona',   name: 'Barcelona',     country: 'Spain' },
+  { id: 'berlin',      name: 'Berlin',        country: 'Germany' },
+  { id: 'cdmx',        name: 'CDMX',          country: 'Mexico' },
+  { id: 'copenhagen',  name: 'Copenhagen',    country: 'Denmark' },
+  { id: 'dubai',       name: 'Dubai',         country: 'UAE' },
+  { id: 'hamburg',     name: 'Hamburg',       country: 'Germany' },
+  { id: 'lisbon',      name: 'Lisbon',        country: 'Portugal' },
+  { id: 'melbourne',   name: 'Melbourne',     country: 'Australia' },
+  { id: 'miami',       name: 'Miami',         country: 'USA' },
+  { id: 'milan',       name: 'Milan',         country: 'Italy' },
+  { id: 'montreal',    name: 'Montreal',      country: 'Canada' },
+  { id: 'munich',      name: 'Munich',        country: 'Germany' },
+  { id: 'rio',         name: 'Rio de Janeiro', country: 'Brazil' },
+  { id: 'sf',          name: 'San Francisco', country: 'USA' },
+  { id: 'saopaulo',    name: 'São Paulo',     country: 'Brazil' },
+  { id: 'seoul',       name: 'Seoul',         country: 'South Korea' },
+  { id: 'singapore',   name: 'Singapore',     country: 'Singapore' },
+  { id: 'stockholm',   name: 'Stockholm',     country: 'Sweden' },
+  { id: 'sydney',      name: 'Sydney',        country: 'Australia' },
+  { id: 'tokyo',       name: 'Tokyo',         country: 'Japan' },
+  { id: 'toronto',     name: 'Toronto',       country: 'Canada' },
+  { id: 'zurich',      name: 'Zurich',        country: 'Switzerland' },
+];
 
 // Category searches paired with rotating world cities (8 per page)
 const DEFAULT_CATEGORY_SEARCHES = [
@@ -102,7 +281,18 @@ const categoryChips = [
   { id: 'event',        label: 'Event',         emoji: '🎟️' },
 ];
 
-type FeedTab = 'For You' | 'Following' | 'Guides';
+type FeedTab = 'For You' | 'Cities';
+
+const EXP_CATEGORIES: { id: string; label: string; emoji: string; query: string; type: string }[] = [
+  { id: 'art',       label: 'Art & Crafts',  emoji: '🎨', query: 'art workshop pottery painting class studio', type: 'art_gallery' },
+  { id: 'outdoors',  label: 'Outdoors',       emoji: '🌿', query: 'nature hike trail scenic outdoor',          type: 'park' },
+  { id: 'culture',   label: 'Culture',        emoji: '🏛️', query: 'cultural tour museum historic site',        type: 'museum' },
+  { id: 'food',      label: 'Food & Drink',   emoji: '🍽️', query: 'food tour cooking class market tasting',   type: 'restaurant' },
+  { id: 'music',     label: 'Music',          emoji: '🎵', query: 'live music jazz concert venue',             type: 'night_club' },
+  { id: 'wellness',  label: 'Wellness',       emoji: '🧘', query: 'spa yoga retreat wellness meditation',      type: 'spa' },
+  { id: 'adventure', label: 'Adventure',      emoji: '🏄', query: 'surfing diving adventure sport activity',   type: 'tourist_attraction' },
+  { id: 'tours',     label: 'Tours',          emoji: '🗺️', query: 'guided city tour walking tour sightseeing', type: 'tourist_attraction' },
+];
 
 export default function Explore({ onOpenMessages, appUser }: Props) {
   const [posts, setPosts] = useState<RealPost[]>([]);
@@ -132,6 +322,58 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   const [guides, setGuides] = useState<Guide[]>([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [editingGuide, setEditingGuide] = useState<Guide | null>(null);
+  const [selectedSecretGuide, setSelectedSecretGuide] = useState<SecretGuide | null>(null);
+  const [secretSavedIds, setSecretSavedIds] = useState<Set<string>>(new Set());
+  const [secretCovers, setSecretCovers] = useState<Record<string, string>>({});
+  const [activeExpCategory, setActiveExpCategory] = useState('art');
+  const [cityPageTab, setCityPageTab] = useState<'guides' | 'activities'>('activities');
+  const [selectedExpCity, setSelectedExpCity] = useState<{ id: string; name: string; country: string; lat: number; lng: number } | null>(null);
+  const [cityPlaces, setCityPlaces] = useState<RealPostPlace[]>([]);
+  const [cityPlacesNextToken, setCityPlacesNextToken] = useState<string | null>(null);
+  const [loadingCityPlaces, setLoadingCityPlaces] = useState(false);
+  const [loadingMoreCityPlaces, setLoadingMoreCityPlaces] = useState(false);
+  const cityPlacesSentinelRef = useRef<HTMLDivElement | null>(null);
+  const [cityCoverPhotos, setCityCoverPhotos] = useState<Record<string, string>>({});
+  const [expCityQuery, setExpCityQuery] = useState('');
+  const [expCitySuggestions, setExpCitySuggestions] = useState<{ placeId: string; text: string }[]>([]);
+  const expCityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [exploreMapMode, setExploreMapMode] = useState(false);
+  const [selectedMapPin, setSelectedMapPin] = useState<{ id: string; name: string; city: string; neighborhood?: string; photoUrl: string; type: 'curio' | 'discover'; flatPlace?: FlatPlace; discoverPlace?: RealPostPlace } | null>(null);
+  const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
+  const cardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const handleBoundsChange = useCallback((b: MapBounds) => setMapBounds(b), []);
+
+  // Fetch guide covers lazily — only for the selected city, not all 500+ guides at once
+  useEffect(() => {
+    if (!selectedExpCity) return;
+    const cityGuides = SECRET_GUIDES.filter(g => g.city.toLowerCase() === selectedExpCity.name.toLowerCase());
+    cityGuides.forEach(async (g) => {
+      if (secretCovers[g.id]) return; // already fetched
+      const firstPlace = g.places[0];
+      if (!firstPlace) return;
+      const query = `${firstPlace.name} ${firstPlace.neighborhood} ${g.city}`;
+      try {
+        const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
+            'X-Goog-FieldMask': 'places.photos',
+          },
+          body: JSON.stringify({ textQuery: query, maxResultCount: 1, languageCode: 'en' }),
+        });
+        const data = await res.json();
+        const photoName = data.places?.[0]?.photos?.[1]?.name ?? data.places?.[0]?.photos?.[0]?.name;
+        if (photoName) {
+          setSecretCovers(prev => ({
+            ...prev,
+            [g.id]: `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}`,
+          }));
+        }
+      } catch {}
+    });
+  }, [selectedExpCity?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [suggestedUsers, setSuggestedUsers] = useState<FollowProfile[]>([]);
   const [loadingSuggested, setLoadingSuggested] = useState(false);
   const [exploreSavedPlaces, setExploreSavedPlaces] = useState<Set<string>>(new Set());
@@ -150,20 +392,167 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     });
   }, [appUser?.id]);
 
+  // Fetch community guides once when Cities tab is opened
   useEffect(() => {
-    if (activeTab !== 'Guides') return;
-    setLoadingGuides(true);
-    getGuides().then(g => { setGuides(g); setLoadingGuides(false); });
-  }, [activeTab]);
+    if (activeTab !== 'Cities') return;
+    getGuides().then(setGuides);
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch cover photos for featured cities — hardcoded overrides first, then Unsplash, then cached
+  useEffect(() => {
+    if (activeTab !== 'Cities') return;
+    const LS_PREFIX = 'curio_city_cover_v3_';
+
+    // Apply hardcoded overrides immediately (no API needed)
+    FEATURED_CITIES.forEach(city => {
+      const override = CITY_COVER_OVERRIDES[city.name];
+      if (override) setCityCoverPhotos(prev => ({ ...prev, [city.id]: override }));
+    });
+
+    // Seed remaining from localStorage (instant)
+    FEATURED_CITIES.forEach(city => {
+      if (CITY_COVER_OVERRIDES[city.name]) return;
+      const cached = localStorage.getItem(LS_PREFIX + city.id);
+      if (cached) setCityCoverPhotos(prev => prev[city.id] ? prev : { ...prev, [city.id]: cached });
+    });
+
+    // Fetch any still missing from Unsplash, staggered
+    let slot = 0;
+    FEATURED_CITIES.forEach(city => {
+      if (CITY_COVER_OVERRIDES[city.name]) return;
+      if (localStorage.getItem(LS_PREFIX + city.id)) return;
+      const delay = slot++ * 300;
+      setTimeout(async () => {
+        try {
+          const query = encodeURIComponent(CITY_PHOTO_QUERIES[city.name] ?? `${city.name} city`);
+          const res = await fetch(
+            `https://api.unsplash.com/photos/random?query=${query}&orientation=landscape&content_filter=high`,
+            { headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` } }
+          );
+          const data = await res.json();
+          const url: string = data.urls?.regular ?? data.urls?.full ?? '';
+          if (url) {
+            localStorage.setItem(LS_PREFIX + city.id, url);
+            setCityCoverPhotos(prev => ({ ...prev, [city.id]: url }));
+          }
+        } catch { /* ignore */ }
+      }, delay);
+    });
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch places for selected city + category
+  useEffect(() => {
+    if (activeTab !== 'Cities' || !selectedExpCity) return;
+    const cat = EXP_CATEGORIES.find(c => c.id === activeExpCategory);
+    if (!cat) return;
+    setLoadingCityPlaces(true);
+    setCityPlaces([]);
+    setCityPlacesNextToken(null);
+    const mapPlaces = (places: any[], cityFallback: string) =>
+      (places ?? []).map((p: any) => {
+        const comps: any[] = p.addressComponents ?? [];
+        const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
+        const cityName = find('locality') || find('administrative_area_level_1') || cityFallback;
+        const country = find('country');
+        const neighborhood = extractNeighborhood(comps, p.formattedAddress, cityName);
+        const category = googleTypesToCategory(p.types ?? []);
+        const photo = p.photos?.[1] ?? p.photos?.[0];
+        const photoUrl = photo ? `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
+        const name = p.displayName?.text ?? '';
+        if (!name || !isLatinScript(name)) return null;
+        const desc: string = typeof p.editorialSummary === 'string' ? p.editorialSummary : (p.editorialSummary?.text ?? '');
+        return { id: p.id ?? '', name, category, neighborhood: neighborhood || '', city: cityName, country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null, description: desc || undefined } as RealPostPlace;
+      }).filter(Boolean) as RealPostPlace[];
+    fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.addressComponents,places.formattedAddress,places.types,places.photos,places.location,places.rating,places.editorialSummary,nextPageToken' },
+      body: JSON.stringify({ textQuery: `${cat.query} in ${selectedExpCity.name}`, maxResultCount: 20, languageCode: 'en', locationBias: { circle: { center: { latitude: selectedExpCity.lat, longitude: selectedExpCity.lng }, radius: 40000 } } }),
+    }).then(r => r.json()).then(data => {
+      setCityPlaces(mapPlaces(data.places, selectedExpCity!.name));
+      setCityPlacesNextToken(data.nextPageToken ?? null);
+      setLoadingCityPlaces(false);
+    }).catch(() => setLoadingCityPlaces(false));
+  }, [activeTab, selectedExpCity, activeExpCategory]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Infinite scroll — fetch next page from Google Places when sentinel visible
+  useEffect(() => {
+    const sentinel = cityPlacesSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(entries => {
+      if (!entries[0].isIntersecting) return;
+      if (!cityPlacesNextToken || loadingMoreCityPlaces || !selectedExpCity) return;
+      const cat = EXP_CATEGORIES.find(c => c.id === activeExpCategory);
+      if (!cat) return;
+      setLoadingMoreCityPlaces(true);
+      fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.addressComponents,places.formattedAddress,places.types,places.photos,places.location,places.rating,places.editorialSummary,nextPageToken' },
+        body: JSON.stringify({ textQuery: `${cat.query} in ${selectedExpCity.name}`, maxResultCount: 20, pageToken: cityPlacesNextToken, languageCode: 'en', locationBias: { circle: { center: { latitude: selectedExpCity.lat, longitude: selectedExpCity.lng }, radius: 40000 } } }),
+      }).then(r => r.json()).then(data => {
+        const more = (data.places ?? []).map((p: any) => {
+          const comps: any[] = p.addressComponents ?? [];
+          const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
+          const cityName = find('locality') || find('administrative_area_level_1') || selectedExpCity!.name;
+          const country = find('country');
+          const neighborhood = extractNeighborhood(comps, p.formattedAddress, cityName);
+          const category = googleTypesToCategory(p.types ?? []);
+          const photo = p.photos?.[1] ?? p.photos?.[0];
+          const photoUrl = photo ? `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=600&key=${GOOGLE_PLACES_KEY}` : '';
+          const name = p.displayName?.text ?? '';
+          if (!name || !isLatinScript(name)) return null;
+          const desc: string = typeof p.editorialSummary === 'string' ? p.editorialSummary : (p.editorialSummary?.text ?? '');
+          return { id: p.id ?? '', name, category, neighborhood: neighborhood || '', city: cityName, country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null, description: desc || undefined } as RealPostPlace;
+        }).filter(Boolean) as RealPostPlace[];
+        setCityPlaces(prev => [...prev, ...more]);
+        setCityPlacesNextToken(data.nextPageToken ?? null);
+        setLoadingMoreCityPlaces(false);
+      }).catch(() => setLoadingMoreCityPlaces(false));
+    }, { threshold: 0.1 });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [cityPlaces, cityPlacesNextToken, loadingMoreCityPlaces, selectedExpCity, activeExpCategory]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced city autocomplete for Activities search
+  useEffect(() => {
+    if (expCityTimerRef.current) clearTimeout(expCityTimerRef.current);
+    if (!expCityQuery.trim()) { setExpCitySuggestions([]); return; }
+    expCityTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
+          body: JSON.stringify({ input: expCityQuery, languageCode: 'en', includedPrimaryTypes: ['locality', 'administrative_area_level_1'] }),
+        });
+        const data = await res.json();
+        setExpCitySuggestions((data.suggestions ?? []).slice(0, 5).map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' })).filter((s: any) => s.placeId));
+      } catch { setExpCitySuggestions([]); }
+    }, 300);
+  }, [expCityQuery]);
+
+  const handleExpCitySelect = async (placeId: string, text: string) => {
+    setExpCityQuery('');
+    setExpCitySuggestions([]);
+    try {
+      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+        headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'location,addressComponents,displayName', 'X-Goog-LanguageCode': 'en' },
+      });
+      const data = await res.json();
+      const comps: any[] = data.addressComponents ?? [];
+      const find = (...types: string[]) => { const c = comps.find((c: any) => types.some(t => c.types?.includes(t))); return c ? (c.longText || c.shortText || '') : ''; };
+      const cityName = data.displayName?.text || find('locality') || find('administrative_area_level_1') || text;
+      const country = find('country');
+      const lat = data.location?.latitude;
+      const lng = data.location?.longitude;
+      if (lat && lng) setSelectedExpCity({ id: `custom_${placeId}`, name: cityName, country, lat, lng });
+    } catch { /* ignore */ }
+  };
+
+
 
   useEffect(() => {
-    if (activeTab !== 'Following' || !appUser?.id) return;
-    setLoadingSuggested(true);
-    getSuggestedUsers(appUser.id, [...following]).then(users => {
-      setSuggestedUsers(users);
-      setLoadingSuggested(false);
-    });
-  }, [activeTab, appUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLoadingGuides(true);
+    getGuides().then(g => { setGuides(g); setLoadingGuides(false); });
+  }, []);
 
   // Debounced user search
   useEffect(() => {
@@ -177,8 +566,27 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   }, [query, appUser?.id]);
 
   const GEO_TYPES = new Set(['locality', 'administrative_area_level_1', 'administrative_area_level_2', 'country', 'political', 'colloquial_area', 'continent']);
-  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.formattedAddress,places.types,places.photos,places.location,places.rating';
+  const FIELD_MASK = 'places.id,places.displayName,places.addressComponents,places.formattedAddress,places.types,places.photos,places.location,places.rating,places.editorialSummary';
   const HEADERS = { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': FIELD_MASK };
+
+  // Fetch up to `targetCount` results for one city+query by chaining nextPageToken (max 20 per page)
+  const fetchCityPaginated = async (textQuery: string, includedType: string, city: string, targetCount: number): Promise<RealPostPlace[]> => {
+    const places: RealPostPlace[] = [];
+    let token: string | null = null;
+    const pages = Math.ceil(targetCount / 20);
+    for (let page = 0; page < pages; page++) {
+      const body: Record<string, unknown> = { textQuery: `${textQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 20, languageCode: 'en' };
+      if (token) body.pageToken = token;
+      try {
+        const d = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', headers: HEADERS, body: JSON.stringify(body) }).then(r => r.json());
+        const mapped = byRating(d.places ?? []).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[];
+        places.push(...mapped);
+        token = d.nextPageToken ?? null;
+        if (!token) break;
+      } catch { break; }
+    }
+    return places;
+  };
 
   const mapPlace = (p: any, cityOverride?: string, countryOverride?: string): RealPostPlace | null => {
     const comps: any[] = p.addressComponents ?? [];
@@ -195,7 +603,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     const name = p.displayName?.text ?? '';
     // Reject places whose name is not in Latin script
     if (!isLatin(name)) return null;
-    return { id: p.id ?? `discover_${Math.random()}`, name, category, neighborhood: neighborhood || '', city: city || '', country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null };
+    const description: string = typeof p.editorialSummary === 'string' ? p.editorialSummary : (p.editorialSummary?.text ?? '');
+    return { id: p.id ?? `discover_${Math.random()}`, name, category, neighborhood: neighborhood || '', city: city || '', country, photoUrl, position: 0, lat: p.location?.latitude ?? null, lng: p.location?.longitude ?? null, description: description || undefined };
   };
 
   // Sort raw Google results by rating descending before mapping
@@ -281,7 +690,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
           // Text search path
           const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
             method: 'POST', headers: HEADERS,
-            body: JSON.stringify({ textQuery: query.trim(), languageCode: 'en' }),
+            body: JSON.stringify({ textQuery: query.trim(), maxResultCount: 20, languageCode: 'en' }),
           });
           const data = await res.json();
           const raw: any[] = data.places ?? [];
@@ -308,7 +717,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               setDiscoverDefaultTokens(results.map(r => r.token));
               const all = results.flatMap(r => r.places);
               const seenIds = new Set<string>(); const seenNames = new Set<string>();
-              setDiscoverResults(all.filter(p => { const k = p.name.toLowerCase().slice(0, 30); if (!p.name || seenIds.has(p.id) || seenNames.has(k)) return false; seenIds.add(p.id); seenNames.add(k); return true; }));
+              setDiscoverResults(shuffleArray(all.filter(p => { const k = p.name.toLowerCase().slice(0, 30); if (!p.name || seenIds.has(p.id) || seenNames.has(k)) return false; seenIds.add(p.id); seenNames.add(k); return true; })));
             } else {
               // All + city: run all category searches for this city
               const results = await Promise.all(DEFAULT_CATEGORY_SEARCHES.map(({ textQuery, includedType }) =>
@@ -322,33 +731,28 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               const maxLen = Math.max(...results.map(r => r.places.length));
               for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r.places[i]) interleaved.push(r.places[i]); });
               const seenIds = new Set<string>(); const seenNames = new Set<string>();
-              setDiscoverResults(interleaved.filter(p => { const k = p.name.toLowerCase().slice(0, 30); if (!p.name || seenIds.has(p.id) || seenNames.has(k)) return false; seenIds.add(p.id); seenNames.add(k); return true; }));
+              setDiscoverResults(shuffleArray(interleaved.filter(p => { const k = p.name.toLowerCase().slice(0, 30); if (!p.name || seenIds.has(p.id) || seenNames.has(k)) return false; seenIds.add(p.id); seenNames.add(k); return true; })));
             }
           } else {
             setDiscoverTextToken(data.nextPageToken ?? null);
-            setDiscoverResults((raw.slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).filter(p => p.name));
+            setDiscoverResults((raw.map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).filter(p => p.name));
           }
         } else if (hasCategoryFilter) {
-          // Category chip path — 20 world cities × 10 results = ~200 places initial load
+          // Category chip path — 10 cities × 200 results each = ~2000 places initial load
           setDiscoverCityPage(0);
           const chipCfg = categoryChipSearchConfig[activeCategory] ?? { textQuery: 'popular place', includedType: 'tourist_attraction' };
           const { textQuery: chipQuery, includedType } = chipCfg;
-          const cities = WORLD_CITIES.slice(0, 20);
-          const results = await Promise.all(cities.map(city =>
-            fetch('https://places.googleapis.com/v1/places:searchText', {
-              method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 10, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
-          ));
+          const cities = WORLD_CITIES.slice(0, 10);
+          const results = await Promise.all(cities.map(city => fetchCityPaginated(chipQuery, includedType, city, 200)));
           const interleaved: RealPostPlace[] = [];
           const maxLen = Math.max(...results.map(r => r.length));
           for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) interleaved.push(r[i]); });
           const seenIds = new Set<string>(); const seenNames = new Set<string>();
-          setDiscoverResults(interleaved.filter(p => {
+          setDiscoverResults(shuffleArray(interleaved.filter(p => {
             const nameKey = p.name.toLowerCase().slice(0, 30);
             if (!p.name || seenIds.has(p.id) || seenNames.has(nameKey)) return false;
             seenIds.add(p.id); seenNames.add(nameKey); return true;
-          }));
+          })));
         } else {
           // Default "For You" — city-specific queries rotated through world cities
           setDiscoverCityPage(0);
@@ -358,18 +762,18 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             return fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST', headers: HEADERS,
               body: JSON.stringify({ textQuery: `${textQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 20, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).slice(0, 20).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
+            }).then(r => r.json()).then(d => ({ places: byRating(d.places ?? []).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[], token: d.nextPageToken ?? null })).catch(() => ({ places: [], token: null }));
           }));
           setDiscoverDefaultTokens(results.map(r => r.token));
           const interleaved: RealPostPlace[] = [];
           const maxLen = Math.max(...results.map(r => r.places.length));
           for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r.places[i]) interleaved.push(r.places[i]); });
           const seenIds = new Set<string>(); const seenNames = new Set<string>();
-          setDiscoverResults(interleaved.filter(p => {
+          setDiscoverResults(shuffleArray(interleaved.filter(p => {
             const nameKey = p.name.toLowerCase().slice(0, 30);
             if (!p.name || seenIds.has(p.id) || seenNames.has(nameKey)) return false;
             seenIds.add(p.id); seenNames.add(nameKey); return true;
-          }));
+          })));
         }
       } catch { setDiscoverResults([]); }
       finally { setLoadingDiscover(false); }
@@ -447,17 +851,12 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         let morePlaces: RealPostPlace[] = [];
 
         if (activeCategory !== 'all' && query.trim().length < 2) {
-          // Category chip load-more — next 20 cities
+          // Category chip load-more — next 10 cities × 200 results each
           const chipCfg = categoryChipSearchConfig[activeCategory] ?? { textQuery: 'popular place', includedType: 'tourist_attraction' };
           const { textQuery: chipQuery, includedType } = chipCfg;
-          const cityStart = (nextPage * 20) % WORLD_CITIES.length;
-          const cities = [...WORLD_CITIES.slice(cityStart, cityStart + 20), ...WORLD_CITIES.slice(0, Math.max(0, cityStart + 20 - WORLD_CITIES.length))].slice(0, 20);
-          const results = await Promise.all(cities.map(city =>
-            fetch('https://places.googleapis.com/v1/places:searchText', {
-              method: 'POST', headers: HEADERS,
-              body: JSON.stringify({ textQuery: `${chipQuery} ${city}`, includedType, minRating: 3.5, maxResultCount: 10, languageCode: 'en' }),
-            }).then(r => r.json()).then(d => byRating(d.places ?? []).slice(0, 10).map((p: any) => mapPlace(p)).filter(Boolean) as RealPostPlace[]).catch(() => [])
-          ));
+          const cityStart = (nextPage * 10) % WORLD_CITIES.length;
+          const cities = [...WORLD_CITIES.slice(cityStart, cityStart + 10), ...WORLD_CITIES.slice(0, Math.max(0, cityStart + 10 - WORLD_CITIES.length))].slice(0, 10);
+          const results = await Promise.all(cities.map(city => fetchCityPaginated(chipQuery, includedType, city, 200)));
           const maxLen = Math.max(...results.map(r => r.length));
           for (let i = 0; i < maxLen; i++) results.forEach(r => { if (r[i]) morePlaces.push(r[i]); });
         } else {
@@ -540,17 +939,50 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     return flat;
   }, [posts, tasteProfile]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const tabFiltered = activeTab === 'Following'
-    ? allPlaces.filter(p => following.has(p.post.userId))
-    : allPlaces;
-
   const categoryFiltered = activeCategory === 'all'
-    ? tabFiltered
-    : tabFiltered.filter(p => p.category === activeCategory);
+    ? allPlaces
+    : allPlaces.filter(p => p.category === activeCategory);
 
   const filteredDiscover = activeCategory === 'all'
     ? discoverResults
     : discoverResults.filter(p => p.category === activeCategory);
+
+  // Search query applied on top of category filter (curio posts)
+  const filtered = query
+    ? categoryFiltered.filter(p =>
+        p.name.toLowerCase().includes(query.toLowerCase()) ||
+        p.city.toLowerCase().includes(query.toLowerCase()) ||
+        p.post.profile.name.toLowerCase().includes(query.toLowerCase()) ||
+        p.post.profile.username.toLowerCase().includes(query.toLowerCase())
+      )
+    : categoryFiltered;
+
+  // Map places — search + category filtered, only those with valid coordinates
+  type MapPlaceEntry = { id: string; lat: number; lng: number; name: string; neighborhood?: string; city: string; country: string; photoUrl: string; type: 'curio' | 'discover'; flatPlace?: FlatPlace; discoverPlace?: RealPostPlace };
+  const exploreMapPlaces = useMemo((): MapPlaceEntry[] => {
+    const places: MapPlaceEntry[] = [];
+    for (const fp of filtered) {
+      const pl = fp.post.places.find(p => p.id === fp.placeId);
+      if (pl?.lat && pl?.lng) {
+        places.push({ id: fp.placeId, lat: pl.lat, lng: pl.lng, name: fp.name, neighborhood: fp.neighborhood, city: fp.city, country: fp.country, photoUrl: fp.photoUrl, type: 'curio', flatPlace: fp });
+      }
+    }
+    for (const dp of filteredDiscover) {
+      if (dp.lat && dp.lng) {
+        places.push({ id: dp.id, lat: dp.lat, lng: dp.lng, name: dp.name, neighborhood: dp.neighborhood, city: dp.city, country: dp.country, photoUrl: dp.photoUrl, type: 'discover', discoverPlace: dp });
+      }
+    }
+    return places;
+  }, [filtered, filteredDiscover]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Places visible in the current map viewport (updates on pan/zoom)
+  const visibleMapPlaces = useMemo((): MapPlaceEntry[] => {
+    if (!mapBounds) return exploreMapPlaces;
+    return exploreMapPlaces.filter(p =>
+      p.lat >= mapBounds.south && p.lat <= mapBounds.north &&
+      p.lng >= mapBounds.west && p.lng <= mapBounds.east
+    );
+  }, [exploreMapPlaces, mapBounds]);
 
   // Unified interleaved grid — 1 curio : 2 discover so discovery content fills the feed
   type MixedCard = { type: 'curio'; place: FlatPlace } | { type: 'discover'; place: RealPostPlace };
@@ -564,15 +996,6 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
     }
     return out;
   };
-
-  const filtered = query
-    ? categoryFiltered.filter(p =>
-        p.name.toLowerCase().includes(query.toLowerCase()) ||
-        p.city.toLowerCase().includes(query.toLowerCase()) ||
-        p.post.profile.name.toLowerCase().includes(query.toLowerCase()) ||
-        p.post.profile.username.toLowerCase().includes(query.toLowerCase())
-      )
-    : categoryFiltered;
 
   const toggleFollow = async (userId: string) => {
     if (!appUser?.id) return;
@@ -592,7 +1015,7 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
   return (
     <div className="bg-white min-h-screen">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white px-4 pt-5 pb-3 border-b border-gray-100">
+      <div className={`sticky top-0 z-10 bg-white px-4 pt-5 ${exploreMapMode ? '' : 'border-b border-gray-100'} ${activeTab === 'Cities' ? 'pb-0' : 'pb-3'}`}>
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">curio</h1>
           {onOpenMessages && (
@@ -614,22 +1037,34 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-5 mb-3">
-          {(['For You', 'Following', 'Guides'] as FeedTab[]).map(tab => (
+        <div className={`flex items-center gap-5 ${activeTab === 'Cities' ? 'mb-0 pb-3' : 'mb-3'}`}>
+          {(['For You', 'Cities'] as FeedTab[]).map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`text-sm font-semibold pb-1 border-b-2 transition-colors ${
-                activeTab === tab ? 'text-slate-900 border-slate-900' : 'text-slate-400 border-transparent'
+              onClick={() => { setActiveTab(tab); if (tab === 'Cities') { setExploreMapMode(false); setSelectedExpCity(null); setCityPlaces([]); } }}
+              className={`text-sm font-medium pb-2.5 transition-colors ${
+                activeTab === tab ? 'text-gray-900 border-b-2 border-gray-900 -mb-px' : 'text-gray-400'
               }`}
             >
               {tab}
             </button>
           ))}
+          {/* Map/Grid toggle — only on For You / Following */}
+          {activeTab === 'For You' && (
+            <button
+              onClick={() => { setExploreMapMode(m => !m); setSelectedMapPin(null); }}
+              className="ml-auto flex items-center gap-1 text-xs font-semibold text-gray-500 pb-1"
+            >
+              {exploreMapMode
+                ? <><LayoutGrid size={14} strokeWidth={1.5} /><span>Grid</span></>
+                : <><Map size={14} strokeWidth={1.5} /><span>Map</span></>
+              }
+            </button>
+          )}
         </div>
 
         {/* Category chips */}
-        <div className="flex gap-2 overflow-x-auto -mx-4 px-4" style={{ scrollbarWidth: 'none' }}>
+        <div className={`flex gap-2 overflow-x-auto -mx-4 px-4 ${activeTab !== 'For You' ? 'hidden' : ''}`} style={{ scrollbarWidth: 'none' }}>
           {categoryChips.map(chip => (
             <button
               key={chip.id}
@@ -682,7 +1117,77 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
 
 
       {/* Grid — place cards (hidden on Guides tab) */}
-      {activeTab !== 'Guides' && (
+      {activeTab === 'For You' && exploreMapMode && (
+        <div>
+          {/* Map — floats above the scrollable grid */}
+          <div className="relative" style={{ height: 'calc(42dvh)' }}>
+              {/* Hint badge */}
+            {visibleMapPlaces.length > 0 && (
+              <div className="absolute bottom-3 left-3 z-[999] bg-white/90 backdrop-blur-sm rounded-full px-2.5 py-1 shadow-sm">
+                <p className="text-[11px] font-semibold text-gray-700">Zoom in to explore</p>
+              </div>
+            )}
+
+            <Suspense fallback={<div className="w-full h-full bg-gray-100 animate-pulse" />}>
+              <MapView
+                places={exploreMapPlaces.map(p => ({ id: p.id, lat: p.lat, lng: p.lng, name: p.name, neighborhood: p.neighborhood, city: p.city, country: p.country }))}
+                height="100%"
+                selectedId={selectedMapPin?.id}
+                onBoundsChange={handleBoundsChange}
+                onPlaceClick={(mp) => {
+                  const found = exploreMapPlaces.find(p => p.id === mp.id);
+                  if (found) {
+                    setSelectedMapPin(found);
+                    setTimeout(() => cardRefs.current[found.id]?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }), 60);
+                  }
+                }}
+              />
+            </Suspense>
+          </div>
+
+          {/* Grid of places visible in the current viewport */}
+          <div className="px-3 pt-3 pb-2">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2.5 px-0.5">
+              {visibleMapPlaces.length > 0 ? 'Places in view' : 'Pan or zoom to find places'}
+            </p>
+            {visibleMapPlaces.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <p className="text-2xl mb-2">🗺️</p>
+                <p className="text-sm font-semibold text-gray-700">No places in this area</p>
+                <p className="text-xs text-gray-400 mt-1">Pan or zoom out to discover places</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {visibleMapPlaces.map(place => (
+                  <button
+                    key={place.id}
+                    ref={el => { cardRefs.current[place.id] = el; }}
+                    onClick={() => {
+                      if (place.type === 'curio' && place.flatPlace) setSelectedPlace(place.flatPlace);
+                      else if (place.type === 'discover' && place.discoverPlace) setSelectedPlacePage(place.discoverPlace);
+                    }}
+                    className={`relative aspect-square rounded-2xl overflow-hidden active:scale-[0.97] transition-all text-left ${
+                      selectedMapPin?.id === place.id ? 'ring-2 ring-orange-400' : ''
+                    }`}
+                  >
+                    {place.photoUrl
+                      ? <img src={place.photoUrl} alt={place.name} className="absolute inset-0 w-full h-full object-cover" />
+                      : <div className="absolute inset-0 bg-gray-200" />
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                      <p className="text-xs font-bold text-white leading-tight truncate">{place.name}</p>
+                      <p className="text-[10px] text-white/60 truncate mt-0.5">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'For You' && !exploreMapMode && (
         <div className="p-3">
           {loading ? (
             <div className="grid grid-cols-2 gap-2">
@@ -692,59 +1197,8 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Empty / thin Following state → suggested users */}
-              {activeTab === 'Following' && filtered.length === 0 && query.trim().length < 2 && activeCategory === 'all' && (
-                <div className="px-1 pb-4">
-                  <p className="text-base font-bold text-gray-900 mb-1">Find people to follow</p>
-                  <p className="text-xs text-gray-400 mb-4">Follow creators to see their places here</p>
-                  {loadingSuggested ? (
-                    <div className="space-y-3">
-                      {[...Array(5)].map((_, i) => (
-                        <div key={i} className="flex items-center gap-3">
-                          <div className="w-11 h-11 rounded-full bg-gray-100 animate-pulse flex-shrink-0" />
-                          <div className="flex-1 space-y-1.5">
-                            <div className="h-3 bg-gray-100 rounded animate-pulse w-24" />
-                            <div className="h-2.5 bg-gray-100 rounded animate-pulse w-16" />
-                          </div>
-                          <div className="w-20 h-8 bg-gray-100 rounded-xl animate-pulse" />
-                        </div>
-                      ))}
-                    </div>
-                  ) : suggestedUsers.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-8">No suggestions yet</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {suggestedUsers.map(user => (
-                        <div key={user.id} className="flex items-center gap-3">
-                          <button onClick={() => setViewingUserId(user.id)} className="flex-shrink-0">
-                            {user.avatarUrl
-                              ? <img src={user.avatarUrl} className="w-11 h-11 rounded-full object-cover" alt={user.name} />
-                              : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500">{user.name[0]?.toUpperCase()}</div>
-                            }
-                          </button>
-                          <button onClick={() => setViewingUserId(user.id)} className="flex-1 min-w-0 text-left">
-                            <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
-                            <p className="text-xs text-gray-400 truncate">@{user.username}</p>
-                          </button>
-                          <button
-                            onClick={() => toggleFollow(user.id)}
-                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex-shrink-0 ${
-                              following.has(user.id)
-                                ? 'bg-gray-100 text-gray-700'
-                                : 'bg-gray-900 text-white'
-                            }`}
-                          >
-                            {following.has(user.id) ? 'Following' : 'Follow'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Generic empty state for search/category with no results */}
-              {!(activeTab === 'Following' && filtered.length === 0 && query.trim().length < 2 && activeCategory === 'all') && filtered.length === 0 && filteredDiscover.length === 0 && !loadingDiscover && (
+              {/* Empty state */}
+              {filtered.length === 0 && filteredDiscover.length === 0 && !loadingDiscover && (
                 <div className="flex flex-col items-center justify-center py-24 text-center">
                   <p className="text-3xl mb-3">{query.trim().length >= 2 || activeCategory !== 'all' ? '🔍' : '🌍'}</p>
                   <p className="text-sm font-semibold text-gray-900 mb-1">
@@ -798,57 +1252,224 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
         </div>
       )}
 
-      {/* Guides list */}
-      {activeTab === 'Guides' && (
-        <div className="p-3 space-y-3">
-          {loadingGuides ? (
-            [...Array(3)].map((_, i) => (
-              <div key={i} className="h-40 bg-gray-100 rounded-2xl animate-pulse" />
-            ))
-          ) : guides.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center">
-              <p className="text-3xl mb-3">📖</p>
-              <p className="text-sm font-semibold text-gray-900 mb-1">No guides yet</p>
-              <p className="text-xs text-gray-400 max-w-[200px]">Publish a trip from your Saved tab to create a guide</p>
-            </div>
-          ) : (
-            guides.map(guide => (
-              <button
-                key={guide.id}
-                onClick={() => setSelectedGuide(guide)}
-                className="w-full rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-[0.98] transition-transform"
-              >
-                {guide.coverUrl ? (
-                  <div className="relative h-40">
-                    <img src={guide.coverUrl} alt={guide.title} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                    <div className="absolute bottom-0 left-0 right-0 p-3">
-                      <p className="text-white text-base font-bold leading-tight">{guide.title}</p>
-                      {guide.destination && (
-                        <p className="text-white/70 text-xs mt-0.5 flex items-center gap-1">
-                          <MapPin size={10} strokeWidth={1.5} />
-                          {guide.destination}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="h-24 bg-gray-200 flex items-center justify-center">
-                    <p className="text-4xl">🗺️</p>
-                  </div>
-                )}
-                <div className="px-3 py-2.5 flex items-center gap-2">
-                  {guide.profile.avatarUrl
-                    ? <img src={guide.profile.avatarUrl} alt={guide.profile.name} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-                    : <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-gray-500">{guide.profile.name[0]?.toUpperCase()}</div>
+      {/* Activities tab — city-first */}
+      {activeTab === 'Cities' && !selectedExpCity && (
+        <div className="pb-8">
+          {/* City grid */}
+          <div className="px-4 pt-2 grid grid-cols-2 gap-2">
+            {FEATURED_CITIES.map(city => {
+              const coords = CITY_COORDS[city.name] ?? [0, 0];
+              return (
+                <button
+                  key={city.id}
+                  onClick={() => setSelectedExpCity({ ...city, lat: coords[0], lng: coords[1] })}
+                  className="relative rounded-2xl overflow-hidden text-left active:scale-[0.97] transition-transform"
+                  style={{ aspectRatio: '4/3' }}
+                >
+                  {cityCoverPhotos[city.id]
+                    ? <img src={cityCoverPhotos[city.id]} alt={city.name} className="absolute inset-0 w-full h-full object-cover" />
+                    : <div className="absolute inset-0 bg-gray-200 animate-pulse" />
                   }
-                  <p className="text-xs text-gray-600 font-medium truncate">by @{guide.profile.username}</p>
-                </div>
-              </button>
-            ))
-          )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 p-3">
+                    <p className="text-sm font-bold text-white leading-tight">{city.name}</p>
+                    <p className="text-[11px] text-white/60 mt-0.5">{city.country}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
+
+      {/* Activities tab — city homepage */}
+      {activeTab === 'Cities' && selectedExpCity && (
+        <div className="pb-8">
+          {/* Hero image + city name */}
+          <div className="relative mx-4 mb-4 rounded-2xl overflow-hidden aspect-[16/9]">
+            {cityCoverPhotos[selectedExpCity.id]
+              ? <img src={cityCoverPhotos[selectedExpCity.id]} alt={selectedExpCity.name} className="absolute inset-0 w-full h-full object-cover" />
+              : <div className="absolute inset-0 bg-gray-200" />
+            }
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+            {/* Back button */}
+            <button
+              onClick={() => { setSelectedExpCity(null); setCityPlaces([]); setCityPageTab('activities'); }}
+              className="absolute top-3 left-3 w-8 h-8 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm"
+            >
+              <ChevronRight size={16} className="text-white rotate-180" />
+            </button>
+            {/* City label */}
+            <div className="absolute bottom-0 left-0 right-0 p-3.5">
+              <p className="text-xl font-bold text-white leading-tight">{selectedExpCity.name}</p>
+              <p className="text-xs text-white/70 mt-0.5">{selectedExpCity.country}</p>
+            </div>
+          </div>
+
+          {/* Tab bar: Guides · Activities · Posts */}
+          <div className="flex border-b border-gray-100 px-4 mb-4">
+            {(['guides', 'activities'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setCityPageTab(tab)}
+                className={`mr-5 text-sm pb-2.5 transition-colors capitalize ${cityPageTab === tab ? 'text-gray-900 font-semibold border-b-2 border-gray-900 -mb-px' : 'text-gray-400 font-medium'}`}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* ── GUIDES tab ── */}
+          {cityPageTab === 'guides' && (() => {
+            const cityName = selectedExpCity.name.toLowerCase();
+            const secretCityGuides = SECRET_GUIDES.filter(g => g.city.toLowerCase() === cityName);
+            const communityCityGuides = guides.filter(g => g.destination?.toLowerCase().includes(cityName));
+            const hasAny = secretCityGuides.length > 0 || communityCityGuides.length > 0;
+            if (!hasAny) return (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-4">
+                <p className="text-3xl mb-3">📖</p>
+                <p className="text-sm font-semibold text-gray-900 mb-1">No guides yet for {selectedExpCity.name}</p>
+                <p className="text-xs text-gray-400">Check back soon — we're curating the best spots</p>
+              </div>
+            );
+            return (
+              <div className="px-4 space-y-4">
+                {secretCityGuides.length > 0 && (
+                  <>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Curated</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {secretCityGuides.map(g => {
+                        const coverUrl = secretCovers[g.id];
+                        return (
+                          <button
+                            key={g.id}
+                            onClick={() => setSelectedSecretGuide(g)}
+                            className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform aspect-square bg-gray-200"
+                          >
+                            {coverUrl && (
+                              <img src={coverUrl} alt={g.title} className="absolute inset-0 w-full h-full object-cover" />
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                            <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                              <p className="text-xs font-bold text-white leading-tight">{g.title}</p>
+                              <p className="text-[10px] text-white/60 mt-0.5">{g.places.length} places</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                {communityCityGuides.length > 0 && (
+                  <>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pt-1">From the Community</p>
+                    <div className="space-y-3">
+                      {communityCityGuides.map(guide => (
+                        <button
+                          key={guide.id}
+                          onClick={() => setSelectedGuide(guide)}
+                          className="w-full rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-[0.98] transition-transform"
+                        >
+                          {guide.coverUrl ? (
+                            <div className="relative h-36">
+                              <img src={guide.coverUrl} alt={guide.title} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                              <div className="absolute bottom-0 left-0 right-0 p-3">
+                                <p className="text-white text-sm font-bold leading-tight">{guide.title}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="h-20 bg-gray-200 flex items-center justify-center">
+                              <p className="text-3xl">🗺️</p>
+                            </div>
+                          )}
+                          <div className="px-3 py-2 flex items-center gap-2">
+                            {guide.profile.avatarUrl
+                              ? <img src={guide.profile.avatarUrl} alt={guide.profile.name} className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
+                              : <div className="w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0 text-[9px] font-bold text-gray-500">{guide.profile.name[0]?.toUpperCase()}</div>
+                            }
+                            <p className="text-xs text-gray-500 truncate">by @{guide.profile.username}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── ACTIVITIES tab ── */}
+          {cityPageTab === 'activities' && (
+            <>
+              {/* Category strip */}
+              <div className="pb-3">
+                <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none', paddingLeft: 16, paddingRight: 16 }}>
+                  {EXP_CATEGORIES.map(cat => {
+                    const isActive = activeExpCategory === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        onClick={() => setActiveExpCategory(cat.id)}
+                        className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${isActive ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'}`}
+                      >
+                        {cat.emoji} {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Places grid */}
+              {loadingCityPlaces ? (
+                <div className="px-4 grid grid-cols-2 gap-2">
+                  {[...Array(8)].map((_, i) => <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />)}
+                </div>
+              ) : cityPlaces.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <p className="text-3xl mb-3">{EXP_CATEGORIES.find(c => c.id === activeExpCategory)?.emoji}</p>
+                  <p className="text-sm font-semibold text-gray-900 mb-1">Nothing found</p>
+                  <p className="text-xs text-gray-400">Try another category</p>
+                </div>
+              ) : (
+                <div className="px-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    {cityPlaces.map(place => (
+                      <button
+                        key={place.id}
+                        onClick={() => setSelectedPlacePage(place)}
+                        className="relative aspect-square rounded-2xl overflow-hidden text-left active:scale-[0.97] transition-transform bg-gray-100"
+                      >
+                        {place.photoUrl
+                          ? <img
+                              src={place.photoUrl}
+                              alt={place.name}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          : null
+                        }
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                        <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                          <p className="text-xs font-bold text-white leading-tight truncate">{place.name}</p>
+                          <p className="text-[10px] text-white/60 truncate mt-0.5">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div ref={cityPlacesSentinelRef} className="h-10 flex items-center justify-center mt-2">
+                    {loadingMoreCityPlaces && (
+                      <div className="w-5 h-5 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+        </div>
+      )}
+
 
       {/* Post modal */}
       {selectedPlace && (
@@ -866,7 +1487,45 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
       )}
 
       {/* Guide detail */}
-      {selectedGuide && <GuideDetail guide={selectedGuide} currentUserId={appUser?.id} onClose={() => setSelectedGuide(null)} />}
+      {selectedGuide && (
+        <GuideDetail
+          guide={selectedGuide}
+          currentUserId={appUser?.id}
+          onClose={() => setSelectedGuide(null)}
+          onEditGuide={() => { setEditingGuide(selectedGuide); setSelectedGuide(null); }}
+          onPlaceClick={(place) => setSelectedPlacePage(place)}
+        />
+      )}
+
+      {editingGuide && appUser && (
+        <CreateGuideSheet
+          userId={appUser.id}
+          editingGuide={editingGuide}
+          onClose={() => setEditingGuide(null)}
+          onCreated={() => setEditingGuide(null)}
+          onUpdated={(updated) => {
+            setGuides(prev => prev.map(g => g.id === updated.id ? { ...g, ...updated } : g));
+            setEditingGuide(null);
+          }}
+        />
+      )}
+
+      {/* Secret Guide detail */}
+      {selectedSecretGuide && (
+        <SecretGuideSheet
+          guide={selectedSecretGuide}
+          savedPlaceIds={secretSavedIds}
+          onClose={() => setSelectedSecretGuide(null)}
+          onOpenPlace={pl => { setSelectedSecretGuide(null); setSelectedPlacePage(pl); }}
+          onToggleSave={(placeId) => {
+            setSecretSavedIds(prev => {
+              const next = new Set(prev);
+              if (next.has(placeId)) next.delete(placeId); else next.add(placeId);
+              return next;
+            });
+          }}
+        />
+      )}
 
       {/* Place Page — rendered at page level so it's not clipped by PostModal */}
       {selectedPlacePage && (
@@ -885,6 +1544,9 @@ export default function Explore({ onOpenMessages, appUser }: Props) {
               await savePlace(appUser.id, id);
             }
           }}
+          appUser={appUser ?? undefined}
+          onViewUser={(uid) => { setSelectedPlacePage(null); setViewingUserId(uid); }}
+          onSelectPlace={(pl) => setSelectedPlacePage(pl)}
         />
       )}
     </div>
@@ -903,13 +1565,14 @@ const categoryEmoji: Record<string, string> = {
 
 function PlaceCard({ place, onClick }: { place: FlatPlace; onClick: () => void }) {
   const emoji = categoryEmoji[place.category];
+  const [imgFailed, setImgFailed] = React.useState(false);
   return (
     <button onClick={onClick} className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-95 transition-transform">
-      {place.photoUrl ? (
-        <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
+      {place.photoUrl && !imgFailed ? (
+        <img src={place.photoUrl} alt="" className="w-full h-full object-cover" onError={() => setImgFailed(true)} />
       ) : (
         <div className="w-full h-full bg-slate-200 flex items-center justify-center">
-          <span className="text-slate-400 text-xs">No photo</span>
+          <span className="text-3xl">{emoji ?? '📍'}</span>
         </div>
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
@@ -934,10 +1597,11 @@ function PlaceCard({ place, onClick }: { place: FlatPlace; onClick: () => void }
 
 function DiscoverCard({ place, onClick }: { place: RealPostPlace; onClick: () => void }) {
   const emoji = categoryEmoji[place.category];
+  const [imgFailed, setImgFailed] = React.useState(false);
   return (
     <button onClick={onClick} className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 text-left active:scale-95 transition-transform">
-      {place.photoUrl ? (
-        <img src={place.photoUrl} alt={place.name} className="w-full h-full object-cover" />
+      {place.photoUrl && !imgFailed ? (
+        <img src={place.photoUrl} alt="" className="w-full h-full object-cover" onError={() => setImgFailed(true)} />
       ) : (
         <div className="w-full h-full bg-slate-200 flex items-center justify-center">
           <span className="text-3xl">{emoji ?? '📍'}</span>
@@ -1066,16 +1730,21 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
 
   return (
     <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full overflow-y-auto" style={{ maxWidth: '384px', maxHeight: '96vh' }} onClick={e => e.stopPropagation()}>
-        <div className="bg-white w-full rounded-t-[2rem]">
+      <div className="w-full overflow-y-auto overflow-x-hidden rounded-t-3xl" style={{ maxWidth: '384px', maxHeight: '96vh' }} onClick={e => e.stopPropagation()}>
 
-          {/* Drag handle */}
-          <div className="flex justify-center pt-2.5 pb-0 absolute top-0 left-0 right-0 z-20 pointer-events-none">
-            <div className="w-9 h-1 bg-white/70 rounded-full" />
-          </div>
+        {/* Sticky header — drag handle + X always visible regardless of scroll */}
+        <div className="sticky top-0 z-30 flex justify-between items-start px-3 pt-3 pointer-events-none" style={{ marginBottom: -44 }}>
+          <div className="w-8" />
+          <div className="w-9 h-1 bg-white/60 rounded-full mt-0.5" />
+          <button onClick={onClose} className="pointer-events-auto w-8 h-8 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center">
+            <X size={15} strokeWidth={2.5} className="text-white" />
+          </button>
+        </div>
+
+        <div className="bg-white w-full rounded-t-3xl">
 
           {/* Photo carousel — scrolls with the rest */}
-          <div className="relative overflow-hidden rounded-t-[2rem]">
+          <div className="relative overflow-hidden rounded-t-3xl">
 
             {/* Profile pill — top left (owner + collaborators) */}
             <button
@@ -1097,13 +1766,6 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                   : (post.profile.username || post.profile.name)}
               </span>
             </button>
-            {/* Close button — top right */}
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-3 z-20 w-8 h-8 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center"
-            >
-              <X size={15} strokeWidth={2.5} className="text-white" />
-            </button>
 
             {/* Swipeable photos */}
             <div
@@ -1112,8 +1774,8 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
               className="flex overflow-x-auto snap-x snap-mandatory"
               style={{ scrollbarWidth: 'none' }}
             >
-              {uniquePlaces.map((pl) => (
-                <div key={pl.id} className="flex-shrink-0 w-full" style={{ aspectRatio: '3/4' }}>
+              {post.places.map((pl, i) => (
+                <div key={`${pl.id}-${i}`} className="flex-shrink-0 w-full" style={{ aspectRatio: '3/4' }}>
                   {pl.photoUrl
                     ? <img src={pl.photoUrl} alt={pl.name} className="w-full h-full object-cover" />
                     : <div className="w-full h-full bg-gray-100" />
@@ -1128,15 +1790,15 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
             {/* Bottom bar: place name left, dots right — same row */}
             <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 flex items-end justify-between gap-3 pointer-events-none">
               <div className="min-w-0">
-                <p className="text-white font-semibold text-xs leading-tight truncate">{uniquePlaces[currentIndex]?.name.split(',')[0].trim()}</p>
+                <p className="text-white font-semibold text-xs leading-tight truncate">{post.places[currentIndex]?.name.split(',')[0].trim()}</p>
                 <p className="text-white/70 text-[10px] mt-0.5 truncate">
-                  {[resolveCity(uniquePlaces[currentIndex]?.city), uniquePlaces[currentIndex]?.country].filter(Boolean).join(', ')}
+                  {[resolveCity(post.places[currentIndex]?.city), post.places[currentIndex]?.country].filter(Boolean).join(', ')}
                 </p>
               </div>
-              {uniquePlaces.length > 1 && (
+              {post.places.length > 1 && (
                 <div className="flex gap-1.5 items-center flex-shrink-0 pointer-events-auto pb-0.5">
-                  {uniquePlaces.length <= 5
-                    ? uniquePlaces.map((_, i) => (
+                  {post.places.length <= 5
+                    ? post.places.map((_, i) => (
                         <button
                           key={i}
                           onClick={() => scrollTo(i)}
@@ -1144,7 +1806,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
                         />
                       ))
                     : <span className="text-white text-[11px] font-semibold bg-black/40 backdrop-blur-sm rounded-full px-2 py-0.5 leading-none">
-                        {currentIndex + 1} / {uniquePlaces.length}
+                        {currentIndex + 1} / {post.places.length}
                       </span>
                   }
                 </div>
@@ -1208,7 +1870,7 @@ function PostModal({ place, isFollowing, isOwnPost, onToggleFollow, onClose, use
 
             {/* Caption + hashtags */}
             {(post.caption || post.hashtags.length > 0) && (
-              <div className="px-5 pb-5">
+              <div className="px-5 pt-4 pb-5">
                 {post.caption && <p className="text-sm text-gray-800 leading-relaxed">{post.caption}</p>}
                 {post.hashtags.length > 0 && (() => {
                   const seen = new Set<string>();
