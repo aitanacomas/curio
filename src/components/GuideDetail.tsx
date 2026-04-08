@@ -232,24 +232,26 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
         <div className="flex-1 overflow-y-auto">
           {/* Cover — full bleed */}
           {guide.coverUrl && (
-            <div className="relative flex-shrink-0" style={{ height: guide.description ? 260 : 220 }}>
-              <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-black/10" />
-              <div className="absolute top-3 left-0 right-0 flex justify-center">
-                <div className="w-10 h-1 rounded-full bg-white/50" />
+            <>
+              <div className="relative flex-shrink-0" style={{ height: 220 }}>
+                <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-black/10" />
+                <div className="absolute top-3 left-0 right-0 flex justify-center">
+                  <div className="w-10 h-1 rounded-full bg-white/50" />
+                </div>
+                <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
+                  <h2 className="text-xl font-black text-white leading-tight">{guide.title}</h2>
+                  {guide.destination && (
+                    <p className="text-white/70 text-[11px] flex items-center gap-0.5 mt-1">
+                      <MapPin size={9} strokeWidth={1.5} className="inline" />{guide.destination}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
-                <h2 className="text-xl font-black text-white leading-tight">{guide.title}</h2>
-                {guide.destination && (
-                  <p className="text-white/70 text-[11px] flex items-center gap-0.5 mt-1">
-                    <MapPin size={9} strokeWidth={1.5} className="inline" />{guide.destination}
-                  </p>
-                )}
-                {guide.description && (
-                  <p className="text-white/80 text-xs mt-1.5 leading-snug line-clamp-2">{guide.description}</p>
-                )}
-              </div>
-            </div>
+              {guide.description && (
+                <p className="px-5 pt-3 pb-1 text-sm text-gray-600 leading-relaxed">{guide.description}</p>
+              )}
+            </>
           )}
 
           {!guide.coverUrl && (
