@@ -248,9 +248,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                   )}
                 </div>
               </div>
-              {guide.description && (
-                <p className="px-5 pt-3 pb-1 text-sm text-gray-600 leading-relaxed">{guide.description}</p>
-              )}
             </>
           )}
 
@@ -334,6 +331,9 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
             </div>
           </div>
 
+          {guide.description && (
+            <p className="px-5 py-3 text-sm text-gray-600 leading-relaxed border-b border-gray-100">{guide.description}</p>
+          )}
 
           {/* Places header + map toggle — sticky */}
           <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-3 flex items-center justify-between">
