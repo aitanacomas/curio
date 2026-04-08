@@ -71,11 +71,13 @@ function PlaceCarousel({ photos, name }: { photos: string[]; name: string }) {
 
   if (photos.length === 1) {
     return (
-      <img
-        src={photos[0]} alt={name}
-        className="w-full h-44 object-cover"
-        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-      />
+      <div className="w-full aspect-[3/4]">
+        <img
+          src={photos[0]} alt={name}
+          className="w-full h-full object-cover"
+          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+        />
+      </div>
     );
   }
 
@@ -91,10 +93,12 @@ function PlaceCarousel({ photos, name }: { photos: string[]; name: string }) {
         }}
       >
         {photos.map((url, i) => (
-          <img key={i} src={url} alt={`${name} ${i + 1}`}
-            className="flex-shrink-0 w-full h-44 object-cover snap-start"
-            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-          />
+          <div key={i} className="flex-shrink-0 w-full aspect-[3/4] snap-start">
+            <img src={url} alt={`${name} ${i + 1}`}
+              className="w-full h-full object-cover"
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          </div>
         ))}
       </div>
       <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
@@ -209,14 +213,17 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
         <div className="flex-1 overflow-y-auto">
           {/* Cover — full bleed */}
           {guide.coverUrl && (
-            <div className="relative flex-shrink-0" style={{ height: 220 }}>
+            <div className="relative flex-shrink-0" style={{ height: guide.description ? 260 : 220 }}>
               <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/65 to-black/10" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-black/10" />
               <div className="absolute top-3 left-0 right-0 flex justify-center">
                 <div className="w-10 h-1 rounded-full bg-white/50" />
               </div>
-              <div className="absolute bottom-0 left-0 right-0 px-5 pb-4">
+              <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
                 <h2 className="text-xl font-black text-white leading-tight">{guide.title}</h2>
+                {guide.description && (
+                  <p className="text-white/80 text-xs mt-1.5 leading-snug line-clamp-2">{guide.description}</p>
+                )}
               </div>
               <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm">
                 <X size={14} strokeWidth={2} className="text-white" />
@@ -318,10 +325,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
             </div>
           </div>
 
-          {/* Description */}
-          {guide.description && (
-            <p className="px-5 py-3 text-sm text-gray-700 leading-relaxed border-b border-gray-100">{guide.description}</p>
-          )}
 
           {/* Map toggle */}
           {mapPlaces.length > 0 && (
