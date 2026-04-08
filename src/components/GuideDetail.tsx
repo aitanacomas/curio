@@ -398,7 +398,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                             {photos.length > 0
                               ? <ImageCarousel
                                   images={photos}
-                                  labels={[place.name]}
+                                  labels={[`${i + 1}. ${place.name}`]}
                                   sublabels={sublabel ? [sublabel] : undefined}
                                   aspectRatio="3/2"
                                 />
