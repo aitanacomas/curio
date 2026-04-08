@@ -409,7 +409,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                                   images={photos}
                                   labels={[place.name]}
                                   sublabels={sublabel ? [sublabel] : undefined}
-                                  aspectRatio="4/5"
+                                  aspectRatio="3/2"
                                 />
                               : (
                                 <div className="px-3 pt-3 pb-1">
@@ -448,23 +448,12 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                             </button>
                           )}
                         </div>
-                        {/* Description + audio + tap hint */}
-                        <button
-                          className="w-full text-left px-3 py-2.5 active:bg-gray-100 transition-colors flex items-start gap-2"
-                          onClick={() => onPlaceClick?.(mappedPlace)}
-                        >
-                          <div className="flex-1 min-w-0">
-                            {!photos.length && <div />}
-                            {(place.description || place.note) && (
-                              <p className="text-xs text-amber-900/70 leading-relaxed italic">"{place.description || place.note}"</p>
-                            )}
-                            {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
-                            {!place.description && !place.note && !place.audioUrl && (
-                              <p className="text-xs text-gray-400">View place details</p>
-                            )}
+                        {/* Audio player if present */}
+                        {place.audioUrl && (
+                          <div className="px-3 py-2">
+                            <AudioPlayer src={place.audioUrl} />
                           </div>
-                          <ChevronRight size={14} strokeWidth={1.8} className="text-gray-300 flex-shrink-0 mt-0.5" />
-                        </button>
+                        )}
                       </div>
                     );
                   })}
