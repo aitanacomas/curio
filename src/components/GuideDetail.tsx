@@ -293,7 +293,9 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               </p>
             </div>
             <div className="flex items-center gap-1.5">
-              {/* Follow button for non-owners */}
+              <button onClick={() => setShowShare(true)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                <Share2 size={14} strokeWidth={1.8} className="text-gray-600" />
+              </button>
               {!isOwn && currentUserId && (
                 <button
                   disabled={togglingSubscribe}
@@ -315,35 +317,18 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                   {togglingSubscribe ? '…' : subscribed ? 'Following' : 'Follow'}
                 </button>
               )}
-              {/* Owner actions */}
-              {isOwn && onEditGuide && (
-                <button onClick={() => { onEditGuide(); onClose(); }} className="text-xs text-gray-700 font-semibold px-3 py-1.5 rounded-full bg-gray-100">
-                  Edit
-                </button>
-              )}
-              {/* ··· overflow menu */}
-              <div className="relative">
-                <button onClick={() => setShowMenu(v => !v)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
-                  <MoreHorizontal size={15} strokeWidth={1.8} className="text-gray-600" />
-                </button>
-                {showMenu && (
-                  <div className="absolute right-0 top-10 bg-white rounded-2xl shadow-xl border border-gray-100 py-1 z-10 min-w-[160px]">
-                    <button onClick={() => { setShowShare(true); setShowMenu(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 active:bg-gray-50">
-                      <Share2 size={14} strokeWidth={1.8} className="text-gray-400" /> Share guide
+              {isOwn && (
+                <>
+                  <button onClick={() => setShowCollabSheet(true)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                    <UserPlus size={14} strokeWidth={1.8} className="text-gray-600" />
+                  </button>
+                  {onEditGuide && (
+                    <button onClick={() => { onEditGuide(); onClose(); }} className="text-xs text-gray-700 font-semibold px-3 py-1.5 rounded-full bg-gray-100">
+                      Edit
                     </button>
-                    {isOwn && (
-                      <button onClick={() => { setShowCollabSheet(true); setShowMenu(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 active:bg-gray-50">
-                        <UserPlus size={14} strokeWidth={1.8} className="text-gray-400" /> Add collaborator
-                      </button>
-                    )}
-                    {isOwn && onDeleteGuide && (
-                      <button onClick={() => { onDeleteGuide(guide.id); onClose(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 active:bg-gray-50">
-                        <X size={14} strokeWidth={1.8} className="text-red-300" /> Delete guide
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
 
