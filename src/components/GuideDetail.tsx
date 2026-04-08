@@ -221,6 +221,11 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               </div>
               <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
                 <h2 className="text-xl font-black text-white leading-tight">{guide.title}</h2>
+                {guide.destination && (
+                  <p className="text-white/70 text-[11px] flex items-center gap-0.5 mt-1">
+                    <MapPin size={9} strokeWidth={1.5} className="inline" />{guide.destination}
+                  </p>
+                )}
                 {guide.description && (
                   <p className="text-white/80 text-xs mt-1.5 leading-snug line-clamp-2">{guide.description}</p>
                 )}
