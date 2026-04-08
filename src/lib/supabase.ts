@@ -1521,6 +1521,24 @@ export async function deletePlanItem(itemId: string) {
   await supabase.from('plan_items').delete().eq('id', itemId);
 }
 
+/** Deletes duplicate plan_items rows within the same day (same name, keep first by position). */
+export async function purgeDuplicatePlanItems(days: { id?: string; items: { id: string; name: string }[] }[]) {
+  const toDelete: string[] = [];
+  for (const day of days) {
+    const seenInDay = new Set<string>();
+    for (const item of day.items) {
+      const key = item.name.toLowerCase();
+      if (seenInDay.has(key)) {
+        toDelete.push(item.id);
+      } else {
+        seenInDay.add(key);
+      }
+    }
+  }
+  if (toDelete.length === 0) return;
+  await supabase.from('plan_items').delete().in('id', toDelete);
+}
+
 // ── Item Invites ──────────────────────────────────────────────────────────────
 export interface ItemInvite {
   id: string;
@@ -1878,6 +1896,7 @@ export async function leavePlan(planId: string, userId: string): Promise<void> {
 export interface SavedPlace {
   id: string;
   postId: string;
+  postUserId?: string;
   name: string;
   category: string;
   neighborhood: string;
@@ -1891,7 +1910,7 @@ export interface SavedPlace {
 export async function getSavedPlaces(userId: string): Promise<SavedPlace[]> {
   const { data } = await supabase
     .from('saved_places')
-    .select('post_place_id, post_places(id, post_id, name, category, neighborhood, city, country, photo_url, lat, lng)')
+    .select('post_place_id, post_places(id, post_id, name, category, neighborhood, city, country, photo_url, lat, lng, posts(user_id))')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   return (data ?? [])
@@ -1900,6 +1919,7 @@ export async function getSavedPlaces(userId: string): Promise<SavedPlace[]> {
     .map((p: any) => ({
       id: p.id,
       postId: p.post_id ?? '',
+      postUserId: Array.isArray(p.posts) ? p.posts[0]?.user_id : p.posts?.user_id,
       name: p.name ?? '',
       category: p.category ?? '',
       neighborhood: p.neighborhood ?? '',
@@ -1996,6 +2016,26 @@ export async function getSavedPlaceIds(userId: string): Promise<Set<string>> {
     .select('post_place_id')
     .eq('user_id', userId);
   return new Set((data ?? []).map((r: any) => r.post_place_id as string));
+}
+
+/**
+ * Returns a Set of "name|city" keys for all places saved by the user.
+ * Use this to show the bookmark as filled even when the same place exists
+ * across multiple posts (different post_place_ids, same name+city).
+ */
+export async function getSavedPlaceNameCityKeys(userId: string): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('saved_places')
+    .select('post_places(name, city)')
+    .eq('user_id', userId);
+  const keys = new Set<string>();
+  for (const row of (data ?? []) as any[]) {
+    const pp = Array.isArray(row.post_places) ? row.post_places[0] : row.post_places;
+    if (pp?.name && pp?.city) {
+      keys.add(`${pp.name.toLowerCase()}|${pp.city.toLowerCase()}`);
+    }
+  }
+  return keys;
 }
 
 export async function savePlace(userId: string, postPlaceId: string) {

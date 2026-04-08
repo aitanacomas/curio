@@ -5,7 +5,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles, GripVertical } from 'lucide-react';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles, GripVertical, BookmarkPlus, Check, Heart, MessageCircle, Copy } from 'lucide-react';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY as string;
@@ -171,15 +171,30 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 }
 
 import type { Category, Collection, Place } from '../types';
-import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
+import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, purgeDuplicatePlanItems, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
 import { getBookingUrl, isBookable } from '../lib/placeUtils';
-import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide } from '../lib/supabase';
+import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, addPlaceToCollection, getPlaceCollectionIds, getSubscribedGuides, likePost, unlikePost, getLikedPosts, getPostLikeCounts, getPostComments, addComment, deleteComment, getConversations, getOrCreateConversation, sendMessage, type PostComment, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide, type Conversation } from '../lib/supabase';
+
+function timeAgo(iso: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  return `${Math.floor(d / 7)}w`;
+}
 import BookingSheet from '../components/BookingSheet';
 import PlaceSearch from '../components/PlaceSearch';
+import PlacePage from '../components/PlacePage';
+import ImageCarousel from '../components/ImageCarousel';
 
 const MapView = lazy(() => import('../components/MapView'));
 
-type SavedTab = 'Places' | 'Collections' | 'Trips' | 'Map';
+type SavedTab = 'Places' | 'Collections' | 'Subscribed' | 'Trips';
 
 interface TripItem {
   id: string;
@@ -502,12 +517,14 @@ function PlanCard({ trip, onClick, userId }: { trip: Trip; onClick: () => void; 
           ) : (
             <p className="text-white/50 text-xs flex items-center gap-1"><CalendarDays size={10} strokeWidth={1.5} />Brainstorm</p>
           )}
-          {trip.dates
-            ? <p className="text-white/60 text-xs">· {countDaysFromDateStr(trip.dates)} days · {trip.days.reduce((a, d) => a + d.items.length, 0)} places</p>
-            : trip.days.reduce((a, d) => a + d.items.length, 0) > 0
-              ? <p className="text-white/60 text-xs">· {trip.days.reduce((a, d) => a + d.items.length, 0)} ideas</p>
-              : null
-          }
+          {(() => {
+            const uniquePlaces = new Set(trip.days.flatMap(d => d.items.map(i => i.name))).size;
+            return trip.dates
+              ? <p className="text-white/60 text-xs">· {countDaysFromDateStr(trip.dates)} days · {uniquePlaces} places</p>
+              : uniquePlaces > 0
+                ? <p className="text-white/60 text-xs">· {uniquePlaces} ideas</p>
+                : null;
+          })()}
         </div>
       </div>
     </button>
@@ -644,8 +661,32 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [plansLoading, setPlansLoading] = useState(false);
   const [realSavedPlaces, setRealSavedPlaces] = useState<SavedPlace[]>([]);
   const [realSavedPlaceIds, setRealSavedPlaceIds] = useState<Set<string>>(new Set());
+  const savedMapRef = useRef<import('leaflet').Map | null>(null);
+  const [savedMapPin, setSavedMapPin] = useState<SavedPlace | null>(null);
+  const [savedMapSearch, setSavedMapSearch] = useState('');
   const [selectedSavedPost, setSelectedSavedPost] = useState<RealPost | null>(null);
+  const [savedPostLiked, setSavedPostLiked] = useState(false);
+  const [savedPostLikeCount, setSavedPostLikeCount] = useState(0);
+  const [savedPostComments, setSavedPostComments] = useState<PostComment[]>([]);
+  const [savedPostCommentText, setSavedPostCommentText] = useState('');
+  const [savedPostCommentSending, setSavedPostCommentSending] = useState(false);
+  const savedPostCommentRef = useRef<HTMLInputElement>(null);
+  const [showSavedPostShare, setShowSavedPostShare] = useState(false);
+  const [savedPostShareSentTo, setSavedPostShareSentTo] = useState<Set<string>>(new Set());
+  const [savedPostShareSearch, setSavedPostShareSearch] = useState('');
+  const [savedPostShareResults, setSavedPostShareResults] = useState<FollowProfile[]>([]);
+  const [searchingSavedPostShare, setSearchingSavedPostShare] = useState(false);
+  const [savedPostShareLinkCopied, setSavedPostShareLinkCopied] = useState(false);
+  const [savedPostConversations, setSavedPostConversations] = useState<Conversation[]>([]);
+  const savedPostShareSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [postsBrowseGroup, setPostsBrowseGroup] = useState<SavedPlace[] | null>(null);
+  const [postsBrowsePosts, setPostsBrowsePosts] = useState<(RealPost | null)[]>([]);
+  const [addToColPlace, setAddToColPlace] = useState<SavedPlace | null>(null);
+  const [addToColIds, setAddToColIds] = useState<Set<string>>(new Set());
+  const [addToColLoading, setAddToColLoading] = useState(false);
+  const [addToColSaving, setAddToColSaving] = useState<Set<string>>(new Set());
   const [showMap, setShowMap] = useState(false);
+  const [mapDayFilter, setMapDayFilter] = useState<string>('all'); // 'all' or day label
   const [planViewMode, setPlanViewMode] = useState<'brainstorm' | 'itinerary'>('brainstorm');
   const [brainstormCategoryFilter, setBrainstormCategoryFilter] = useState<string>('all');
   const [mapCoords, setMapCoords] = useState<Record<string, { lat: number; lng: number }>>({});
@@ -706,6 +747,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [showItemDetail, setShowItemDetail] = useState(false);
   const [detailItem, setDetailItem] = useState<TripItem | null>(null);
   const [detailItemDayId, setDetailItemDayId] = useState<string | null>(null);
+  const [detailItemAsPlace, setDetailItemAsPlace] = useState<RealPostPlace | null>(null);
   const [showEditItem, setShowEditItem] = useState(false);
   const [editItemUploading, setEditItemUploading] = useState(false);
   const [addPlaceUploading, setAddPlaceUploading] = useState(false);
@@ -789,6 +831,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [newPlanCollabs, setNewPlanCollabs] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [myGuides, setMyGuides] = useState<Guide[]>([]);
+  const [subscribedGuides, setSubscribedGuides] = useState<Guide[]>([]);
   const [showPublishGuide, setShowPublishGuide] = useState(false);
   const [publishGuideTitle, setPublishGuideTitle] = useState('');
   const [publishGuideDesc, setPublishGuideDesc] = useState('');
@@ -1140,6 +1183,14 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       const dayIndex = targetDayId ? updatedDays.findIndex(d => d.id === targetDayId) : 0;
       if (dayIndex === -1) return;
       const day = updatedDays[dayIndex];
+
+      // Guard: don't add a place that already exists in the same day
+      const alreadyInDay = day.items.some(i => i.name.toLowerCase() === name.toLowerCase());
+      if (alreadyInDay) {
+        setShowAddPlace(false);
+        return;
+      }
+
       const position = day.items.length;
 
       const finalImage = imageUrl; // imageUrl already prefers addPlaceCustomImage (set at top of function)
@@ -1568,7 +1619,15 @@ Email: ${bookingEmailText.slice(0, 3000)}` }] }],
       }
 
       const allTripItems = selectedTrip.days.flatMap(d => d.items);
-      const placesToUse = allTripItems.filter(p => generateSelectedIds.has(p.id));
+      // Deduplicate by name (within the flat list) so items that appear twice in the same pool aren't doubled
+      const _seenGen = new Set<string>();
+      const uniqueTripItems = allTripItems.filter(item => {
+        const key = item.name.toLowerCase();
+        if (_seenGen.has(key)) return false;
+        _seenGen.add(key);
+        return true;
+      });
+      const placesToUse = uniqueTripItems.filter(p => generateSelectedIds.has(p.id));
       const numDays = countDaysFromDates(selectedTrip.dates) || 3;
 
       // Group by neighborhood → city → 'Other'
@@ -1811,7 +1870,42 @@ Return ONLY valid JSON, no markdown, no explanation:
     }
     setPlansLoading(true);
     getPlans(userId).then(dbPlans => {
-      const converted: Trip[] = dbPlans.map(p => ({
+      const converted: Trip[] = dbPlans.map(p => {
+        // Deduplicate items within each day by name (keep first occurrence per day)
+        const deduplicatedDays = p.days.map(d => {
+          const seenInDay = new Set<string>();
+          return {
+          id: d.id,
+          label: d.label,
+          items: d.items
+            .filter(i => {
+              const key = i.name.toLowerCase();
+              if (seenInDay.has(key)) return false;
+              seenInDay.add(key);
+              return true;
+            })
+            .map(i => ({
+              id: i.id,
+              name: i.name,
+              category: i.category,
+              image: i.imageUrl || undefined,
+              time: i.timeLabel || undefined,
+              timeEnd: i.timeEnd || undefined,
+              notes: i.notes || undefined,
+              address: i.address || undefined,
+              neighborhood: i.neighborhood || undefined,
+              location: i.location || undefined,
+              status: (i.status as TripItem['status']) || 'none',
+              checkIn: i.checkIn || undefined,
+              checkOut: i.checkOut || undefined,
+              booked: i.booked,
+              addedBy: i.addedBy ?? null,
+              addedByName: i.addedByName ?? null,
+              addedByAvatar: i.addedByAvatar ?? null,
+            })),
+          };
+        });
+        return ({
         id: p.id,
         destination: p.title,
         country: p.country,
@@ -1819,36 +1913,17 @@ Return ONLY valid JSON, no markdown, no explanation:
         coverImage: p.coverImageUrl,
         status: p.status,
         description: p.description,
-        days: p.days.map(d => ({
-          id: d.id,
-          label: d.label,
-          items: d.items.map(i => ({
-            id: i.id,
-            name: i.name,
-            category: i.category,
-            image: i.imageUrl || undefined,
-            time: i.timeLabel || undefined,
-            timeEnd: i.timeEnd || undefined,
-            notes: i.notes || undefined,
-            address: i.address || undefined,
-            neighborhood: i.neighborhood || undefined,
-            location: i.location || undefined,
-            status: (i.status as TripItem['status']) || 'none',
-            checkIn: i.checkIn || undefined,
-            checkOut: i.checkOut || undefined,
-            booked: i.booked,
-            addedBy: i.addedBy ?? null,
-            addedByName: i.addedByName ?? null,
-            addedByAvatar: i.addedByAvatar ?? null,
-          })),
-        })),
+        days: deduplicatedDays,
         ownerId: p.userId,
         ownerName: p.ownerName ?? null,
         ownerAvatar: p.ownerAvatar ?? null,
         collaborators: p.collaborators.map(c => ({ id: c.id, name: c.name, avatar: c.avatar, pending: c.pending })),
-      }));
+        });
+      });
       setPlans(converted);
       setPlansLoading(false);
+      // Silently delete any duplicate rows that exist in the DB
+      converted.forEach(trip => purgeDuplicatePlanItems(trip.days));
     });
 
     getSavedPlaces(userId).then(sp => {
@@ -1859,7 +1934,21 @@ Return ONLY valid JSON, no markdown, no explanation:
     getItemInvites(userId).then(setItemInvites);
     getUserCollections(userId).then(setDbCollections);
     getSubscribedCollections(userId).then(setDbSubscribedCollections);
+    getSubscribedGuides(userId).then(setSubscribedGuides);
   }, [userId]);
+
+  // ── Load likes + comments when a saved post is opened ────────────────
+  useEffect(() => {
+    if (!selectedSavedPost || !userId) return;
+    setSavedPostComments([]);
+    setSavedPostCommentText('');
+    setShowSavedPostShare(false);
+    setSavedPostShareSentTo(new Set());
+    getLikedPosts(userId).then(ids => setSavedPostLiked(ids.has(selectedSavedPost.id)));
+    getPostLikeCounts([selectedSavedPost.id]).then(counts => setSavedPostLikeCount(counts[selectedSavedPost.id] ?? 0));
+    getPostComments(selectedSavedPost.id).then(setSavedPostComments);
+    getConversations(userId).then(setSavedPostConversations);
+  }, [selectedSavedPost?.id]);
 
   // ── Enrich items in the opened trip with address/neighborhood/photo ──
   useEffect(() => {
@@ -1921,7 +2010,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             }
             const searchQuery = resolvedAddress
               ? resolvedAddress
-              : plan.country ? `${item.name} ${plan.country}` : item.name;
+              : [item.name, plan.destination, plan.country].filter(Boolean).join(', ');
 
             const stRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
               method: 'POST',
@@ -1971,14 +2060,14 @@ Return ONLY valid JSON, no markdown, no explanation:
 
             // ── Photo logic ──────────────────────────────────────────────────
             let newImage = '';
-            if (place && needsPhoto && item.address) {
-              // Only fetch a photo when the item has a confirmed address — searching
-              // by name alone returns unreliable results with wrong photos (e.g. lake).
+            if (place && needsPhoto) {
               const photoName = place.photos?.[0]?.name;
               const formattedAddr = (place.formattedAddress ?? '').toLowerCase();
-              const geoHints = [plan.country, plan.destination]
+              // Build geo hints from all words in destination + country to handle "United States", "New York" etc.
+              const geoHints = [plan.destination, plan.country]
                 .filter(Boolean)
-                .map(s => s!.toLowerCase().split(/[\s,]+/)[0]);
+                .flatMap(s => s!.toLowerCase().split(/[\s,]+/).filter(w => w.length > 2));
+              // Require geo match to avoid wrong-location photos
               const geoMatch = geoHints.length === 0 || geoHints.some(h => formattedAddr.includes(h));
               if (photoName && geoMatch) {
                 newImage = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${GOOGLE_PLACES_KEY}`;
@@ -2021,6 +2110,7 @@ Return ONLY valid JSON, no markdown, no explanation:
     const hasItinerary = selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label));
     setPlanViewMode(hasItinerary ? 'itinerary' : 'brainstorm');
     setShowMap(false);
+    setMapDayFilter('all');
     setMapCoords({});
   }, [selectedTrip?.id]);
 
@@ -2052,7 +2142,6 @@ Return ONLY valid JSON, no markdown, no explanation:
     let cancelled = false;
     setMapLoading(true);
     (async () => {
-      const newCoords: Record<string, { lat: number; lng: number }> = {};
       for (const item of toGeocode) {
         if (cancelled) break;
         try {
@@ -2076,7 +2165,8 @@ Return ONLY valid JSON, no markdown, no explanation:
           if (loc?.latitude && loc?.longitude) {
             const lat = loc.latitude;
             const lng = loc.longitude;
-            newCoords[item.id] = { lat, lng };
+            // Update incrementally so map appears as soon as first place is found
+            if (!cancelled) setMapCoords(prev => ({ ...prev, [item.id]: { lat, lng } }));
             // Write back to DB so this item never needs geocoding again
             if (item.id && !item.id.startsWith('item-')) {
               updatePlanItem(item.id, { lat, lng });
@@ -2085,10 +2175,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           await new Promise(r => setTimeout(r, 120));
         } catch { /* silent */ }
       }
-      if (!cancelled) {
-        setMapCoords(prev => ({ ...prev, ...newCoords }));
-        setMapLoading(false);
-      }
+      if (!cancelled) setMapLoading(false);
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2169,12 +2256,6 @@ Return ONLY valid JSON, no markdown, no explanation:
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
           </button>
           <div className="absolute top-4 right-4 flex gap-2 items-center">
-            <button
-              onClick={() => { setPublishGuideTitle(selectedTrip.destination); setPublishGuideDesc(''); setShowPublishGuide(true); }}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full"
-            >
-              📖 Guide
-            </button>
             <button onClick={() => { openEditPlan(selectedTrip); }} className="w-9 h-9 rounded-full bg-white/90 flex items-center justify-center">
               <Pencil size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
@@ -2279,10 +2360,12 @@ Return ONLY valid JSON, no markdown, no explanation:
 
         {/* Stats row */}
         <div className="flex items-center divide-x divide-gray-100 border-b border-gray-100">
-          <div className="flex-1 py-3 text-center">
-            <p className="text-base font-black text-gray-900">{planViewMode === 'itinerary' && selectedTrip.days.length > 0 ? (countDaysFromDates(selectedTrip.dates) || sortedDays.length) : allItems.length}</p>
-            <p className="text-xs text-gray-400">{planViewMode === 'itinerary' && selectedTrip.days.length > 0 ? 'Days' : 'Ideas'}</p>
-          </div>
+          {planViewMode === 'itinerary' && selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
+            <div className="flex-1 py-3 text-center">
+              <p className="text-base font-black text-gray-900">{countDaysFromDates(selectedTrip.dates) || sortedDays.filter(d => /^Day\s+\d+/i.test(d.label)).length}</p>
+              <p className="text-xs text-gray-400">Days</p>
+            </div>
+          )}
           <div className="flex-1 py-3 text-center">
             <p className="text-base font-black text-gray-900">{totalItems}</p>
             <p className="text-xs text-gray-400">Places</p>
@@ -2299,86 +2382,42 @@ Return ONLY valid JSON, no markdown, no explanation:
         {/* Place list — TRIP only (events returned early above) */}
         <div className="px-4 pt-4 pb-28">
 
-          {/* Mode indicator — show when trip has structured itinerary days */}
-          {planViewMode === 'itinerary' && selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
-            <div className="flex items-center justify-between mb-5">
-              <button
-                onClick={() => setPlanViewMode('brainstorm')}
-                className="text-xs text-gray-400 font-medium flex items-center gap-1"
-              >
-                ← Brainstorm
-              </button>
-              <p className="text-xs font-bold text-gray-900 flex items-center gap-1.5">🗓 Your itinerary</p>
-              <button
-                onClick={() => { setGenerateSelectedIds(new Set(selectedTrip.days.flatMap(d => d.items).map(i => i.id))); setShowGenerateSheet(true); }}
-                className="text-xs text-gray-400 font-medium"
-              >
-                Regenerate
-              </button>
-            </div>
-          )}
-
-          {/* ── Bookings section — only shown when there are bookings ── */}
-          {planBookings.length > 0 && (
-            <div className="mb-5">
-              <div className="flex items-center justify-between mb-2">
+          {/* Mode toggle — Brainstorm / Itinerary pill + Show map on same row */}
+          {selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center bg-gray-100 rounded-full p-0.5">
+                  <button
+                    onClick={() => setPlanViewMode('brainstorm')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${planViewMode === 'brainstorm' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                  >
+                    Brainstorm
+                  </button>
+                  <button
+                    onClick={() => setPlanViewMode('itinerary')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${planViewMode === 'itinerary' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                  >
+                    Itinerary
+                  </button>
+                </div>
                 <button
-                  onClick={() => setBookingsExpanded(e => !e)}
-                  className="flex items-center gap-1.5 text-xs font-bold text-gray-700"
+                  onClick={() => setShowMap(m => !m)}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
                 >
-                  {bookingsExpanded ? <ChevronUp size={13} strokeWidth={2.5} /> : <ChevronDown size={13} strokeWidth={2.5} />}
-                  Reservations <span className="text-gray-400 font-normal">· {planBookings.length}</span>
-                </button>
-                <button
-                  onClick={() => { setShowAddBooking(true); setBookingForm({}); setBookingEmailText(''); setBookingImportMode(false); }}
-                  className="flex items-center gap-1 text-xs font-semibold text-gray-500 bg-gray-100 rounded-full px-3 py-1"
-                >
-                  <Plus size={11} strokeWidth={2.5} /> Add
+                  <MapPin size={12} strokeWidth={2} />
+                  {showMap ? 'Hide map' : 'Show map'}
                 </button>
               </div>
-
-              {bookingsExpanded && (
-                <div className="divide-y divide-gray-100">
-                  {planBookings.map(b => {
-                    const meta = BOOKING_META[b.type];
-                    return (
-                      <div
-                        key={b.id}
-                        className="flex items-center gap-3 py-2.5 cursor-pointer group"
-                        onClick={() => {
-                          setBookingType(b.type);
-                          setBookingForm(b);
-                          setBookingImportMode(false);
-                          setBookingEmailText('');
-                          setShowAddBooking(true);
-                        }}
-                      >
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${meta.color}`}>
-                          {meta.icon}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{b.title || meta.label}</p>
-                          <p className="text-xs text-gray-400 truncate">
-                            {b.type === 'flight' && [b.flightNumber, b.departureAirport && b.arrivalAirport ? `${b.departureAirport} → ${b.arrivalAirport}` : '', b.departureTime].filter(Boolean).join(' · ')}
-                            {b.type === 'stay' && [b.checkInDate && b.checkOutDate ? `${b.checkInDate} – ${b.checkOutDate}` : b.checkInDate, b.address].filter(Boolean).join(' · ')}
-                            {(b.type === 'restaurant' || b.type === 'activity') && [b.reservationDate, b.reservationTime, b.partySize ? `${b.partySize} ppl` : ''].filter(Boolean).join(' · ')}
-                            {b.confirmationNumber && <span className="font-mono"> · #{b.confirmationNumber}</span>}
-                          </p>
-                        </div>
-                        <button
-                          onClick={e => { e.stopPropagation(); handleDeleteBooking(b.id); }}
-                          className="text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0"
-                        >
-                          <Trash2 size={13} strokeWidth={1.5} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
+              {planViewMode === 'itinerary' && (
+                <button
+                  onClick={() => { setShowAddBooking(true); setBookingForm({}); setBookingEmailText(''); setBookingImportMode(false); }}
+                  className="mt-2.5 flex items-center gap-1.5 text-xs font-medium text-gray-400 w-full justify-center py-2 rounded-xl border border-dashed border-gray-200"
+                >
+                  <Plus size={11} strokeWidth={2} /> Add reservation
+                </button>
               )}
             </div>
           )}
-          {/* ── /Bookings section ────────────────────────────────── */}
 
 
           {isBrainstorm ? (
@@ -2386,25 +2425,16 @@ Return ONLY valid JSON, no markdown, no explanation:
                BRAINSTORM MODE — flat idea list
                ══════════════════════════════════════ */
             <>
-              {/* Itinerary ready banner */}
-              {selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
-                <button
-                  onClick={() => setPlanViewMode('itinerary')}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 rounded-2xl mb-4 border border-gray-100"
-                >
-                  <p className="text-xs font-semibold text-gray-700">🗓 Your itinerary is ready</p>
-                  <p className="text-xs text-gray-400 font-medium">View →</p>
-                </button>
-              )}
 
-              {/* Map toggle */}
-              {allItems.length > 0 && (
-                <div className="flex justify-end mb-3">
-                  <button onClick={() => setShowMap(m => !m)} className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">
-                    <MapPin size={12} strokeWidth={2} />{showMap ? 'Hide map' : 'Show map'}
-                  </button>
-                </div>
-              )}
+              {/* Top actions — always visible */}
+              <div className="flex gap-2 mb-4">
+                <button onClick={() => openAddPlace(null)} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                  <Plus size={12} strokeWidth={2} /> Add place
+                </button>
+                <button onClick={openAskAI} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
+                  <Sparkles size={12} strokeWidth={2} /> Ask AI
+                </button>
+              </div>
 
               {/* Inline map */}
               {showMap && allItems.length > 0 && (
@@ -2447,16 +2477,9 @@ Return ONLY valid JSON, no markdown, no explanation:
 
               {/* Flat idea list */}
               {filteredItemsWithDayId.length === 0 && allItemsWithDayId.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <p className="text-4xl mb-3">✨</p>
+                <div className="flex flex-col items-center justify-center py-12 text-center">
                   <p className="text-base font-bold text-gray-900 mb-1">Start dreaming</p>
-                  <p className="text-xs text-gray-400 mb-6">Add places you want to visit — restaurants, stays, experiences, anything</p>
-                  <button onClick={() => openAddPlace(null)} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-full text-xs font-semibold mb-2">
-                    <Plus size={13} strokeWidth={2} /> Add anything — flights, reservations, places…
-                  </button>
-                  <button onClick={openAskAI} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-gray-50 text-xs text-gray-500 font-medium">
-                    ✨ Need help? Ask AI what to do on your trip
-                  </button>
+                  <p className="text-xs text-gray-400">Add places you want to visit — restaurants, stays, experiences, anything</p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -2468,7 +2491,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                       <div
                         key={item.id}
                         className={`rounded-2xl p-3 transition-colors ${isBooked ? 'bg-green-50/70 border border-green-100' : isPending ? 'bg-amber-50/70 border border-amber-100' : 'bg-white border-2 border-dashed border-gray-200'}`}
-                        onClick={() => { setDetailItem(item); setDetailItemDayId(item._dayId); setShowItemDetail(true); }}
+                        onClick={() => { setDetailItem(item); setDetailItemDayId(item._dayId); setDetailItemAsPlace({ id: item.id, name: item.name, category: item.category, neighborhood: item.neighborhood ?? '', city: selectedTrip.destination, country: selectedTrip.country ?? '', photoUrl: item.image ?? '', position: 0, lat: item.lat ?? null, lng: item.lng ?? null }); }}
                       >
                         <div className="flex items-start gap-3">
                           <ItemThumb image={item.image} name={item.name} category={item.category} />
@@ -2512,23 +2535,6 @@ Return ONLY valid JSON, no markdown, no explanation:
                     );
                   })}
 
-                  {/* Bottom actions */}
-                  <div className="flex flex-col items-center gap-2 pt-1">
-                    <button onClick={() => openAddPlace(null)} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
-                      <Plus size={12} strokeWidth={2} /> Add anything — flights, reservations, places…
-                    </button>
-                    <button onClick={openAskAI} className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl border border-gray-100 text-xs text-gray-400 font-medium">
-                      <Sparkles size={12} strokeWidth={2} /> Need help? Ask AI what to do on your trip
-                    </button>
-                    {!selectedTrip.days.some(d => /^Day\s+\d+/i.test(d.label)) && (
-                      <button
-                        onClick={() => { setGenerateSelectedIds(new Set(selectedTrip.days.flatMap(d => d.items).map(i => i.id))); setShowGenerateSheet(true); }}
-                        className="w-full flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-gray-900 text-white text-xs font-semibold"
-                      >
-                        🗓 Generate your {countDaysFromDates(selectedTrip.dates) > 0 ? `${countDaysFromDates(selectedTrip.dates)}-day ` : ''}itinerary
-                      </button>
-                    )}
-                  </div>
                 </div>
               )}
 
@@ -2538,41 +2544,57 @@ Return ONLY valid JSON, no markdown, no explanation:
                ITINERARY MODE — day-by-day structure
                ══════════════════════════════════════ */
             <>
-              {/* Header row: place count + show/hide map */}
-              {selectedTrip.days.length > 0 && (
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{totalItems} places</p>
-                  <button
-                    onClick={() => setShowMap(m => !m)}
-                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full"
-                  >
-                    <MapPin size={12} strokeWidth={2} />
-                    {showMap ? 'Hide map' : 'Show map'}
-                  </button>
-                </div>
-              )}
 
-              {/* Inline map — shown/hidden */}
-              {showMap && selectedTrip.days.length > 0 && (
-                <div className="rounded-2xl overflow-hidden mb-5" style={{ height: 260 }}>
-                  <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
-                    {mapLoading && Object.keys(mapCoords).length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
-                        <Loader2 size={20} className="animate-spin text-gray-400" />
-                        <p className="text-xs text-gray-400">Finding places on map…</p>
-                      </div>
-                    ) : (
-                      <MapView
-                        places={selectedTrip.days.flatMap(d => d.items).filter(i => mapCoords[i.id]).map(i => ({
-                          id: i.id, lat: mapCoords[i.id].lat, lng: mapCoords[i.id].lng,
-                          name: i.name, city: selectedTrip.destination, country: selectedTrip.country,
-                        }))}
-                        height="260px"
-                      />
-                    )}
-                  </Suspense>
-                </div>
-              )}
+              {/* Inline map — shown/hidden with day filter */}
+              {showMap && selectedTrip.days.length > 0 && (() => {
+                const visibleDays = sortedDays
+                  .filter((d, idx, arr) => arr.findIndex(x => x.label === d.label) === idx)
+                  .slice(0, countDaysFromDates(selectedTrip.dates) || sortedDays.length);
+                const mapItems = (mapDayFilter === 'all'
+                  ? selectedTrip.days.flatMap(d => d.items)
+                  : (visibleDays.find(d => d.label === mapDayFilter)?.items ?? [])
+                ).filter(i => mapCoords[i.id]);
+                return (
+                  <div className="mb-5">
+                    {/* Day filter chips */}
+                    <div className="flex gap-1.5 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+                      <button
+                        onClick={() => setMapDayFilter('all')}
+                        className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all ${mapDayFilter === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'}`}
+                      >
+                        All
+                      </button>
+                      {visibleDays.map(d => (
+                        <button
+                          key={d.label}
+                          onClick={() => setMapDayFilter(d.label)}
+                          className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all ${mapDayFilter === d.label ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'}`}
+                        >
+                          {d.label.split('·')[0].trim()}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="rounded-2xl overflow-hidden" style={{ height: 240 }}>
+                      <Suspense fallback={<div className="flex items-center justify-center h-full bg-gray-100 rounded-2xl"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}>
+                        {mapLoading && Object.keys(mapCoords).length === 0 ? (
+                          <div className="flex flex-col items-center justify-center h-full bg-gray-100 rounded-2xl gap-2">
+                            <Loader2 size={20} className="animate-spin text-gray-400" />
+                            <p className="text-xs text-gray-400">Finding places on map…</p>
+                          </div>
+                        ) : (
+                          <MapView
+                            places={mapItems.map(i => ({
+                              id: i.id, lat: mapCoords[i.id].lat, lng: mapCoords[i.id].lng,
+                              name: i.name, city: selectedTrip.destination, country: selectedTrip.country,
+                            }))}
+                            height="240px"
+                          />
+                        )}
+                      </Suspense>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {selectedTrip.days.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -2613,7 +2635,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                       .map((day, di) => (
                       <div key={di}>
                         <div className="flex items-center justify-between mb-3">
-                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{day.label}</p>
+                          <p className="text-sm font-bold text-gray-900">{day.label}</p>
                           {day.id && (
                             <button onClick={() => setDeleteDayConfirm({ id: day.id!, label: day.label })}
                               className="text-gray-300 hover:text-red-400 transition-colors p-1">
@@ -2621,6 +2643,46 @@ Return ONLY valid JSON, no markdown, no explanation:
                             </button>
                           )}
                         </div>
+                        {/* Reservations for this day */}
+                        {(() => {
+                          const dayDate = getDayDateFromLabel(day.label);
+                          const dayBookings = dayDate ? planBookings.filter(b => {
+                            const sameDay = (d: Date) => d.toDateString() === dayDate.toDateString();
+                            if (b.type === 'flight') return b.departureTime ? sameDay(new Date(b.departureTime)) : false;
+                            if (b.type === 'stay') return b.checkInDate ? sameDay(new Date(b.checkInDate + 'T00:00:00')) : false;
+                            if (b.type === 'restaurant' || b.type === 'activity') return b.reservationDate ? sameDay(new Date(b.reservationDate + 'T00:00:00')) : false;
+                            return false;
+                          }) : [];
+                          if (dayBookings.length === 0) return null;
+                          return (
+                            <div className="space-y-2 mb-3">
+                              {dayBookings.map(b => {
+                                const meta = BOOKING_META[b.type];
+                                return (
+                                  <button
+                                    key={b.id}
+                                    className="w-full flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5 text-left"
+                                    onClick={() => { setBookingType(b.type); setBookingForm(b); setBookingImportMode(false); setBookingEmailText(''); setShowAddBooking(true); }}
+                                  >
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${meta.color}`}>
+                                      {meta.icon}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-semibold text-gray-900 truncate">{b.title || meta.label}</p>
+                                      <p className="text-xs text-gray-400 truncate">
+                                        {b.type === 'flight' && [b.flightNumber, b.departureAirport && b.arrivalAirport ? `${b.departureAirport} → ${b.arrivalAirport}` : ''].filter(Boolean).join(' · ')}
+                                        {b.type === 'stay' && [b.checkInDate && b.checkOutDate ? `${b.checkInDate} – ${b.checkOutDate}` : b.checkInDate, b.address].filter(Boolean).join(' · ')}
+                                        {(b.type === 'restaurant' || b.type === 'activity') && [b.reservationTime, b.partySize ? `${b.partySize} ppl` : ''].filter(Boolean).join(' · ')}
+                                        {b.confirmationNumber && <span className="font-mono"> · #{b.confirmationNumber}</span>}
+                                      </p>
+                                    </div>
+                                    <ChevronRight size={14} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                         <SortableContext items={day.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
                           <div className="space-y-2.5">
                             {day.items.map(item => (
@@ -2629,7 +2691,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                                 item={item}
                                 dayId={day.id ?? null}
                                 userId={userId}
-                                onOpen={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setShowItemDetail(true); }}
+                                onOpen={() => { setDetailItem(item); setDetailItemDayId(day.id ?? null); setDetailItemAsPlace({ id: item.id, name: item.name, category: item.category, neighborhood: item.neighborhood ?? '', city: selectedTrip.destination, country: selectedTrip.country ?? '', photoUrl: item.image ?? '', position: 0, lat: item.lat ?? null, lng: item.lng ?? null }); }}
                                 categoryEmoji={categoryEmoji}
                                 categoryDisplayName={categoryDisplayName}
                                 collaborators={selectedTrip.collaborators}
@@ -2744,7 +2806,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                 <X size={15} strokeWidth={2} className="text-gray-500" />
               </button>
 
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit plan</p>
+              <p className="text-sm font-bold text-gray-900 mb-4">Edit plan</p>
 
               {/* Cover image preview */}
               {createPortal(
@@ -2896,7 +2958,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               <button onClick={() => setShowInvite(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                 <X size={15} strokeWidth={2} className="text-gray-500" />
               </button>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">People on this plan</p>
+              <p className="text-sm font-bold text-gray-900 mb-4">People on this plan</p>
               {inviteCollabs.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {inviteCollabs.map(c => {
@@ -3037,7 +3099,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
                 <div className="w-8" />
                 <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Build Itinerary</p>
+                <p className="text-sm font-bold text-gray-900">Build Itinerary</p>
                 <button onClick={() => setShowGenerateSheet(false)} disabled={generateLoading} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
                   <X size={14} strokeWidth={2} className="text-gray-600" />
                 </button>
@@ -3144,7 +3206,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
                 <div className="w-8" />
                 <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Ask AI for ideas</p>
+                <p className="text-sm font-bold text-gray-900">Ask AI for ideas</p>
                 <button onClick={() => setShowAskAISheet(false)} disabled={askAILoading} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
                   <X size={14} strokeWidth={2} className="text-gray-600" />
                 </button>
@@ -3238,7 +3300,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               <div className="flex-shrink-0 flex items-center justify-between px-5 pt-3 pb-4 border-b border-gray-100">
                 <div className="w-8 h-8" />
                 <div className="w-10 h-1 rounded-full bg-gray-200 absolute top-3 left-1/2 -translate-x-1/2" />
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{bookingForm.id ? 'Edit Reservation' : 'Add Reservation'}</p>
+                <p className="text-sm font-bold text-gray-900">{bookingForm.id ? 'Edit reservation' : 'Add reservation'}</p>
                 <button onClick={() => setShowAddBooking(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
                   <X size={14} strokeWidth={2} className="text-gray-600" />
                 </button>
@@ -3384,7 +3446,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               </div>
               {/* header */}
               <div className="flex items-center px-5 pt-2 pb-3 flex-shrink-0">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Add anything</p>
+                <p className="text-sm font-bold text-gray-900 flex-1">Add anything</p>
                 <button onClick={() => setShowAddPlace(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                   <X size={15} strokeWidth={2} className="text-gray-500" />
                 </button>
@@ -3783,8 +3845,18 @@ Return ONLY valid JSON, no markdown, no explanation:
           </div>
         )}
 
-        {/* Item Detail — bottom sheet */}
-        {showItemDetail && detailItem && (
+        {/* Item Detail — PlacePage */}
+        {detailItemAsPlace && detailItem && (
+          <PlacePage
+            place={detailItemAsPlace}
+            appUser={userId ? { id: userId, name: '', username: '', avatar: userAvatar ?? '' } as any : undefined}
+            isSaved={false}
+            onClose={() => { setDetailItemAsPlace(null); setDetailItem(null); }}
+          />
+        )}
+
+        {/* Item Detail — bottom sheet (legacy, kept for event items) */}
+        {showItemDetail && detailItem && !detailItemAsPlace && (
           <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
             <div className="absolute inset-0 bg-black/40" onClick={() => { setShowItemDetail(false); setShowDuplicatePicker(false); }} />
             <div className="relative bg-white rounded-t-3xl flex flex-col overflow-hidden" style={{ maxHeight: '88vh' }}>
@@ -3958,7 +4030,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             <div className="relative bg-white rounded-t-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
               <div className="flex items-center px-5 pt-2 pb-3 flex-shrink-0">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex-1">Edit place / plan</p>
+                <p className="text-sm font-bold text-gray-900 flex-1">Edit place / plan</p>
                 <button onClick={() => setShowEditItem(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><X size={15} strokeWidth={2} className="text-gray-500" /></button>
               </div>
               <div ref={editItemScrollRef} className="flex-1 overflow-y-auto px-5 pb-8">
@@ -4631,7 +4703,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                   if (Object.keys(byArea).length === 0) return <p className="text-center text-sm text-gray-400 py-8">No places match this filter</p>;
                   return Object.entries(byArea).map(([area, areaPlaces]) => (
                     <div key={area}>
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{area}</p>
+                      <p className="text-sm font-bold text-gray-900 mb-2">{area}</p>
                       <div className="space-y-3">{areaPlaces.map(place => <RealPlaceCard key={place.id} place={place} />)}</div>
                     </div>
                   ));
@@ -4651,7 +4723,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             <button onClick={() => setShowEditColSheet(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
               <X size={15} strokeWidth={2} className="text-gray-500" />
             </button>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit collection</p>
+            <p className="text-sm font-bold text-gray-900 mb-4">Edit collection</p>
             <input
               value={editColName}
               onChange={e => setEditColName(e.target.value)}
@@ -4720,7 +4792,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               {/* All invited collaborators — shown as Pending until acceptance flow exists */}
               {(colCollaborators.length > 0 || colInvitedPeople.length > 0) && !colInviteSearch && (
                 <div className="mb-1">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
+                  <p className="text-sm font-bold text-gray-900 px-2 mb-1">Pending</p>
                   {/* DB collaborators */}
                   {colCollaborators.map(c => (
                     <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
@@ -4928,7 +5000,7 @@ Return ONLY valid JSON, no markdown, no explanation:
               {/* Places count + view toggle */}
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{filtered.length} places</p>
+                  <p className="text-sm font-bold text-gray-900">{filtered.length} places</p>
                   {isOwn && (
                     <button onClick={() => setShowAddPlaces(true)} className="w-5 h-5 bg-gray-100 rounded-full flex items-center justify-center">
                       <Plus size={11} strokeWidth={2.5} className="text-gray-500" />
@@ -4976,7 +5048,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                   <div className="space-y-5">
                     {grouped.map(({ label, items }, gi) => (
                       <div key={label}>
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2.5">
+                        <p className="text-sm font-bold text-gray-900 mb-2.5">
                           📍 {label}
                         </p>
                         <div className="space-y-2.5">
@@ -5117,7 +5189,7 @@ Return ONLY valid JSON, no markdown, no explanation:
 
         {/* Tabs */}
         <div className="flex gap-6 border-b border-gray-100">
-          {([['Places', 'All saved'], ['Collections', 'Collections'], ['Trips', 'My plans'], ['Map', 'Map']] as [SavedTab, string][]).map(([tab, label]) => (
+          {([['Places', 'Saved'], ['Collections', 'Collections'], ['Subscribed', 'Subscribed'], ['Trips', 'My plans']] as [SavedTab, string][]).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -5134,9 +5206,45 @@ Return ONLY valid JSON, no markdown, no explanation:
       </div>
 
       {/* Places Tab */}
-      {activeTab === 'Places' && userId && (
-        <div className="pb-6">
-          {realSavedPlaces.length === 0 ? (
+      {activeTab === 'Places' && userId && (() => {
+        // Exclude places saved from the user's own posts — you know those already
+        const othersPlaces = realSavedPlaces.filter(p => !p.postUserId || p.postUserId !== userId);
+        const countriesCount = new Set(othersPlaces.map(p => p.country).filter(Boolean)).size;
+        // Group all saves by name+city — used for "from N posts" badge
+        const placeGroups = (() => {
+          const groups = new Map<string, SavedPlace[]>();
+          for (const p of othersPlaces) {
+            const key = `${p.name.toLowerCase()}|${p.city.toLowerCase()}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(p);
+          }
+          return groups;
+        })();
+        // Deduplicate by name+city — keep the entry with the best data (photo preferred)
+        const dedupedPlaces = (() => {
+          const seen = new Map<string, SavedPlace>();
+          for (const p of othersPlaces) {
+            const key = `${p.name.toLowerCase()}|${p.city.toLowerCase()}`;
+            const existing = seen.get(key);
+            if (!existing || (!existing.photoUrl && p.photoUrl)) {
+              seen.set(key, p);
+            }
+          }
+          return Array.from(seen.values());
+        })();
+        const q = savedMapSearch.trim().toLowerCase();
+        const filtered = q
+          ? dedupedPlaces.filter(p => p.name.toLowerCase().includes(q) || p.city.toLowerCase().includes(q) || p.country.toLowerCase().includes(q))
+          : dedupedPlaces;
+        const byCountry: Record<string, SavedPlace[]> = {};
+        filtered.forEach(p => { const c = p.country || 'Unknown'; if (!byCountry[c]) byCountry[c] = []; byCountry[c].push(p); });
+        const catEmoji = (cat: string) => {
+          const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
+          return m[cat?.toLowerCase()] ?? '📍';
+        };
+        return (
+        <div className="pb-10">
+          {othersPlaces.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-6">
               <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
                 <span className="text-3xl">🔖</span>
@@ -5145,89 +5253,575 @@ Return ONLY valid JSON, no markdown, no explanation:
               <p className="text-slate-400 text-sm text-center max-w-[200px]">Tap the bookmark icon on any place to save it here</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 px-4 pt-3">
-              {realSavedPlaces.map(place => (
-                <div
-                  key={place.id}
-                  className="relative rounded-2xl overflow-hidden cursor-pointer active:scale-95 transition-transform"
-                  onClick={async () => {
-                    if (!place.postId) return;
-                    const post = await getPostById(place.postId);
-                    if (post) setSelectedSavedPost(post);
-                  }}
-                >
-                  <img src={place.photoUrl} alt={place.name} className="w-full aspect-square object-cover" />
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-2.5 pb-2.5 pt-6">
-                    <p className="text-white text-xs font-semibold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
-                    <p className="text-white/70 text-xs flex items-center gap-0.5 mt-0.5">
-                      <MapPin size={9} strokeWidth={1.5} />{place.city}
-                    </p>
+            <>
+              {/* Map + stats */}
+              <div className="px-4 pt-4">
+                <div className="rounded-2xl relative" style={{ height: 220 }}>
+                  <div className="rounded-2xl overflow-hidden absolute inset-0">
+                    <Suspense fallback={<div className="h-full bg-gray-100 animate-pulse" />}>
+                      <MapView
+                        places={dedupedPlaces.filter(p => p.lat != null && p.lng != null).map(p => ({ id: p.id, lat: p.lat!, lng: p.lng!, name: p.name, city: p.city, country: p.country }))}
+                        height="220px"
+                        hideZoomControls
+                        selectedId={savedMapPin?.id}
+                        onMapReady={(map: import('leaflet').Map) => { savedMapRef.current = map; }}
+                        onPlaceClick={(mp) => {
+                          const found = realSavedPlaces.find(p => p.id === mp.id);
+                          if (found) setSavedMapPin(found);
+                        }}
+                      />
+                    </Suspense>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Post detail overlay when a saved place card is tapped */}
-          {selectedSavedPost && (
-              <div className="fixed inset-0 z-50 bg-white overflow-y-auto pb-24">
-                {/* Frosted glass header */}
-                <div className="relative">
-                  <div className="w-full bg-gray-100" style={{ aspectRatio: '3/4', position: 'relative' }}>
-                    {selectedSavedPost.places.length > 0 && (
-                      <img src={selectedSavedPost.places[0].photoUrl} className="w-full h-full object-cover" alt="" />
-                    )}
-                    {selectedSavedPost.places.length > 1 && (
-                      <div className="absolute bottom-3 right-3 bg-black/50 rounded-full px-2 py-0.5 text-white text-xs font-medium">
-                        1 / {selectedSavedPost.places.length}
-                      </div>
-                    )}
-                  </div>
-                  <div className="absolute top-0 left-0 right-0 px-4 pt-12 pb-8 bg-gradient-to-b from-black/55 via-black/10 to-transparent">
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        onClick={() => setSelectedSavedPost(null)}
-                        className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
-                      >
-                        <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
-                      </button>
-                      <div className="flex items-center gap-2 bg-black/35 backdrop-blur-md rounded-full px-3 py-1.5 w-fit max-w-[65%] overflow-hidden">
-                        {selectedSavedPost.profile.avatarUrl
-                          ? <img src={selectedSavedPost.profile.avatarUrl} className="w-7 h-7 rounded-full object-cover flex-shrink-0" alt="" />
-                          : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">{selectedSavedPost.profile.name[0]?.toUpperCase()}</span></div>
-                        }
-                        <p className="text-white font-semibold text-sm leading-tight truncate">
-                          {selectedSavedPost.collaborators?.length
-                            ? `${selectedSavedPost.profile.username || selectedSavedPost.profile.name} & ${selectedSavedPost.collaborators.map(c => c.username || c.name).join(', ')}`
-                            : selectedSavedPost.profile.username || selectedSavedPost.profile.name}
-                        </p>
-                      </div>
+                  <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/70 to-transparent rounded-b-2xl pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 px-4 py-3 pointer-events-none">
+                    <div className="flex gap-6">
+                      <div><p className="text-base font-black text-white">{countriesCount}</p><p className="text-xs text-white/70">Countries</p></div>
+                      <div><p className="text-base font-black text-white">{dedupedPlaces.length}</p><p className="text-xs text-white/70">Places saved</p></div>
                     </div>
                   </div>
-                </div>
-                {/* Post content */}
-                <div className="bg-white px-5 pt-4 pb-5">
-                  {selectedSavedPost.hashtags.length > 0 && (() => {
-                    const seen = new Set<string>();
-                    const unique = selectedSavedPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
-                    return <p className="text-xs text-orange-400 mb-4">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
-                  })()}
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">{selectedSavedPost.places.length} place{selectedSavedPost.places.length !== 1 ? 's' : ''}</p>
-                  <div className="space-y-3">
-                    {selectedSavedPost.places.map(pl => (
-                      <div key={pl.id} className="flex items-center gap-3">
-                        <img src={pl.photoUrl} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" alt={pl.name} />
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 leading-snug">{pl.name.split(',')[0].trim()}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{[pl.neighborhood, pl.city].filter(Boolean).join(', ')}</p>
+                  <div className="absolute bottom-3 right-3 flex flex-col gap-1" style={{ zIndex: 10 }}>
+                    <button onClick={() => savedMapRef.current?.zoomIn()} className="w-8 h-8 rounded-[10px] bg-white flex items-center justify-center" style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.15)' }}>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><line x1="6" y1="0" x2="6" y2="12" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/><line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                    </button>
+                    <button onClick={() => savedMapRef.current?.zoomOut()} className="w-8 h-8 rounded-[10px] bg-white flex items-center justify-center" style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.15)' }}>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><line x1="0" y1="6" x2="12" y2="6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                    </button>
+                  </div>
+                  {/* Pin preview card */}
+                  {savedMapPin && (() => {
+                    const catEmojiLocal = (cat: string) => {
+                      const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
+                      return m[cat?.toLowerCase()] ?? '📍';
+                    };
+                    return (
+                      <div
+                        className="absolute bottom-3 left-3 right-3 z-[500]"
+                        style={{ transition: 'transform 0.25s cubic-bezier(0.34,1.2,0.64,1), opacity 0.2s ease' }}
+                      >
+                        <div
+                          className="bg-white rounded-2xl overflow-hidden flex items-stretch cursor-pointer active:scale-[0.98] transition-transform"
+                          style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }}
+                          onClick={async () => {
+                            if (!savedMapPin.postId) return;
+                            const post = await getPostById(savedMapPin.postId);
+                            if (post) setSelectedSavedPost(post);
+                          }}
+                        >
+                          {/* Photo */}
+                          <div className="w-20 h-20 flex-shrink-0 bg-gray-200">
+                            {savedMapPin.photoUrl
+                              ? <img src={savedMapPin.photoUrl} alt={savedMapPin.name} className="w-full h-full object-cover" />
+                              : <div className="w-full h-full flex items-center justify-center text-2xl">{catEmojiLocal(savedMapPin.category)}</div>
+                            }
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0 px-3 py-3 flex flex-col justify-center">
+                            <p className="text-sm font-bold text-gray-900 truncate leading-tight">{savedMapPin.name.split(',')[0].trim()}</p>
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">{[savedMapPin.neighborhood, savedMapPin.city].filter(Boolean).join(', ')}</p>
+                            {savedMapPin.category && (
+                              <p className="text-xs text-gray-400 mt-0.5">{catEmojiLocal(savedMapPin.category)} {savedMapPin.category.charAt(0).toUpperCase() + savedMapPin.category.slice(1)}</p>
+                            )}
+                          </div>
+                          {/* View post indicator */}
+                          <div className="flex flex-col items-center justify-center pr-3 pl-1 gap-0.5">
+                            <ChevronRight size={16} strokeWidth={2} className="text-gray-300" />
+                          </div>
+                          {/* Dismiss */}
+                          <button
+                            className="absolute top-2 right-2 w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center z-10"
+                            onClick={e => { e.stopPropagation(); setSavedMapPin(null); }}
+                          >
+                            <X size={11} strokeWidth={2.5} className="text-gray-500" />
+                          </button>
                         </div>
                       </div>
-                    ))}
+                    );
+                  })()}
+                </div>
+              </div>
+              {/* Search */}
+              <div className="px-4 pt-3">
+                <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+                  <Search size={14} strokeWidth={2} className="text-gray-400 flex-shrink-0" />
+                  <input value={savedMapSearch} onChange={e => setSavedMapSearch(e.target.value)} placeholder="Search saved places…" className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none" />
+                  {savedMapSearch && <button onClick={() => setSavedMapSearch('')} className="text-gray-400 text-xs">✕</button>}
+                </div>
+              </div>
+              {/* Places by country — clickable to open post */}
+              <div className="px-4 pt-4 space-y-5">
+                {Object.keys(byCountry).length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">No places match your search</p>
+                ) : Object.entries(byCountry).map(([country, cPlaces]) => (
+                  <div key={country}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-bold text-gray-900">{country}</p>
+                      <p className="text-xs text-gray-400">{cPlaces.length} place{cPlaces.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {cPlaces.map((pl, i) => {
+                        const groupKey = `${pl.name.toLowerCase()}|${pl.city.toLowerCase()}`;
+                        const group = placeGroups.get(groupKey) ?? [pl];
+                        const postCount = group.length;
+                        return (
+                        <div
+                          key={`${pl.id}-${i}`}
+                          className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5 cursor-pointer active:bg-gray-100 transition-colors"
+                          onClick={async () => {
+                            if (postCount > 1) {
+                              setPostsBrowseGroup(group);
+                              setPostsBrowsePosts(group.map(() => null));
+                              group.forEach(async (sp, idx) => {
+                                if (!sp.postId) return;
+                                const post = await getPostById(sp.postId);
+                                setPostsBrowsePosts(prev => { const next = [...prev]; next[idx] = post; return next; });
+                              });
+                            } else {
+                              if (!pl.postId) return;
+                              const post = await getPostById(pl.postId);
+                              if (post) setSelectedSavedPost(post);
+                            }
+                          }}
+                        >
+                          {/* Thumbnail — stacked if multiple posts, single otherwise */}
+                          {postCount > 1 ? (() => {
+                            const secondSave = group.find(s => s.id !== pl.id && s.photoUrl);
+                            return (
+                              <div className="relative flex-shrink-0" style={{ width: 54, height: 48 }}>
+                                {secondSave?.photoUrl && (
+                                  <img src={secondSave.photoUrl} alt="" className="absolute object-cover rounded-[10px]" style={{ width: 40, height: 40, top: 4, left: 13, border: '2.5px solid #f9fafb', zIndex: 1 }} />
+                                )}
+                                {pl.photoUrl
+                                  ? <img src={pl.photoUrl} alt={pl.name} className="absolute object-cover rounded-xl" style={{ width: 44, height: 44, top: 0, left: 0, border: '2.5px solid #f9fafb', zIndex: 2 }} />
+                                  : <div className="absolute rounded-xl bg-gray-200 flex items-center justify-center text-lg" style={{ width: 44, height: 44, top: 0, left: 0, border: '2.5px solid #f9fafb', zIndex: 2 }}>{catEmoji(pl.category)}</div>
+                                }
+                              </div>
+                            );
+                          })() : (
+                            pl.photoUrl
+                              ? <img src={pl.photoUrl} alt={pl.name} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                              : <div className="w-12 h-12 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 text-xl">{catEmoji(pl.category)}</div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{pl.name.split(',')[0].trim()}</p>
+                              {postCount > 1 && (
+                                <span className="flex-shrink-0 text-[10px] font-medium text-gray-400 bg-gray-100 rounded-full px-1.5 py-px whitespace-nowrap">{postCount} posts</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5">{[pl.neighborhood, pl.city].filter(Boolean).join(', ') || country}</p>
+                            {pl.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(pl.category)} {pl.category.charAt(0).toUpperCase() + pl.category.slice(1)}</p>}
+                          </div>
+                          <button
+                            className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 active:bg-gray-300 transition-colors"
+                            onClick={async e => {
+                              e.stopPropagation();
+                              setAddToColPlace(pl);
+                              setAddToColLoading(true);
+                              const ids = await getPlaceCollectionIds(pl.id);
+                              setAddToColIds(ids);
+                              setAddToColLoading(false);
+                            }}
+                          >
+                            <BookmarkPlus size={14} strokeWidth={1.8} className="text-gray-600" />
+                          </button>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {/* Posts-browse sheet — shown when a place has been saved from multiple posts */}
+          {postsBrowseGroup && (
+            <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto', background: 'rgba(0,0,0,0.4)' }} onClick={() => setPostsBrowseGroup(null)}>
+              <div className="bg-white rounded-t-3xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                {/* Handle */}
+                <div className="flex justify-center pt-3 pb-1">
+                  <div className="w-9 h-1 rounded-full bg-gray-200" />
+                </div>
+                {/* Header */}
+                <div className="px-5 pt-2 pb-4 border-b border-gray-100">
+                  <p className="text-sm font-bold text-gray-900">{postsBrowseGroup[0].name.split(',')[0].trim()}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{postsBrowseGroup[0].city} · saved from {postsBrowseGroup.length} posts</p>
+                </div>
+                {/* Posts grid */}
+                <div className="overflow-y-auto px-4 pt-4" style={{ maxHeight: '55vh' }}>
+                  <div className="grid grid-cols-2 gap-3 pb-8">
+                    {postsBrowsePosts.map((post, idx) => {
+                      const sp = postsBrowseGroup[idx];
+                      return (
+                        <button
+                          key={sp.id}
+                          className="text-left active:opacity-75 transition-opacity"
+                          onClick={async () => {
+                            if (post) { setPostsBrowseGroup(null); setSelectedSavedPost(post); return; }
+                            if (!sp.postId) return;
+                            const fetched = await getPostById(sp.postId);
+                            if (fetched) { setPostsBrowseGroup(null); setSelectedSavedPost(fetched); }
+                          }}
+                        >
+                          {/* Square image */}
+                          <div className="rounded-2xl overflow-hidden aspect-square bg-gray-100 w-full">
+                            {sp.photoUrl
+                              ? <img src={sp.photoUrl} alt={sp.name} className="w-full h-full object-cover" />
+                              : <div className="w-full h-full flex items-center justify-center text-3xl">{catEmoji(sp.category)}</div>
+                            }
+                          </div>
+                          {/* Info below image */}
+                          {post ? (
+                            <div className="mt-2">
+                              <div className="flex items-center gap-1.5">
+                                {post.profile.avatarUrl
+                                  ? <img src={post.profile.avatarUrl} className="w-4 h-4 rounded-full object-cover flex-shrink-0" alt="" />
+                                  : <div className="w-4 h-4 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-[8px] font-bold text-gray-500">{post.profile.name[0]?.toUpperCase()}</span></div>
+                                }
+                                <p className="text-xs font-semibold text-gray-900 truncate">@{post.profile.username || post.profile.name}</p>
+                              </div>
+                              <p className="text-[11px] text-gray-400 mt-0.5">{post.places.length} place{post.places.length !== 1 ? 's' : ''}</p>
+                            </div>
+                          ) : (
+                            <div className="mt-2 space-y-1.5">
+                              <div className="h-3 bg-gray-100 rounded-full w-3/4 animate-pulse" />
+                              <div className="h-2.5 bg-gray-100 rounded-full w-1/2 animate-pulse" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+          {/* Post detail — same layout as Profile post view */}
+          {selectedSavedPost && (
+            <div className="fixed inset-0 z-[300] bg-white overflow-y-auto pb-24" style={{ maxWidth: 384, margin: '0 auto' }}>
+              {/* Full-bleed carousel */}
+              <div className="relative">
+                {selectedSavedPost.places.length > 0
+                  ? <ImageCarousel
+                      images={selectedSavedPost.places.map(pl => pl.photoUrl).filter(Boolean)}
+                      labels={selectedSavedPost.places.map(pl => pl.name.split(',')[0].trim())}
+                      sublabels={selectedSavedPost.places.map(pl => [pl.neighborhood, pl.city].filter(Boolean).join(', ') || pl.country)}
+                    />
+                  : <div className="w-full bg-gray-100" style={{ aspectRatio: '3/4' }} />
+                }
+                {/* Top overlay */}
+                <div className="absolute top-0 left-0 right-0 px-4 pt-5 pb-8 bg-gradient-to-b from-black/55 via-black/10 to-transparent">
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      onClick={() => setSelectedSavedPost(null)}
+                      className="w-9 h-9 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md flex-shrink-0"
+                    >
+                      <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
+                    </button>
+                    <div className="flex items-center gap-1.5 bg-black/35 backdrop-blur-md rounded-full px-2 py-1.5 w-fit max-w-[65%] overflow-hidden">
+                      {selectedSavedPost.profile.avatarUrl
+                        ? <img src={selectedSavedPost.profile.avatarUrl} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" alt="" />
+                        : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{selectedSavedPost.profile.name[0]?.toUpperCase()}</span></div>
+                      }
+                      <p className="text-white font-semibold text-sm leading-tight truncate ml-1">
+                        {selectedSavedPost.collaborators?.length
+                          ? `${selectedSavedPost.profile.username || selectedSavedPost.profile.name} & ${selectedSavedPost.collaborators.map(c => c.username || c.name).join(', ')}`
+                          : selectedSavedPost.profile.username || selectedSavedPost.profile.name}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {/* Action bar */}
+              <div className="flex items-center justify-between px-5 pt-4 pb-4 border-b border-gray-100">
+                <div className="flex items-center gap-5">
+                  <button className="flex items-center gap-1.5" onClick={() => {
+                    if (!userId) return;
+                    setSavedPostLiked(prev => !prev);
+                    setSavedPostLikeCount(prev => prev + (savedPostLiked ? -1 : 1));
+                    savedPostLiked ? unlikePost(userId, selectedSavedPost.id) : likePost(userId, selectedSavedPost.id);
+                  }}>
+                    <Heart size={22} strokeWidth={1.5} className={savedPostLiked ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
+                    <span className="text-sm font-medium text-gray-500">{savedPostLikeCount}</span>
+                  </button>
+                  <button className="flex items-center gap-1.5" onClick={() => setTimeout(() => savedPostCommentRef.current?.focus(), 50)}>
+                    <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
+                    <span className="text-sm font-medium text-gray-500">{savedPostComments.length}</span>
+                  </button>
+                  <button className="active:scale-90 transition-transform" onClick={() => setShowSavedPostShare(true)}>
+                    <Send size={21} strokeWidth={1.5} className="text-gray-800" />
+                  </button>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!userId) return;
+                    for (const pl of selectedSavedPost.places) {
+                      if (!realSavedPlaceIds.has(pl.id)) {
+                        await savePlace(userId, pl.id);
+                        setRealSavedPlaceIds(prev => new Set(prev).add(pl.id));
+                        setRealSavedPlaces(prev => [...prev, { id: pl.id, postId: selectedSavedPost.id, name: pl.name, category: pl.category, neighborhood: pl.neighborhood ?? '', city: pl.city, country: pl.country ?? '', photoUrl: pl.photoUrl ?? '', lat: pl.lat ?? null, lng: pl.lng ?? null }]);
+                      }
+                    }
+                  }}
+                >
+                  {selectedSavedPost.places.every(pl => realSavedPlaceIds.has(pl.id))
+                    ? <BookmarkCheck size={22} strokeWidth={1.5} className="text-gray-900" />
+                    : <Bookmark size={22} strokeWidth={1.5} className="text-gray-300" />}
+                </button>
+              </div>
+              {/* Caption + hashtags */}
+              {(selectedSavedPost.caption || selectedSavedPost.hashtags.length > 0) && (
+                <div className="px-5 pt-4 pb-4 border-b border-gray-100">
+                  {selectedSavedPost.caption && <p className="text-sm text-gray-800 leading-relaxed">{selectedSavedPost.caption}</p>}
+                  {selectedSavedPost.hashtags.length > 0 && (() => {
+                    const seen = new Set<string>();
+                    const unique = selectedSavedPost.hashtags.filter(h => { const k = h.split(',')[0].trim().toLowerCase().replace(/\s+/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+                    return <p className="text-xs text-orange-400 mt-2">{unique.map(h => `#${h.split(',')[0].trim().replace(/\s+/g, '')}`).join(' ')}</p>;
+                  })()}
+                </div>
+              )}
+              {/* Places list */}
+              {selectedSavedPost.places.length > 0 && (
+                <div className="px-5 pt-4">
+                  <p className="text-sm font-bold text-gray-900 mb-3">
+                    {new Set(selectedSavedPost.places.map(p => p.name.split(',')[0].trim().toLowerCase())).size} place{selectedSavedPost.places.length !== 1 ? 's' : ''}
+                  </p>
+                  <div className="space-y-2.5 pb-5">
+                    {(() => {
+                      const postPlaceCatEmoji = (cat: string) => {
+                        const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', landmark: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙', beach: '🏖️', sport: '⚽', sports: '⚽', wellness: '🧖', treats: '🍰', food: '🥡', neighbourhood: '📍', transport: '✈️', art: '🎨', event: '🎪', flight: '✈️', stay: '🏨' };
+                        return m[cat?.toLowerCase()] ?? '📍';
+                      };
+                      return selectedSavedPost.places
+                        .filter((p, i, arr) => arr.findIndex(x => x.name.split(',')[0].trim() === p.name.split(',')[0].trim()) === i)
+                        .map(pl => {
+                          const isSaved = realSavedPlaceIds.has(pl.id);
+                          return (
+                            <div
+                              key={pl.id}
+                              className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3 cursor-pointer active:bg-gray-100 transition-colors"
+                              onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(pl.name + ' ' + pl.city)}`, '_blank')}
+                            >
+                              {pl.photoUrl
+                                ? <img src={pl.photoUrl} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" alt={pl.name} />
+                                : <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 text-2xl">{postPlaceCatEmoji(pl.category)}</div>
+                              }
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 leading-snug truncate">{pl.name.split(',')[0].trim()}</p>
+                                <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-0.5 flex-wrap">
+                                  <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+                                  {[pl.neighborhood, pl.city].filter(Boolean).join(', ') || pl.country}
+                                </p>
+                                {pl.category && <p className="text-xs text-gray-400 mt-0.5">{postPlaceCatEmoji(pl.category)} {pl.category.charAt(0).toUpperCase() + pl.category.slice(1)}</p>}
+                              </div>
+                              <button
+                                className="w-9 h-9 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0 active:opacity-70 transition-opacity"
+                                onClick={async e => {
+                                  e.stopPropagation();
+                                  if (!userId) return;
+                                  if (isSaved) {
+                                    await unsavePlace(userId, pl.id);
+                                    setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(pl.id); return n; });
+                                    setRealSavedPlaces(prev => prev.filter(p => p.id !== pl.id));
+                                  } else {
+                                    await savePlace(userId, pl.id);
+                                    setRealSavedPlaceIds(prev => new Set(prev).add(pl.id));
+                                    setRealSavedPlaces(prev => [...prev, { id: pl.id, postId: selectedSavedPost.id, name: pl.name, category: pl.category, neighborhood: pl.neighborhood ?? '', city: pl.city, country: pl.country ?? '', photoUrl: pl.photoUrl ?? '', lat: pl.lat ?? null, lng: pl.lng ?? null }]);
+                                  }
+                                }}
+                              >
+                                {isSaved
+                                  ? <BookmarkCheck size={15} strokeWidth={1.5} className="text-white" />
+                                  : <BookmarkPlus size={15} strokeWidth={1.5} className="text-white" />
+                                }
+                              </button>
+                            </div>
+                          );
+                        });
+                    })()}
+                  </div>
+                </div>
+              )}
+              {/* Comments */}
+              <div className="px-5 pt-4 border-t border-gray-100">
+                <p className="text-sm font-bold text-gray-900 mb-3">Comments</p>
+                {savedPostCommentSending && savedPostComments.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-4">Loading…</p>
+                )}
+                {!savedPostCommentSending && savedPostComments.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
+                )}
+                <div className="space-y-3 mb-4">
+                  {savedPostComments.map(c => (
+                    <div key={c.id} className="flex items-start gap-2.5">
+                      {c.profile?.avatarUrl
+                        ? <img src={c.profile.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                        : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />}
+                      <div className="flex-1 bg-gray-50 rounded-2xl px-3 py-2.5">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-xs font-semibold text-gray-900">{c.profile?.username || c.profile?.name}</span>
+                          <span className="text-[10px] text-gray-400">{timeAgo(c.createdAt)}</span>
+                        </div>
+                        <p className="text-sm text-gray-700 mt-0.5 leading-snug">{c.text}</p>
+                      </div>
+                      {c.userId === userId && (
+                        <button onClick={async () => { await deleteComment(c.id); setSavedPostComments(prev => prev.filter(x => x.id !== c.id)); }} className="text-[10px] text-gray-300 flex-shrink-0 mt-2">✕</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 pb-4">
+                  {userAvatar
+                    ? <img src={userAvatar} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-7 h-7 rounded-full bg-gray-200 flex-shrink-0" />}
+                  <div className="flex-1 flex items-center bg-gray-50 rounded-2xl px-4 py-2.5 gap-2">
+                    <input
+                      ref={savedPostCommentRef}
+                      value={savedPostCommentText}
+                      onChange={e => setSavedPostCommentText(e.target.value)}
+                      placeholder="Add a comment…"
+                      className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
+                      onKeyDown={async e => {
+                        if (e.key === 'Enter' && savedPostCommentText.trim() && userId) {
+                          const text = savedPostCommentText.trim();
+                          setSavedPostCommentText('');
+                          const saved = await addComment(userId, selectedSavedPost.id, text);
+                          if (saved) setSavedPostComments(prev => [...prev, saved]);
+                        }
+                      }}
+                    />
+                    {savedPostCommentText.trim() && (
+                      <button
+                        onClick={async () => {
+                          if (!userId) return;
+                          const text = savedPostCommentText.trim();
+                          setSavedPostCommentText('');
+                          const saved = await addComment(userId, selectedSavedPost.id, text);
+                          if (saved) setSavedPostComments(prev => [...prev, saved]);
+                        }}
+                        className="text-xs font-bold text-gray-900 flex-shrink-0"
+                      >Post</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {/* Share bottom sheet */}
+              {showSavedPostShare && (
+                <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+                  <div className="absolute inset-0 bg-black/40" onClick={() => { setShowSavedPostShare(false); setSavedPostShareSentTo(new Set()); setSavedPostShareSearch(''); setSavedPostShareResults([]); }} />
+                  <div className="relative bg-white rounded-t-3xl">
+                    <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+                    <div className="flex items-center justify-between px-5 pt-2 pb-3">
+                      <h3 className="text-base font-bold text-gray-900">Send to</h3>
+                      <button onClick={() => { setShowSavedPostShare(false); setSavedPostShareSentTo(new Set()); setSavedPostShareSearch(''); setSavedPostShareResults([]); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100">
+                        <X size={14} strokeWidth={2} className="text-gray-500" />
+                      </button>
+                    </div>
+                    <div className="px-5 pb-3">
+                      <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3">
+                        <Search size={14} className="text-gray-400 flex-shrink-0" />
+                        <input
+                          autoFocus
+                          value={savedPostShareSearch}
+                          onChange={e => {
+                            const q = e.target.value;
+                            setSavedPostShareSearch(q);
+                            if (savedPostShareSearchRef.current) clearTimeout(savedPostShareSearchRef.current);
+                            if (!q.trim()) { setSavedPostShareResults([]); setSearchingSavedPostShare(false); return; }
+                            setSearchingSavedPostShare(true);
+                            savedPostShareSearchRef.current = setTimeout(async () => {
+                              if (!userId) return;
+                              const results = await searchProfiles(q, userId);
+                              setSavedPostShareResults(results);
+                              setSearchingSavedPostShare(false);
+                            }, 300);
+                          }}
+                          placeholder="Search people..."
+                          className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder-gray-400"
+                        />
+                        {searchingSavedPostShare && <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin flex-shrink-0" />}
+                      </div>
+                    </div>
+                    {(() => {
+                      const showSearch = savedPostShareSearch.trim().length > 0;
+                      const list = showSearch ? savedPostShareResults : savedPostConversations.map(c => ({ id: c.otherUser.id, name: c.otherUser.name, username: c.otherUser.username, avatarUrl: c.otherUser.avatarUrl }));
+                      if (showSearch && savedPostShareResults.length === 0 && !searchingSavedPostShare) {
+                        return <p className="text-sm text-gray-400 text-center py-4 px-5">No users found</p>;
+                      }
+                      if (!showSearch && savedPostConversations.length === 0) return null;
+                      return (
+                        <div className="px-3 max-h-44 overflow-y-auto">
+                          {list.map(person => {
+                            const sent = savedPostShareSentTo.has(person.id);
+                            const initials = person.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+                            return (
+                              <button
+                                key={person.id}
+                                onClick={async () => {
+                                  if (sent || !userId) return;
+                                  const convId = await getOrCreateConversation(userId, person.id);
+                                  if (convId) {
+                                    const url = `${window.location.origin}/post/${selectedSavedPost.id}`;
+                                    await sendMessage(convId, userId, `Check this out on curio: ${url}`);
+                                    setSavedPostShareSentTo(prev => new Set(prev).add(person.id));
+                                  }
+                                }}
+                                className="w-full flex items-center gap-3 py-2.5 px-2 rounded-2xl active:bg-gray-50 text-left"
+                              >
+                                {person.avatarUrl
+                                  ? <img src={person.avatarUrl} className="w-11 h-11 rounded-full object-cover object-top flex-shrink-0" />
+                                  : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-500">{initials}</div>}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-gray-900 truncate">{person.name}</p>
+                                  <p className="text-xs text-gray-400 truncate">@{person.username}</p>
+                                </div>
+                                <div className={`px-5 py-2 rounded-full text-xs font-bold flex-shrink-0 transition-colors ${sent ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}>
+                                  {sent ? 'Sent ✓' : 'Send'}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    <div className="mt-2 border-t border-gray-100 px-3 pb-10">
+                      <button
+                        className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                        onClick={async () => {
+                          const url = `${window.location.origin}/post/${selectedSavedPost.id}`;
+                          if (navigator.share) {
+                            try { await navigator.share({ url, title: 'Check this out on curio' }); } catch {}
+                          } else {
+                            navigator.clipboard.writeText(url).catch(() => {});
+                          }
+                        }}
+                      >
+                        <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                          <Send size={16} strokeWidth={1.5} className="text-gray-700" />
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">Share externally</span>
+                      </button>
+                      <button
+                        className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}/post/${selectedSavedPost.id}`).catch(() => {});
+                          setSavedPostShareLinkCopied(true);
+                          setTimeout(() => setSavedPostShareLinkCopied(false), 1500);
+                        }}
+                      >
+                        <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                          {savedPostShareLinkCopied ? <Check size={16} strokeWidth={2} className="text-green-500" /> : <Copy size={16} strokeWidth={1.5} className="text-gray-700" />}
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">{savedPostShareLinkCopied ? 'Link copied!' : 'Copy link'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
-      )}
+      );
+      })()}
       {activeTab === 'Places' && !userId && (
         <div className="pb-6">
           {isNewUser && savedPlaces.length === 0 && (
@@ -5276,9 +5870,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                     <img src={place.image} alt={place.name} className="w-full aspect-square object-cover" />
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/55 to-transparent px-2.5 pb-2.5 pt-6">
                       <p className="text-white text-xs font-semibold leading-tight truncate">{place.name.split(',')[0].trim()}</p>
-                      <p className="text-white/70 text-xs flex items-center gap-0.5 mt-0.5">
-                        <MapPin size={9} strokeWidth={1.5} />{place.city}
-                      </p>
+                      <p className="text-white/70 text-xs mt-0.5">{place.city}</p>
                     </div>
                   </div>
                 ))}
@@ -5305,7 +5897,12 @@ Return ONLY valid JSON, no markdown, no explanation:
         <div className="px-4 pt-4 pb-6 space-y-6">
           {/* Mine */}
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Mine</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-bold text-gray-900">My Collections</p>
+              <button onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }} className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full">
+                <Plus size={12} strokeWidth={2.5} /> New
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
               {dbCollections.map(col => (
                 <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
@@ -5320,38 +5917,73 @@ Return ONLY valid JSON, no markdown, no explanation:
                   <p className="text-xs text-gray-400">{col.placesCount} places</p>
                 </div>
               ))}
-              <div className="cursor-pointer" onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }}>
-                <div className="rounded-xl border-2 border-dashed border-gray-200 aspect-square flex items-center justify-center bg-gray-50">
-                  <Plus size={24} strokeWidth={1.5} className="text-gray-300" />
-                </div>
-                <p className="text-sm text-gray-400 mt-2">New Collection</p>
-              </div>
             </div>
           </div>
 
-          {/* Following */}
-          {dbSubscribedCollections.length > 0 && (
-          <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Subscribed</p>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-              {dbSubscribedCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
-                  <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
-                    {col.coverImageUrl ? (
-                      <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-4xl">{col.emoji || '🗂️'}</div>
-                    )}
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                  <p className="text-xs text-gray-400">{col.placesCount} places</p>
-                </div>
-              ))}
-            </div>
-          </div>
-          )}
         </div>
         )
+      )}
+
+      {/* Subscribed Tab */}
+      {activeTab === 'Subscribed' && (
+        <div className="px-4 pt-4 pb-6 space-y-6">
+          {dbSubscribedCollections.length === 0 && subscribedGuides.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <span className="text-3xl">🔭</span>
+              </div>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">Nothing yet</p>
+              <p className="text-slate-400 text-sm text-center max-w-[220px]">Follow collections and guides from creators you love and they'll appear here</p>
+            </div>
+          ) : (
+            <>
+              {/* Collections */}
+              {dbSubscribedCollections.length > 0 && (
+                <div>
+                  <p className="text-sm font-bold text-gray-900 mb-3">Collections</p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+                    {dbSubscribedCollections.map(col => (
+                      <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
+                        <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
+                          {col.coverImageUrl
+                            ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center text-4xl">{col.emoji || '🗂️'}</div>
+                          }
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
+                        <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Guides */}
+              {subscribedGuides.length > 0 && (
+                <div>
+                  <p className="text-sm font-bold text-gray-900 mb-3">Guides</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {subscribedGuides.map(guide => (
+                      <button key={guide.id} className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform aspect-square bg-gray-200">
+                        {guide.coverUrl
+                          ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                          : <div className="absolute inset-0 bg-gradient-to-br from-gray-300 to-gray-400" />
+                        }
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                        <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                          <p className="text-xs font-bold text-white leading-tight">{guide.title}</p>
+                          <p className="text-[10px] text-white/60 mt-0.5">
+                            {[guide.destination, `${guide.places?.length ?? 0} places`].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {/* Trips Tab */}
@@ -5378,7 +6010,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           {/* Invited items */}
           {itemInvites.length > 0 && (
             <div>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">📬 Invited to</p>
+              <p className="text-sm font-bold text-gray-900 mb-3">Invited to</p>
               <div className="space-y-3">
                 {itemInvites.map(invite => (
                   <div key={invite.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -5450,7 +6082,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           {/* Someday */}
           {plans.some(t => t.status === 'dreaming') && (
             <div>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">✨ Want to do / see</p>
+              <p className="text-sm font-bold text-gray-900 mb-3">Want to do / see</p>
               <div className="space-y-3">
                 {plans.filter(t => t.status === 'dreaming').map(trip => (
                   trip.description?.startsWith('[event]')
@@ -5464,7 +6096,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           {/* Coming up */}
           {plans.some(t => t.status === 'planning' || t.status === 'upcoming') && (
             <div>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">🗓 Coming up</p>
+              <p className="text-sm font-bold text-gray-900 mb-3">Coming up</p>
               <div className="space-y-3">
                 {plans.filter(t => t.status === 'planning' || t.status === 'upcoming')
                   .sort((a, b) => (parseTripStartDate(a.dates, a.status)?.getTime() ?? 0) - (parseTripStartDate(b.dates, b.status)?.getTime() ?? 0))
@@ -5480,7 +6112,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           {/* Past */}
           {plans.some(t => t.status === 'past') && (
             <div>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">✅ Past</p>
+              <p className="text-sm font-bold text-gray-900 mb-3">Past</p>
               <div className="space-y-2.5">
                 {plans.filter(t => t.status === 'past')
                   .sort((a, b) => (parseTripStartDate(b.dates, b.status)?.getTime() ?? 0) - (parseTripStartDate(a.dates, a.status)?.getTime() ?? 0))
@@ -5536,7 +6168,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             <button onClick={() => setShowNewCollection(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
               <X size={15} strokeWidth={2} className="text-gray-500" />
             </button>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">New Collection</p>
+            <p className="text-sm font-bold text-gray-900 mb-4">New Collection</p>
             {/* Emoji + Name row */}
             <div className="flex gap-3 mb-4">
               <input
@@ -5680,7 +6312,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             <button onClick={() => setShowEditPlan(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
               <X size={15} strokeWidth={2} className="text-gray-500" />
             </button>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Edit event</p>
+            <p className="text-sm font-bold text-gray-900 mb-4">Edit event</p>
             <input autoFocus value={editPlanName} onChange={e => setEditPlanName(e.target.value)} placeholder="Title" className="w-full text-2xl font-black text-gray-900 outline-none placeholder:text-gray-200 mb-5 bg-transparent" />
             <div className="space-y-2 mb-5">
               <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3">
@@ -6076,14 +6708,96 @@ Return ONLY valid JSON, no markdown, no explanation:
         </div>
       )}
 
-      {/* Map Tab */}
-      {activeTab === 'Map' && (
-        <div className="pt-4 pb-6 px-4">
-          <p className="text-sm font-bold text-gray-900 mb-1">Your Saved Map</p>
-          <p className="text-xs text-gray-400 mb-3">All the places you want to visit.</p>
-          <Suspense fallback={<div className="h-64 bg-gray-100 rounded-xl animate-pulse" />}>
-            <MapView places={savedPlaces} height="260px" />
-          </Suspense>
+      {/* Add to Collection sheet */}
+      {addToColPlace && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setAddToColPlace(null)} />
+          <div className="relative bg-white rounded-t-3xl pb-10">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            {/* Header */}
+            <div className="flex items-center gap-3 px-5 pt-2 pb-4 border-b border-gray-100">
+              {addToColPlace.photoUrl
+                ? <img src={addToColPlace.photoUrl} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" alt="" />
+                : <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-lg">📍</div>
+              }
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-900 truncate">{addToColPlace.name.split(',')[0].trim()}</p>
+                <p className="text-xs text-gray-400 mt-0.5">Add to collection</p>
+              </div>
+              <button onClick={() => setAddToColPlace(null)} className="ml-auto w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={14} strokeWidth={2} className="text-gray-600" />
+              </button>
+            </div>
+            {/* Collections list */}
+            <div className="px-4 pt-3 space-y-2 max-h-72 overflow-y-auto">
+              {addToColLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={20} className="animate-spin text-gray-400" />
+                </div>
+              ) : dbCollections.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-400">No collections yet</p>
+                  <button
+                    onClick={() => { setAddToColPlace(null); setShowNewCollection(true); }}
+                    className="mt-3 text-sm font-semibold text-gray-900 underline underline-offset-2"
+                  >Create one</button>
+                </div>
+              ) : dbCollections.map(col => {
+                const isIn = addToColIds.has(col.id);
+                const isSaving = addToColSaving.has(col.id);
+                return (
+                  <button
+                    key={col.id}
+                    disabled={isSaving}
+                    onClick={async () => {
+                      if (!userId) return;
+                      setAddToColSaving(prev => new Set(prev).add(col.id));
+                      if (isIn) {
+                        await removePlaceFromCollection(col.id, addToColPlace.id);
+                        setAddToColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                      } else {
+                        await addPlaceToCollection(col.id, addToColPlace.id, userId);
+                        setAddToColIds(prev => new Set(prev).add(col.id));
+                      }
+                      setAddToColSaving(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                    }}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-2xl active:bg-gray-50 transition-colors"
+                  >
+                    <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+                      {col.coverImageUrl
+                        ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center text-2xl">{col.emoji || '🗂️'}</div>
+                      }
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isIn ? 'bg-gray-900' : 'border-2 border-gray-200'}`}>
+                      {isSaving
+                        ? <Loader2 size={12} className="animate-spin text-white" />
+                        : isIn && <Check size={12} strokeWidth={2.5} className="text-white" />
+                      }
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* New collection shortcut */}
+            {dbCollections.length > 0 && (
+              <div className="px-4 pt-3">
+                <button
+                  onClick={() => { setAddToColPlace(null); setShowNewCollection(true); }}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 active:bg-gray-50 transition-colors"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center flex-shrink-0">
+                    <Plus size={18} strokeWidth={2} className="text-gray-400" />
+                  </div>
+                  <p className="text-sm font-semibold">New collection</p>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
