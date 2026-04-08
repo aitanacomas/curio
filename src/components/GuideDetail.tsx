@@ -388,14 +388,14 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                           onClick={() => onPlaceClick?.(mappedPlace)}
                         >
                           <div className="flex items-center gap-2">
-                            <p className="text-[13px] font-bold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
+                            <p className="text-sm font-semibold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
                             {place.category && (
                               <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>
                             )}
                           </div>
                           {(place.neighborhood || place.city) && (
-                            <p className="text-[11px] text-gray-400 mt-0.5">
-                              {[place.neighborhood, place.city].filter(Boolean).join(' · ')}
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">
+                              {[place.neighborhood, place.city].filter(Boolean).join(', ')}
                             </p>
                           )}
                           {(place.description || place.note) && (
