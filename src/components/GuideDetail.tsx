@@ -339,20 +339,13 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               {guide.places?.length ?? 0} place{(guide.places?.length ?? 0) !== 1 ? 's' : ''}
             </p>
             {mapPlaces.length > 0 && (
-              <div className="flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
-                <button
-                  onClick={() => setShowMap(false)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${!showMap ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-                >
-                  <List size={11} strokeWidth={2} /> List
-                </button>
-                <button
-                  onClick={() => setShowMap(true)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${showMap ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-                >
-                  <Map size={11} strokeWidth={1.5} /> Map
-                </button>
-              </div>
+              <button
+                onClick={() => setShowMap(v => !v)}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                <Map size={11} strokeWidth={1.5} />
+                {showMap ? 'Hide map' : 'Show map'}
+              </button>
             )}
           </div>
 
@@ -368,7 +361,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
           )}
 
           {/* Places list */}
-          {!showMap && (
           <div className="pb-6">
             {!guide.planId ? (
               guide.places && guide.places.length > 0 ? (
@@ -491,7 +483,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               </div>
             )}
           </div>
-          )}
           <div className="h-6" />
         </div>
       </div>
