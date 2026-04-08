@@ -388,8 +388,10 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                               <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>
                             )}
                           </div>
-                          {place.neighborhood && (
-                            <p className="text-[11px] text-gray-400 mt-0.5">{place.neighborhood}</p>
+                          {(place.neighborhood || place.city) && (
+                            <p className="text-[11px] text-gray-400 mt-0.5">
+                              {[place.neighborhood, place.city].filter(Boolean).join(' · ')}
+                            </p>
                           )}
                           {(place.description || place.note) && (
                             <p className="text-xs text-gray-500 leading-relaxed mt-1.5">{place.description || place.note}</p>
