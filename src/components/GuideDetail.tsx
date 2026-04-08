@@ -378,19 +378,16 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                           onClick={() => onPlaceClick?.(mappedPlace)}
                         >
                           <div className="flex items-center gap-2">
-                            <div className="min-w-[18px] min-h-[18px] w-[18px] h-[18px] rounded-full bg-gray-900 text-white text-[8px] font-bold flex items-center justify-center flex-shrink-0">
-                              {i + 1}
-                            </div>
                             <p className="text-[13px] font-bold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
                             {place.category && (
                               <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>
                             )}
                           </div>
                           {place.neighborhood && (
-                            <p className="text-[11px] text-gray-400 ml-[26px] mt-0.5">{place.neighborhood}</p>
+                            <p className="text-[11px] text-gray-400 mt-0.5">{place.neighborhood}</p>
                           )}
                           {(place.description || place.note) && (
-                            <p className="text-xs text-gray-500 leading-relaxed mt-2">{place.description || place.note}</p>
+                            <p className="text-xs text-gray-500 leading-relaxed mt-1.5">{place.description || place.note}</p>
                           )}
                           {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
                         </button>
