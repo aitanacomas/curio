@@ -685,7 +685,7 @@ export default function Home({ showMessages = false, messagesTargetUserId, onMes
                     </div>
                     {/* Guide badge + title bottom */}
                     <div className="absolute bottom-0 left-0 right-0 px-4 pb-4">
-                      <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full border border-white/20 inline-block mb-1.5">📖 Guide</span>
+                      <span className="bg-orange-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full inline-block mb-1.5">📖 Guide</span>
                       <h3 className="text-white text-xl font-black leading-tight drop-shadow">{guide.title}</h3>
                       <div className="flex items-center gap-1 mt-1">
                         {guide.destination && (

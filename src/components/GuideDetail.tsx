@@ -412,7 +412,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                     const totalPlaces = guide.places?.length ?? 0;
 
                     return (
-                      <div key={place.id ?? i} className="rounded-2xl overflow-hidden bg-gray-50">
+                      <div key={place.id ?? i} className="rounded-2xl overflow-hidden bg-white border border-gray-100 shadow-sm">
                         {/* Photo carousel or tap zone */}
                         <div className="relative">
                           <button
@@ -471,7 +471,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                           <div className="flex-1 min-w-0">
                             {!photos.length && <div />}
                             {(place.description || place.note) && (
-                              <p className="text-xs text-gray-500 leading-relaxed">{place.description || place.note}</p>
+                              <p className="text-xs text-amber-900/70 leading-relaxed italic">"{place.description || place.note}"</p>
                             )}
                             {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
                             {!place.description && !place.note && !place.audioUrl && (
