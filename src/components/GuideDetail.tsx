@@ -363,7 +363,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
           )}
 
           {/* Places list */}
-          <div className="pb-6">
+          <div className="py-4">
             {!guide.planId ? (
               guide.places && guide.places.length > 0 ? (
                 <div className="space-y-3 px-4">
