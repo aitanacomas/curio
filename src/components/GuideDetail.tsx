@@ -394,7 +394,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
 
                     const sublabel = [place.neighborhood, place.city].filter(Boolean).join(', ');
                     const isSaved = savedPlaceIds.has(place.id ?? '');
-                    const totalPlaces = guide.places?.length ?? 0;
 
                     return (
                       <div key={place.id ?? i} className="rounded-2xl overflow-hidden bg-white border border-gray-100 shadow-sm">
@@ -422,10 +421,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                               )
                             }
                           </button>
-                          {/* Place counter badge */}
-                          <div className="absolute top-2.5 left-2.5 bg-black/40 backdrop-blur-sm rounded-full px-2 py-0.5 pointer-events-none">
-                            <span className="text-white text-[10px] font-semibold">{i + 1} / {totalPlaces}</span>
-                          </div>
                           {/* Save bookmark */}
                           {currentUserId && place.id && (
                             <button
@@ -448,10 +443,13 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                             </button>
                           )}
                         </div>
-                        {/* Audio player if present */}
-                        {place.audioUrl && (
-                          <div className="px-3 py-2">
-                            <AudioPlayer src={place.audioUrl} />
+                        {/* Caption + audio */}
+                        {(place.description || place.note || place.audioUrl) && (
+                          <div className="px-3 pt-2.5 pb-3">
+                            {(place.description || place.note) && (
+                              <p className="text-xs text-gray-500 leading-relaxed">{place.description || place.note}</p>
+                            )}
+                            {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
                           </div>
                         )}
                       </div>
