@@ -144,7 +144,7 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
     <MapContainer
       center={center}
       zoom={zoom}
-      style={{ height, width: '100%', background: '#D5DADC', position: 'relative' }}
+      style={{ height, width: '100%', background: '#D5DADC', position: 'relative', borderRadius: 0 }}
       className="z-0"
       zoomControl={false}
       attributionControl={false}

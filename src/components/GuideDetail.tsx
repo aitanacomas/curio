@@ -329,13 +329,18 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
           {/* Map toggle */}
           {mapPlaces.length > 0 && (
             <div className="border-b border-gray-100">
-              <button
-                onClick={() => setShowMap(v => !v)}
-                className="w-full flex items-center gap-2 px-5 py-3 text-sm font-semibold text-gray-700 active:bg-gray-50"
-              >
-                <Map size={15} strokeWidth={1.8} className="text-gray-500" />
-                {showMap ? 'Hide map' : 'Show map'}
-              </button>
+              <div className="flex items-center justify-between px-5 py-3">
+                <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Map size={15} strokeWidth={1.8} className="text-gray-500" />
+                  Map
+                </span>
+                <button
+                  onClick={() => setShowMap(v => !v)}
+                  className="text-xs font-semibold text-orange-500 active:opacity-70"
+                >
+                  {showMap ? 'Hide' : 'Show'}
+                </button>
+              </div>
               {showMap && (
                 <Suspense fallback={<div className="h-48 flex items-center justify-center"><Loader2 size={18} className="animate-spin text-gray-300" /></div>}>
                   <div className="overflow-hidden" style={{ height: 200 }}>
