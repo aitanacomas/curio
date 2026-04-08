@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import ImageCarousel from './ImageCarousel';
 import { X, MapPin, Loader2, Play, Pause, Map, Share2, Send, Copy, Check, Search, UserPlus } from 'lucide-react';
 import type { Guide, Plan, RealPostPlace, Conversation, FollowProfile, GuideCollaborator } from '../lib/supabase';
 import {
@@ -380,29 +381,39 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                       description: place.description || place.note || '',
                     };
 
+                    const sublabel = [place.neighborhood, place.city].filter(Boolean).join(', ');
+
                     return (
                       <div key={place.id ?? i} className="rounded-2xl overflow-hidden bg-gray-50">
-                        {photos.length > 0 && <PlaceCarousel photos={photos} name={place.name} />}
                         <button
-                          className="w-full text-left px-3 py-2.5 active:bg-gray-100 transition-colors"
+                          className="w-full text-left active:opacity-90 transition-opacity"
                           onClick={() => onPlaceClick?.(mappedPlace)}
                         >
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
-                            {place.category && (
-                              <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>
-                            )}
-                          </div>
-                          {(place.neighborhood || place.city) && (
-                            <p className="text-xs text-gray-400 mt-0.5 truncate">
-                              {[place.neighborhood, place.city].filter(Boolean).join(', ')}
-                            </p>
-                          )}
-                          {(place.description || place.note) && (
-                            <p className="text-xs text-gray-500 leading-relaxed mt-1.5">{place.description || place.note}</p>
-                          )}
-                          {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
+                          {photos.length > 0
+                            ? <ImageCarousel
+                                images={photos}
+                                labels={[place.name]}
+                                sublabels={sublabel ? [sublabel] : undefined}
+                              />
+                            : (
+                              <div className="px-3 py-2.5">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-semibold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
+                                  {place.category && <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>}
+                                </div>
+                                {sublabel && <p className="text-xs text-gray-400 mt-0.5 truncate">{sublabel}</p>}
+                              </div>
+                            )
+                          }
                         </button>
+                        {((place.description || place.note) || place.audioUrl) && (
+                          <div className="px-3 py-2.5">
+                            {(place.description || place.note) && (
+                              <p className="text-xs text-gray-500 leading-relaxed">{place.description || place.note}</p>
+                            )}
+                            {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
