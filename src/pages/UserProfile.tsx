@@ -1,11 +1,7 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Check, MapPin, Map, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send, Search } from 'lucide-react';
-<<<<<<< Updated upstream
-import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, geocodeMissingPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getSavedPlaceIds, getPostComments, addComment, deleteComment, getPlans, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan } from '../lib/supabase';
-=======
 import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, geocodeMissingPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getSavedPlaceIds, getPostComments, addComment, deleteComment, getPlans, getUserGuides, subscribeToGuide, unsubscribeFromGuide, isSubscribedToGuide, getGuideSubscriberCount, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan, type Guide } from '../lib/supabase';
 import GuideDetail from '../components/GuideDetail';
->>>>>>> Stashed changes
 import { googleTypesToCategory } from '../lib/placeUtils';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
@@ -57,11 +53,7 @@ interface Props {
   onMessage?: (userId: string) => void;
 }
 
-<<<<<<< Updated upstream
-type ProfileTab = 'Posts' | 'Map' | 'Collections';
-=======
 type ProfileTab = 'Posts' | 'Map' | 'Collections' | 'Guides';
->>>>>>> Stashed changes
 
 export default function UserProfile({ userId, currentUserId, onBack, onFollowChange, onMessage }: Props) {
   const [profile, setProfile] = useState<{ name: string; username: string; avatarUrl: string | null; bio?: string | null; location?: string | null } | null>(null);
@@ -106,11 +98,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [postCommentText, setPostCommentText] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
-<<<<<<< Updated upstream
-=======
   const [userGuides, setUserGuides] = useState<Guide[]>([]);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
->>>>>>> Stashed changes
   const postCommentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -129,11 +118,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       setFollowing(!!followRow);
       setLoadingPosts(false);
     });
-<<<<<<< Updated upstream
-=======
     // Fetch guides
     getUserGuides(userId).then(setUserGuides);
->>>>>>> Stashed changes
     // Fetch current user's own collections for the "save place" picker
     getUserCollections(currentUserId).then(setMyCollections);
     // Fetch current user's avatar for comment input
@@ -678,13 +664,8 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       </div>
 
       {/* Tabs */}
-<<<<<<< Updated upstream
-      <div className="grid grid-cols-3 border-b border-gray-100 border-t">
-        {(['Posts', 'Map', 'Collections'] as ProfileTab[]).map(tab => (
-=======
       <div className="grid grid-cols-4 border-b border-gray-100 border-t">
         {(['Posts', 'Map', 'Collections', 'Guides'] as ProfileTab[]).map(tab => (
->>>>>>> Stashed changes
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1390,8 +1371,6 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           </div>
         </div>
       )}
-<<<<<<< Updated upstream
-=======
       {/* Guides tab */}
       {activeTab === 'Guides' && (
         <div className="px-4 pt-4 pb-10">
@@ -1442,7 +1421,6 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           onPlaceClick={() => {}}
         />
       )}
->>>>>>> Stashed changes
     </div>
   );
 }

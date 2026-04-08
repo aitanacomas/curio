@@ -391,12 +391,6 @@ export default function CreateGuideSheet({ userId, onClose, onCreated, onUpdated
                 {coverPreview ? (
                   <div className="relative rounded-2xl overflow-hidden aspect-video bg-gray-100">
                     <img src={coverPreview} alt="cover" className="w-full h-full object-cover" />
-<<<<<<< Updated upstream
-                    <button onClick={() => { setCoverUrl(''); setCoverPreview(''); }}
-                      className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-black/50">
-                      <X size={13} strokeWidth={2} className="text-white" />
-                    </button>
-=======
                     <div className="absolute inset-0 flex items-center justify-center gap-2">
                       <button
                         onClick={() => coverInputRef.current?.click()}
@@ -413,7 +407,6 @@ export default function CreateGuideSheet({ userId, onClose, onCreated, onUpdated
                         <X size={13} strokeWidth={2} className="text-white" />
                       </button>
                     </div>
->>>>>>> Stashed changes
                   </div>
                 ) : (
                   <button onClick={() => coverInputRef.current?.click()} disabled={uploadingCover}
