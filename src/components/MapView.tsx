@@ -145,7 +145,7 @@ export default function MapView({ places, center = [20, 10], zoom = 2, height = 
       center={center}
       zoom={zoom}
       style={{ height, width: '100%', background: '#D5DADC', position: 'relative' }}
-      className="rounded-xl z-0"
+      className="z-0"
       zoomControl={false}
       attributionControl={false}
       zoomSnap={0}
