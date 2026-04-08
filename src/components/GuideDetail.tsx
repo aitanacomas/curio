@@ -334,7 +334,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
 
 
           {/* Places header + map toggle — sticky */}
-          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 pt-3 pb-2 flex items-center justify-between">
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-3 flex items-center justify-between">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
               {guide.places?.length ?? 0} place{(guide.places?.length ?? 0) !== 1 ? 's' : ''}
             </p>
