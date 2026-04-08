@@ -5,11 +5,12 @@ interface Props {
   labels?: string[];
   sublabels?: string[];
   scales?: number[];
+  aspectRatio?: string;
   onClick?: () => void;
   onIndexChange?: (index: number) => void;
 }
 
-export default function ImageCarousel({ images, labels, sublabels, scales, onClick, onIndexChange }: Props) {
+export default function ImageCarousel({ images, labels, sublabels, scales, aspectRatio, onClick, onIndexChange }: Props) {
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +46,7 @@ export default function ImageCarousel({ images, labels, sublabels, scales, onCli
               alt=""
               draggable={false}
               className="w-full object-cover pointer-events-none"
-              style={{ aspectRatio: '3/4', ...(scales?.[i] ? { transform: `scale(${scales[i]})`, transformOrigin: 'center' } : {}) }}
+              style={{ aspectRatio: aspectRatio ?? '3/4', ...(scales?.[i] ? { transform: `scale(${scales[i]})`, transformOrigin: 'center' } : {}) }}
             />
           </div>
         ))}

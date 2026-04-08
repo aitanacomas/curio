@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import ImageCarousel from './ImageCarousel';
-import { X, MapPin, Loader2, Play, Pause, Map, Share2, Send, Copy, Check, Search, UserPlus } from 'lucide-react';
+import { X, MapPin, Loader2, Play, Pause, Map, Share2, Send, Copy, Check, Search, UserPlus, Bookmark, BookmarkCheck, ChevronRight, MoreHorizontal, List } from 'lucide-react';
 import type { Guide, Plan, RealPostPlace, Conversation, FollowProfile, GuideCollaborator } from '../lib/supabase';
 import {
   getPlans,
@@ -15,6 +15,9 @@ import {
   unsubscribeFromGuide,
   isSubscribedToGuide,
   getGuideSubscriberCount,
+  getSavedPlaceIds,
+  savePlace,
+  unsavePlace,
 } from '../lib/supabase';
 
 const MapView = lazy(() => import('./MapView'));
@@ -124,6 +127,8 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
   const [plan, setPlan] = useState<Plan | null>(null);
   const [loading, setLoading] = useState(true);
   const [showMap, setShowMap] = useState(false);
+  const [savedPlaceIds, setSavedPlaceIds] = useState<Set<string>>(new Set());
+  const [showMenu, setShowMenu] = useState(false);
 
   // Subscribe
   const [subscribed, setSubscribed] = useState(false);
@@ -173,6 +178,11 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
     }
   }, [guide.id, currentUserId, isOwn]);
 
+  // Load saved place IDs
+  useEffect(() => {
+    if (currentUserId) getSavedPlaceIds(currentUserId).then(setSavedPlaceIds);
+  }, [currentUserId]);
+
   // Load conversations for share sheet
   useEffect(() => {
     if (currentUserId && showShare) {
@@ -211,6 +221,14 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-white rounded-t-3xl overflow-hidden flex flex-col" style={{ maxHeight: '92vh' }}>
 
+        {/* Fixed close button — always visible above scroll */}
+        <button
+          onClick={onClose}
+          className={`absolute top-4 right-4 z-20 w-8 h-8 flex items-center justify-center rounded-full ${guide.coverUrl ? 'bg-black/40 backdrop-blur-sm' : 'bg-gray-100'}`}
+        >
+          <X size={14} strokeWidth={2} className={guide.coverUrl ? 'text-white' : 'text-gray-600'} />
+        </button>
+
         <div className="flex-1 overflow-y-auto">
           {/* Cover — full bleed */}
           {guide.coverUrl && (
@@ -231,9 +249,6 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                   <p className="text-white/80 text-xs mt-1.5 leading-snug line-clamp-2">{guide.description}</p>
                 )}
               </div>
-              <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm">
-                <X size={14} strokeWidth={2} className="text-white" />
-              </button>
             </div>
           )}
 
@@ -242,18 +257,13 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
                 <div className="w-10 h-1 rounded-full bg-gray-200" />
               </div>
-              <div className="px-5 pt-2 pb-3 flex items-start justify-between flex-shrink-0">
-                <div className="flex-1 min-w-0 pr-3">
-                  <h2 className="text-xl font-bold text-gray-900 leading-tight">{guide.title}</h2>
-                  {guide.destination && (
-                    <p className="text-sm text-gray-400 flex items-center gap-1 mt-1">
-                      <MapPin size={11} strokeWidth={1.5} />{guide.destination}
-                    </p>
-                  )}
-                </div>
-                <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0">
-                  <X size={14} strokeWidth={2} className="text-gray-600" />
-                </button>
+              <div className="px-5 pt-2 pb-3 pr-14 flex-shrink-0">
+                <h2 className="text-xl font-bold text-gray-900 leading-tight">{guide.title}</h2>
+                {guide.destination && (
+                  <p className="text-sm text-gray-400 flex items-center gap-1 mt-1">
+                    <MapPin size={11} strokeWidth={1.5} />{guide.destination}
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -283,9 +293,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               </p>
             </div>
             <div className="flex items-center gap-1.5">
-              <button onClick={() => setShowShare(true)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
-                <Share2 size={14} strokeWidth={1.8} className="text-gray-600" />
-              </button>
+              {/* Follow button for non-owners */}
               {!isOwn && currentUserId && (
                 <button
                   disabled={togglingSubscribe}
@@ -302,63 +310,81 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                     }
                     setTogglingSubscribe(false);
                   }}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${
-                    subscribed
-                      ? 'bg-gray-900 text-white'
-                      : 'bg-gray-100 text-gray-700'
-                  }`}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${subscribed ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
                 >
                   {togglingSubscribe ? '…' : subscribed ? 'Following' : 'Follow'}
                 </button>
               )}
-              {isOwn && (
-                <>
-                  <button onClick={() => setShowCollabSheet(true)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
-                    <UserPlus size={14} strokeWidth={1.8} className="text-gray-600" />
-                  </button>
-                  {onEditGuide && (
-                    <button onClick={() => { onEditGuide(); onClose(); }} className="text-xs text-gray-700 font-semibold px-3 py-1.5 rounded-full bg-gray-100">
-                      Edit
-                    </button>
-                  )}
-                  {onDeleteGuide && (
-                    <button onClick={() => { onDeleteGuide(guide.id); onClose(); }} className="text-xs text-red-400 font-semibold px-3 py-1.5 rounded-full bg-red-50">
-                      Delete
-                    </button>
-                  )}
-                </>
+              {/* Owner actions */}
+              {isOwn && onEditGuide && (
+                <button onClick={() => { onEditGuide(); onClose(); }} className="text-xs text-gray-700 font-semibold px-3 py-1.5 rounded-full bg-gray-100">
+                  Edit
+                </button>
               )}
+              {/* ··· overflow menu */}
+              <div className="relative">
+                <button onClick={() => setShowMenu(v => !v)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
+                  <MoreHorizontal size={15} strokeWidth={1.8} className="text-gray-600" />
+                </button>
+                {showMenu && (
+                  <div className="absolute right-0 top-10 bg-white rounded-2xl shadow-xl border border-gray-100 py-1 z-10 min-w-[160px]">
+                    <button onClick={() => { setShowShare(true); setShowMenu(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 active:bg-gray-50">
+                      <Share2 size={14} strokeWidth={1.8} className="text-gray-400" /> Share guide
+                    </button>
+                    {isOwn && (
+                      <button onClick={() => { setShowCollabSheet(true); setShowMenu(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 active:bg-gray-50">
+                        <UserPlus size={14} strokeWidth={1.8} className="text-gray-400" /> Add collaborator
+                      </button>
+                    )}
+                    {isOwn && onDeleteGuide && (
+                      <button onClick={() => { onDeleteGuide(guide.id); onClose(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 active:bg-gray-50">
+                        <X size={14} strokeWidth={1.8} className="text-red-300" /> Delete guide
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
 
-          {/* Map toggle */}
-          {mapPlaces.length > 0 && (
-            <div className="border-b border-gray-100">
-              <div className="flex items-center justify-between px-5 py-3">
-                <span className="text-sm font-semibold text-gray-700">Places map</span>
+          {/* Places header + map toggle */}
+          <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              {guide.places?.length ?? 0} place{(guide.places?.length ?? 0) !== 1 ? 's' : ''}
+            </p>
+            {mapPlaces.length > 0 && (
+              <div className="flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
                 <button
-                  onClick={() => setShowMap(v => !v)}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${showMap ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
+                  onClick={() => setShowMap(false)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${!showMap ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
                 >
-                  <Map size={11} strokeWidth={1.5} />
-                  {showMap ? 'Hide map' : 'Show map'}
+                  <List size={11} strokeWidth={2} /> List
+                </button>
+                <button
+                  onClick={() => setShowMap(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${showMap ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                >
+                  <Map size={11} strokeWidth={1.5} /> Map
                 </button>
               </div>
-              {showMap && (
-                <div className="px-4 pb-4">
-                  <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse rounded-2xl" />}>
-                    <div className="rounded-2xl overflow-hidden">
-                      <MapView places={mapPlaces} height="220px" hideZoomControls zoom={12} center={[mapPlaces[0].lat, mapPlaces[0].lng]} />
-                    </div>
-                  </Suspense>
+            )}
+          </div>
+
+          {/* Map view */}
+          {showMap && mapPlaces.length > 0 && (
+            <div className="px-4 pb-4">
+              <Suspense fallback={<div className="h-52 bg-gray-100 animate-pulse rounded-2xl" />}>
+                <div className="rounded-2xl overflow-hidden">
+                  <MapView places={mapPlaces} height="300px" hideZoomControls zoom={12} center={[mapPlaces[0].lat, mapPlaces[0].lng]} />
                 </div>
-              )}
+              </Suspense>
             </div>
           )}
 
-          {/* Places */}
-          <div className="py-4">
+          {/* Places list */}
+          {!showMap && (
+          <div className="pb-6">
             {!guide.planId ? (
               guide.places && guide.places.length > 0 ? (
                 <div className="space-y-3 px-4">
@@ -382,38 +408,78 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
                     };
 
                     const sublabel = [place.neighborhood, place.city].filter(Boolean).join(', ');
+                    const isSaved = savedPlaceIds.has(place.id ?? '');
+                    const totalPlaces = guide.places?.length ?? 0;
 
                     return (
                       <div key={place.id ?? i} className="rounded-2xl overflow-hidden bg-gray-50">
+                        {/* Photo carousel or tap zone */}
+                        <div className="relative">
+                          <button
+                            className="w-full text-left active:opacity-90 transition-opacity"
+                            onClick={() => onPlaceClick?.(mappedPlace)}
+                          >
+                            {photos.length > 0
+                              ? <ImageCarousel
+                                  images={photos}
+                                  labels={[place.name]}
+                                  sublabels={sublabel ? [sublabel] : undefined}
+                                  aspectRatio="4/5"
+                                />
+                              : (
+                                <div className="px-3 pt-3 pb-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-semibold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
+                                    {place.category && <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>}
+                                  </div>
+                                  {sublabel && <p className="text-xs text-gray-400 mt-0.5 truncate">{sublabel}</p>}
+                                </div>
+                              )
+                            }
+                          </button>
+                          {/* Place counter badge */}
+                          <div className="absolute top-2.5 left-2.5 bg-black/40 backdrop-blur-sm rounded-full px-2 py-0.5 pointer-events-none">
+                            <span className="text-white text-[10px] font-semibold">{i + 1} / {totalPlaces}</span>
+                          </div>
+                          {/* Save bookmark */}
+                          {currentUserId && place.id && (
+                            <button
+                              className="absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-sm"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (isSaved) {
+                                  await unsavePlace(currentUserId, place.id);
+                                  setSavedPlaceIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
+                                } else {
+                                  await savePlace(currentUserId, place.id);
+                                  setSavedPlaceIds(prev => new Set([...prev, place.id]));
+                                }
+                              }}
+                            >
+                              {isSaved
+                                ? <BookmarkCheck size={12} strokeWidth={2} className="text-white" />
+                                : <Bookmark size={12} strokeWidth={2} className="text-white" />
+                              }
+                            </button>
+                          )}
+                        </div>
+                        {/* Description + audio + tap hint */}
                         <button
-                          className="w-full text-left active:opacity-90 transition-opacity"
+                          className="w-full text-left px-3 py-2.5 active:bg-gray-100 transition-colors flex items-start gap-2"
                           onClick={() => onPlaceClick?.(mappedPlace)}
                         >
-                          {photos.length > 0
-                            ? <ImageCarousel
-                                images={photos}
-                                labels={[place.name]}
-                                sublabels={sublabel ? [sublabel] : undefined}
-                              />
-                            : (
-                              <div className="px-3 py-2.5">
-                                <div className="flex items-center gap-2">
-                                  <p className="text-sm font-semibold text-gray-900 leading-tight flex-1 truncate">{place.name}</p>
-                                  {place.category && <span className="text-sm flex-shrink-0">{categoryEmoji[place.category.toLowerCase()] ?? ''}</span>}
-                                </div>
-                                {sublabel && <p className="text-xs text-gray-400 mt-0.5 truncate">{sublabel}</p>}
-                              </div>
-                            )
-                          }
-                        </button>
-                        {((place.description || place.note) || place.audioUrl) && (
-                          <div className="px-3 py-2.5">
+                          <div className="flex-1 min-w-0">
+                            {!photos.length && <div />}
                             {(place.description || place.note) && (
                               <p className="text-xs text-gray-500 leading-relaxed">{place.description || place.note}</p>
                             )}
                             {place.audioUrl && <AudioPlayer src={place.audioUrl} />}
+                            {!place.description && !place.note && !place.audioUrl && (
+                              <p className="text-xs text-gray-400">View place details</p>
+                            )}
                           </div>
-                        )}
+                          <ChevronRight size={14} strokeWidth={1.8} className="text-gray-300 flex-shrink-0 mt-0.5" />
+                        </button>
                       </div>
                     );
                   })}
@@ -453,6 +519,7 @@ export default function GuideDetail({ guide, currentUserId, onClose, onDeleteGui
               </div>
             )}
           </div>
+          )}
           <div className="h-6" />
         </div>
       </div>
