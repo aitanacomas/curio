@@ -1,6 +1,11 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Check, MapPin, Map, MessageCircle, Share2, Bookmark, BookmarkCheck, Plus, Heart, Send, Search } from 'lucide-react';
+<<<<<<< Updated upstream
 import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, geocodeMissingPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getSavedPlaceIds, getPostComments, addComment, deleteComment, getPlans, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan } from '../lib/supabase';
+=======
+import { supabase, getUserPosts, getFollowCounts, getProfile, getUserCollections, getCollectionPlaces, geocodeMissingPlaces, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, subscribeToCollection, unsubscribeFromCollection, isSubscribedToCollection, createCollection, getPublicUrl, likePost, unlikePost, getLikedPosts, getPostLikeCounts, savePlace, unsavePlace, getSavedPlaceIds, getPostComments, addComment, deleteComment, getPlans, getUserGuides, subscribeToGuide, unsubscribeFromGuide, isSubscribedToGuide, getGuideSubscriberCount, type RealPost, type RealCollection, type RealPostPlace, type PostComment, type Plan, type Guide } from '../lib/supabase';
+import GuideDetail from '../components/GuideDetail';
+>>>>>>> Stashed changes
 import { googleTypesToCategory } from '../lib/placeUtils';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
@@ -52,7 +57,11 @@ interface Props {
   onMessage?: (userId: string) => void;
 }
 
+<<<<<<< Updated upstream
 type ProfileTab = 'Posts' | 'Map' | 'Collections';
+=======
+type ProfileTab = 'Posts' | 'Map' | 'Collections' | 'Guides';
+>>>>>>> Stashed changes
 
 export default function UserProfile({ userId, currentUserId, onBack, onFollowChange, onMessage }: Props) {
   const [profile, setProfile] = useState<{ name: string; username: string; avatarUrl: string | null; bio?: string | null; location?: string | null } | null>(null);
@@ -97,6 +106,11 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
   const [postCommentText, setPostCommentText] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
+<<<<<<< Updated upstream
+=======
+  const [userGuides, setUserGuides] = useState<Guide[]>([]);
+  const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+>>>>>>> Stashed changes
   const postCommentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -115,6 +129,11 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       setFollowing(!!followRow);
       setLoadingPosts(false);
     });
+<<<<<<< Updated upstream
+=======
+    // Fetch guides
+    getUserGuides(userId).then(setUserGuides);
+>>>>>>> Stashed changes
     // Fetch current user's own collections for the "save place" picker
     getUserCollections(currentUserId).then(setMyCollections);
     // Fetch current user's avatar for comment input
@@ -659,8 +678,13 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
       </div>
 
       {/* Tabs */}
+<<<<<<< Updated upstream
       <div className="grid grid-cols-3 border-b border-gray-100 border-t">
         {(['Posts', 'Map', 'Collections'] as ProfileTab[]).map(tab => (
+=======
+      <div className="grid grid-cols-4 border-b border-gray-100 border-t">
+        {(['Posts', 'Map', 'Collections', 'Guides'] as ProfileTab[]).map(tab => (
+>>>>>>> Stashed changes
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1366,6 +1390,59 @@ export default function UserProfile({ userId, currentUserId, onBack, onFollowCha
           </div>
         </div>
       )}
+<<<<<<< Updated upstream
+=======
+      {/* Guides tab */}
+      {activeTab === 'Guides' && (
+        <div className="px-4 pt-4 pb-10">
+          {userGuides.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-6">
+              <span className="text-4xl mb-3">📖</span>
+              <p className="text-slate-800 font-semibold text-base mb-1">No guides yet</p>
+              <p className="text-slate-400 text-sm text-center">This user hasn't published any guides</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {userGuides.map(guide => (
+                <button
+                  key={guide.id}
+                  onClick={() => setSelectedGuide(guide)}
+                  className="w-full text-left flex gap-3 bg-gray-50 rounded-2xl overflow-hidden active:scale-[0.98] transition-transform"
+                >
+                  {guide.coverUrl
+                    ? <img src={guide.coverUrl} alt={guide.title} className="w-20 h-20 object-cover flex-shrink-0" />
+                    : <div className="w-20 h-20 bg-gray-200 flex items-center justify-center flex-shrink-0 text-3xl">🗺️</div>
+                  }
+                  <div className="flex-1 min-w-0 py-3 pr-3">
+                    <p className="text-sm font-bold text-gray-900 truncate">{guide.title}</p>
+                    {guide.destination && (
+                      <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                        <MapPin size={10} strokeWidth={1.5} />{guide.destination}
+                      </p>
+                    )}
+                    {guide.description && (
+                      <p className="text-xs text-gray-500 mt-1 line-clamp-2">{guide.description}</p>
+                    )}
+                    {guide.places && guide.places.length > 0 && (
+                      <p className="text-xs text-gray-400 mt-0.5">{guide.places.length} place{guide.places.length !== 1 ? 's' : ''}</p>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {selectedGuide && (
+        <GuideDetail
+          guide={selectedGuide}
+          currentUserId={currentUserId}
+          onClose={() => setSelectedGuide(null)}
+          onPlaceClick={() => {}}
+        />
+      )}
+>>>>>>> Stashed changes
     </div>
   );
 }

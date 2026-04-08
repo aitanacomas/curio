@@ -391,10 +391,29 @@ export default function CreateGuideSheet({ userId, onClose, onCreated, onUpdated
                 {coverPreview ? (
                   <div className="relative rounded-2xl overflow-hidden aspect-video bg-gray-100">
                     <img src={coverPreview} alt="cover" className="w-full h-full object-cover" />
+<<<<<<< Updated upstream
                     <button onClick={() => { setCoverUrl(''); setCoverPreview(''); }}
                       className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-black/50">
                       <X size={13} strokeWidth={2} className="text-white" />
                     </button>
+=======
+                    <div className="absolute inset-0 flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => coverInputRef.current?.click()}
+                        disabled={uploadingCover}
+                        className="flex items-center gap-1.5 bg-black/50 backdrop-blur-sm text-white text-xs font-semibold px-3 py-1.5 rounded-full"
+                      >
+                        {uploadingCover ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} strokeWidth={2} />}
+                        {uploadingCover ? 'Uploading…' : 'Change'}
+                      </button>
+                      <button
+                        onClick={() => { setCoverUrl(''); setCoverPreview(''); }}
+                        className="w-7 h-7 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-sm"
+                      >
+                        <X size={13} strokeWidth={2} className="text-white" />
+                      </button>
+                    </div>
+>>>>>>> Stashed changes
                   </div>
                 ) : (
                   <button onClick={() => coverInputRef.current?.click()} disabled={uploadingCover}
