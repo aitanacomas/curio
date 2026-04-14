@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import { gTextSearch, TTL } from './googlePlaces';
+import { US_STATES } from './constants';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -14,7 +16,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const LEGACY_KEYS = [
       'supabase.auth.token',        // SDK v1 format
       'supabase.auth.refreshToken', // SDK v1 format
-      'curio_pending_invites',      // invite states reset on each app load
+      'sondrr_pending_invites',     // invite states reset on each app load
     ];
 
     // Remove known legacy keys
@@ -26,9 +28,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
       if (isOldFormat) localStorage.removeItem(key);
     });
 
-    // Clear sessionStorage AI-description cache on fresh load so descriptions
-    // stay up-to-date and don't consume memory across sessions
-    sessionStorage.clear();
+    // Clear sessionStorage caches on fresh load so descriptions/photos
+    // stay up-to-date — but preserve conversation state keys
+    const CACHE_PREFIXES = ['placepage_', 'desc:', 'secret_cover_', 'secret_photo_'];
+    Object.keys(sessionStorage).forEach(key => {
+      if (CACHE_PREFIXES.some(p => key.startsWith(p))) sessionStorage.removeItem(key);
+    });
   } catch { /* storage access may be blocked in private browsing */ }
 })();
 
@@ -41,6 +46,7 @@ export interface RealPostPlace {
   city: string;
   country: string;
   photoUrl: string;
+  extraPhotoUrls?: string[];
   position: number;
   lat?: number | null;
   lng?: number | null;
@@ -82,7 +88,15 @@ export function getPublicUrl(bucket: string, path: string) {
 }
 
 // ── Feed posts (public, newest first) ────────────────────────────────────────
-export async function getFeedPosts(): Promise<RealPost[]> {
+export async function getFeedPosts(userId: string): Promise<RealPost[]> {
+  // Fetch the list of users the current user follows
+  const { data: followRows } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', userId);
+  // Always include the user's own ID so their own posts appear in their feed
+  const followingIds = [userId, ...(followRows ?? []).map((r: any) => r.following_id)];
+
   const { data: posts, error } = await supabase
     .from('posts')
     .select(`
@@ -93,9 +107,10 @@ export async function getFeedPosts(): Promise<RealPost[]> {
       created_at,
       hashtags,
       profiles ( name, username, avatar_url ),
-      post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )
+      post_places ( id, name, category, neighborhood, city, country, photo_url, extra_photo_urls, position, lat, lng )
     `)
     .eq('visibility', 'feed')
+    .in('user_id', followingIds)
     .order('created_at', { ascending: false })
     .limit(50);
 
@@ -145,11 +160,85 @@ export async function getFeedPosts(): Promise<RealPost[]> {
         city: pl.city ?? '',
         country: pl.country ?? '',
         photoUrl: pl.photo_url ?? '',
+        extraPhotoUrls: pl.extra_photo_urls ?? [],
         position: pl.position ?? 0,
         lat: pl.lat ?? null,
         lng: pl.lng ?? null,
       })),
   }));
+}
+
+export async function getFollowCount(userId: string): Promise<number> {
+  const { count } = await supabase
+    .from('follows')
+    .select('*', { count: 'exact', head: true })
+    .eq('follower_id', userId);
+  return count ?? 0;
+}
+
+// ── Discovery feed (shown to new users who follow < 20 people) ───────────────
+export async function getDiscoveryPosts(userId: string): Promise<RealPost[]> {
+  const { data: posts, error } = await supabase
+    .from('posts')
+    .select(`
+      id,
+      user_id,
+      caption,
+      location_label,
+      created_at,
+      hashtags,
+      profiles ( name, username, avatar_url ),
+      post_places ( id, name, category, neighborhood, city, country, photo_url, extra_photo_urls, position, lat, lng )
+    `)
+    .eq('visibility', 'feed')
+    .neq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  if (error || !posts) return [];
+
+  return posts.map((p: any) => ({
+    id: p.id,
+    userId: p.user_id,
+    caption: p.caption ?? '',
+    locationLabel: p.location_label ?? '',
+    createdAt: p.created_at,
+    hashtags: p.hashtags ?? [],
+    profile: {
+      name: p.profiles?.name ?? 'Unknown',
+      username: p.profiles?.username ?? '',
+      avatarUrl: p.profiles?.avatar_url ?? null,
+    },
+    collaborators: [],
+    places: (p.post_places ?? []).map((pl: any) => ({
+      id: pl.id,
+      name: pl.name ?? '',
+      category: pl.category ?? '',
+      neighborhood: pl.neighborhood ?? '',
+      city: pl.city ?? '',
+      country: pl.country ?? '',
+      photoUrl: pl.photo_url ?? '',
+      extraPhotoUrls: pl.extra_photo_urls ?? [],
+      position: pl.position ?? 0,
+      lat: pl.lat ?? null,
+      lng: pl.lng ?? null,
+    })),
+  }));
+}
+
+export async function getDiscoveryGuides(userId: string): Promise<Guide[]> {
+  try {
+    const { data, error } = await supabase
+      .from('guides')
+      .select('*')
+      .neq('user_id', userId)
+      .order('published_at', { ascending: false })
+      .limit(20);
+    if (error) return [];
+    return enrichGuidesWithProfiles(data ?? []);
+  } catch {
+    return [];
+  }
 }
 
 // ── People discovery ─────────────────────────────────────────────────────────
@@ -178,7 +267,7 @@ export async function getDiscoverProfiles(currentUserId: string): Promise<Discov
     username: p.username ?? '',
     avatarUrl: p.avatar_url ?? null,
     email: p.email ?? null,
-    phone: p.phone ?? null,
+    phone: p.phone_discoverable ? (p.phone ?? null) : null,
     phoneDiscoverable: p.phone_discoverable ?? false,
     referredBy: p.referred_by ?? null,
   }));
@@ -192,14 +281,87 @@ export async function getFollowing(userId: string): Promise<Set<string>> {
   return new Set((data ?? []).map((r: any) => r.following_id));
 }
 
-export async function followUser(followerId: string, followingId: string) {
-  await supabase.from('follows').insert({ follower_id: followerId, following_id: followingId });
+export async function followUser(followerId: string, followingId: string): Promise<boolean> {
+  const { error } = await supabase.from('follows').insert({ follower_id: followerId, following_id: followingId });
+  if (error) { console.error('[followUser]', error.message); return false; }
+  return true;
 }
 
-export async function unfollowUser(followerId: string, followingId: string) {
-  await supabase.from('follows').delete()
+// Smart follow: checks is_private and sends a request instead of a direct follow for private accounts.
+// Returns 'followed' | 'requested' | 'error'
+export async function smartFollow(followerId: string, followingId: string): Promise<'followed' | 'requested' | 'error'> {
+  const { data: target } = await supabase.from('profiles').select('is_private').eq('id', followingId).single();
+  if (target?.is_private) {
+    const ok = await sendFollowRequest(followerId, followingId);
+    return ok ? 'requested' : 'error';
+  }
+  const ok = await followUser(followerId, followingId);
+  return ok ? 'followed' : 'error';
+}
+
+export async function unfollowUser(followerId: string, followingId: string): Promise<boolean> {
+  const { error } = await supabase.from('follows').delete()
     .eq('follower_id', followerId)
     .eq('following_id', followingId);
+  if (error) { console.error('[unfollowUser]', error.message); return false; }
+  return true;
+}
+
+// ── Follow requests (private accounts) ───────────────────────────────────────
+export async function sendFollowRequest(requesterId: string, requestedId: string): Promise<boolean> {
+  const { error } = await supabase.from('follow_requests').insert({ requester_id: requesterId, requested_id: requestedId });
+  if (error) { console.error('[sendFollowRequest]', error.message); return false; }
+  return true;
+}
+
+export async function cancelFollowRequest(requesterId: string, requestedId: string): Promise<boolean> {
+  const { error } = await supabase.from('follow_requests').delete()
+    .eq('requester_id', requesterId)
+    .eq('requested_id', requestedId);
+  if (error) { console.error('[cancelFollowRequest]', error.message); return false; }
+  return true;
+}
+
+export async function acceptFollowRequest(requesterId: string, requestedId: string): Promise<boolean> {
+  // Move from follow_requests → follows
+  const { error: followErr } = await supabase.from('follows').insert({ follower_id: requesterId, following_id: requestedId });
+  if (followErr) { console.error('[acceptFollowRequest]', followErr.message); return false; }
+  await supabase.from('follow_requests').delete()
+    .eq('requester_id', requesterId)
+    .eq('requested_id', requestedId);
+  return true;
+}
+
+export async function declineFollowRequest(requesterId: string, requestedId: string): Promise<boolean> {
+  const { error } = await supabase.from('follow_requests').delete()
+    .eq('requester_id', requesterId)
+    .eq('requested_id', requestedId);
+  if (error) { console.error('[declineFollowRequest]', error.message); return false; }
+  return true;
+}
+
+export async function getFollowRequestStatus(requesterId: string, requestedId: string): Promise<'pending' | 'none'> {
+  const { data } = await supabase.from('follow_requests')
+    .select('id')
+    .eq('requester_id', requesterId)
+    .eq('requested_id', requestedId)
+    .maybeSingle();
+  return data ? 'pending' : 'none';
+}
+
+export async function getPendingFollowRequests(userId: string): Promise<{ requesterId: string; requesterName: string; requesterUsername: string; requesterAvatar: string | null; createdAt: string }[]> {
+  const { data } = await supabase
+    .from('follow_requests')
+    .select('requester_id, created_at, profiles!requester_id(name, username, avatar_url)')
+    .eq('requested_id', userId)
+    .order('created_at', { ascending: false });
+  return (data ?? []).map((r: any) => ({
+    requesterId: r.requester_id,
+    requesterName: r.profiles?.name ?? '',
+    requesterUsername: r.profiles?.username ?? '',
+    requesterAvatar: r.profiles?.avatar_url ?? null,
+    createdAt: r.created_at,
+  }));
 }
 
 export interface FollowProfile {
@@ -244,7 +406,7 @@ export async function getFollowCounts(userId: string): Promise<{ followers: numb
 }
 
 // ── Update profile ────────────────────────────────────────────────────────────
-export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string; website_url?: string }) {
+export async function updateProfile(userId: string, updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string; website_url?: string; cover_url?: string; is_private?: boolean }) {
   const { data, error } = await supabase
     .from('profiles')
     .update(updates)
@@ -259,7 +421,6 @@ export async function updateProfile(userId: string, updates: { name?: string; us
     // Return a synthetic error so the UI shows a message
     return { message: 'Profile could not be saved. Check Supabase RLS policies on the profiles table.', details: '', hint: '', code: 'PGRST116' } as any;
   }
-  console.log('[updateProfile] success, rows updated:', data.length);
   return null;
 }
 
@@ -268,13 +429,13 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
   const selectFields = `
     id, user_id, caption, location_label, created_at, hashtags,
     profiles ( name, username, avatar_url ),
-    post_places ( id, name, category, neighborhood, city, country, photo_url, position, lat, lng )
+    post_places ( id, name, category, neighborhood, city, country, photo_url, extra_photo_urls, position, lat, lng )
   `;
 
   // Own posts + posts where user is a collaborator (any status — no acceptance flow exists yet)
   const [{ data: ownedPosts }, { data: collabRows }] = await Promise.all([
     supabase.from('posts').select(selectFields).eq('user_id', userId).order('position', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false }),
-    supabase.from('post_collaborators').select('post_id').eq('user_id', userId).in('status', ['accepted', 'pending']),
+    supabase.from('post_collaborators').select('post_id').eq('user_id', userId).eq('status', 'accepted'),
   ]);
 
   const collabPostIds = (collabRows ?? []).map((r: any) => r.post_id);
@@ -293,7 +454,7 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
     .from('post_collaborators')
     .select('post_id, user_id, profiles!user_id(name, username, avatar_url)')
     .in('post_id', allPostIds)
-    .in('status', ['accepted', 'pending']);
+    .eq('status', 'accepted');
 
   const ownPostIds = new Set((ownedPosts ?? []).map((p: any) => p.id));
 
@@ -335,6 +496,7 @@ export async function getUserPosts(userId: string): Promise<RealPost[]> {
         city: pl.city ?? '',
         country: pl.country ?? '',
         photoUrl: pl.photo_url ?? '',
+        extraPhotoUrls: pl.extra_photo_urls ?? [],
         position: pl.position ?? 0,
         lat: pl.lat ?? null,
         lng: pl.lng ?? null,
@@ -362,14 +524,14 @@ export async function getUserCollections(userId: string): Promise<RealCollection
     .order('created_at', { ascending: false });
   if (!data) return [];
 
-  // Try to get place counts — table may not exist yet
   const ids = data.map((r: any) => r.id);
   const counts: Record<string, number> = {};
   if (ids.length > 0) {
-    const { data: cp } = await supabase
+    const { data: cp, error: cpErr } = await supabase
       .from('collection_places')
       .select('collection_id')
       .in('collection_id', ids);
+    if (cpErr) console.error('[getUserCollections/place_counts]', cpErr.message);
     for (const r of cp ?? []) counts[(r as any).collection_id] = (counts[(r as any).collection_id] ?? 0) + 1;
   }
 
@@ -458,20 +620,6 @@ export async function getCollectionPlaces(collectionId: string): Promise<RealPos
       addedByAvatar: (r.profiles as any)?.avatar_url ?? null,
     }));
 }
-
-const US_STATES: Record<string, string> = {
-  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
-  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
-  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
-  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
-  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
-  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
-  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
-  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
-  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
-  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
-  DC: 'Washington DC',
-};
 
 /**
  * Scans all post_places rows where city is a 2-letter US state code and
@@ -636,7 +784,7 @@ function areaFallback(
 /** Geocode any places missing lat/lng. onProgress fires after each place resolves. */
 export async function geocodeMissingPlaces(
   places: RealPostPlace[],
-  apiKey: string,
+  apiKey?: string,
   onProgress?: (updated: RealPostPlace[]) => void
 ): Promise<RealPostPlace[]> {
   // Detect places whose stored coords are clearly a city-center fallback.
@@ -673,31 +821,24 @@ export async function geocodeMissingPlaces(
 
   // Returns coords + whether they came from real geocoding (save to DB) vs fallback (don't save)
   const geocodeOne = async (pl: RealPostPlace): Promise<{ lat: number; lng: number; real: boolean }> => {
-    // 1. Google Places Text Search — same call Add.tsx uses, single request, exact coords
-    if (apiKey) {
-      try {
-        const queries = [
-          `${pl.name}, ${pl.neighborhood}, ${pl.city}, ${pl.country}`,
-          `${pl.name}, ${pl.city}, ${pl.country}`,
-          pl.name,
-        ];
-        for (const textQuery of queries) {
-          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Goog-Api-Key': apiKey,
-              'X-Goog-FieldMask': 'places.location',
-            },
-            body: JSON.stringify({ textQuery, languageCode: 'en' }),
-          });
-          const data = await res.json();
-          const loc = data.places?.[0]?.location;
-          if (loc?.latitude != null)
-            return { lat: loc.latitude as number, lng: loc.longitude as number, real: true };
-        }
-      } catch { /* fall through */ }
-    }
+    // 1. Google Places Text Search via edge function proxy (no API key needed in browser)
+    try {
+      const queries = [
+        `${pl.name}, ${pl.neighborhood}, ${pl.city}, ${pl.country}`,
+        `${pl.name}, ${pl.city}, ${pl.country}`,
+        pl.name,
+      ];
+      for (const textQuery of queries) {
+        const data = await gTextSearch(
+          { textQuery, languageCode: 'en' },
+          'places.location',
+          TTL.ENRICHMENT,
+        );
+        const loc = data.places?.[0]?.location;
+        if (loc?.latitude != null)
+          return { lat: loc.latitude as number, lng: loc.longitude as number, real: true };
+      }
+    } catch { /* fall through */ }
 
     // 2. Nominatim: name + neighborhood + city (most specific)
     const nom1 = await nominatimSearch(`${pl.name}, ${pl.neighborhood}, ${pl.city}, ${pl.country}`);
@@ -729,24 +870,31 @@ export async function geocodeMissingPlaces(
   for (const pl of missing) {
     const { real, ...coords } = await geocodeOne(pl);
     // Only persist real geocoded coords — fallbacks stay in-memory so next load retries
-    if (real) supabase.from('post_places').update({ lat: coords.lat, lng: coords.lng }).eq('id', pl.id);
+    if (real) await supabase.from('post_places').update({ lat: coords.lat, lng: coords.lng }).eq('id', pl.id);
     // Clear city-center fallback coords from DB so next load retries them
-    else if (isBadFallbackCoord(pl)) supabase.from('post_places').update({ lat: null, lng: null }).eq('id', pl.id);
+    else if (isBadFallbackCoord(pl)) await supabase.from('post_places').update({ lat: null, lng: null }).eq('id', pl.id);
     current = current.map(p => p.id === pl.id ? { ...p, ...coords } : p);
     onProgress?.(current);
   }
   return current;
 }
 
-export async function addPlaceToCollection(collectionId: string, postPlaceId: string, addedBy?: string) {
+export async function addPlaceToCollection(collectionId: string, postPlaceId: string, addedBy?: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
   const base = { collection_id: collectionId, post_place_id: postPlaceId };
   if (addedBy) {
     const { error } = await supabase.from('collection_places').insert({ ...base, added_by: addedBy });
-    // If added_by column doesn't exist yet, fall back to insert without it
-    if (error) await supabase.from('collection_places').insert(base);
+    if (error) {
+      // added_by column might not exist yet — fall back
+      const { error: e2 } = await supabase.from('collection_places').insert(base);
+      if (e2) { console.error('[addPlaceToCollection]', e2.message); return false; }
+    }
   } else {
-    await supabase.from('collection_places').insert(base);
+    const { error } = await supabase.from('collection_places').insert(base);
+    if (error) { console.error('[addPlaceToCollection]', error.message); return false; }
   }
+  return true;
 }
 
 export async function removePlaceFromCollection(collectionId: string, postPlaceId: string) {
@@ -867,12 +1015,28 @@ export async function getPostLikeCounts(postIds: string[]): Promise<Record<strin
   return counts;
 }
 
-export async function likePost(userId: string, postId: string) {
-  await supabase.from('post_likes').insert({ user_id: userId, post_id: postId });
+export async function getPostCommentCounts(postIds: string[]): Promise<Record<string, number>> {
+  if (postIds.length === 0) return {};
+  const { data } = await supabase
+    .from('post_comments')
+    .select('post_id')
+    .in('post_id', postIds);
+  const counts: Record<string, number> = {};
+  for (const id of postIds) counts[id] = 0;
+  for (const r of data ?? []) counts[(r as any).post_id] = (counts[(r as any).post_id] ?? 0) + 1;
+  return counts;
 }
 
-export async function unlikePost(userId: string, postId: string) {
-  await supabase.from('post_likes').delete().eq('user_id', userId).eq('post_id', postId);
+export async function likePost(userId: string, postId: string): Promise<boolean> {
+  const { error } = await supabase.from('post_likes').insert({ user_id: userId, post_id: postId });
+  if (error) { console.error('[likePost]', error.message); return false; }
+  return true;
+}
+
+export async function unlikePost(userId: string, postId: string): Promise<boolean> {
+  const { error } = await supabase.from('post_likes').delete().eq('user_id', userId).eq('post_id', postId);
+  if (error) { console.error('[unlikePost]', error.message); return false; }
+  return true;
 }
 
 // ── Saves ─────────────────────────────────────────────────────────────────────
@@ -881,12 +1045,16 @@ export async function getSavedPosts(userId: string): Promise<Set<string>> {
   return new Set((data ?? []).map((r: any) => r.post_id));
 }
 
-export async function savePost(userId: string, postId: string) {
-  await supabase.from('post_saves').insert({ user_id: userId, post_id: postId });
+export async function savePost(userId: string, postId: string): Promise<boolean> {
+  const { error } = await supabase.from('post_saves').insert({ user_id: userId, post_id: postId });
+  if (error) { console.error('[savePost]', error.message); return false; }
+  return true;
 }
 
-export async function unsavePost(userId: string, postId: string) {
-  await supabase.from('post_saves').delete().eq('user_id', userId).eq('post_id', postId);
+export async function unsavePost(userId: string, postId: string): Promise<boolean> {
+  const { error } = await supabase.from('post_saves').delete().eq('user_id', userId).eq('post_id', postId);
+  if (error) { console.error('[unsavePost]', error.message); return false; }
+  return true;
 }
 
 export async function updateCollection(id: string, payload: { name?: string; description?: string; cover_image_url?: string | null }): Promise<{ error: string | null }> {
@@ -934,13 +1102,14 @@ export interface CollectionCollaborator {
   userId: string;
   invitedBy: string;
   createdAt: string;
+  status: 'pending' | 'accepted' | 'declined';
   profile: { name: string; username: string; avatarUrl: string | null };
 }
 
 export async function getCollectionCollaborators(collectionId: string): Promise<CollectionCollaborator[]> {
   const { data } = await supabase
     .from('collection_collaborators')
-    .select('id, collection_id, user_id, invited_by, created_at, profiles!user_id ( name, username, avatar_url )')
+    .select('id, collection_id, user_id, invited_by, created_at, status, profiles!user_id ( name, username, avatar_url )')
     .eq('collection_id', collectionId);
   return (data ?? []).map((r: any) => ({
     id: r.id,
@@ -948,13 +1117,27 @@ export async function getCollectionCollaborators(collectionId: string): Promise<
     userId: r.user_id,
     invitedBy: r.invited_by,
     createdAt: r.created_at,
+    status: r.status ?? 'pending',
     profile: { name: r.profiles?.name ?? '', username: r.profiles?.username ?? '', avatarUrl: r.profiles?.avatar_url ?? null },
   }));
 }
 
 export async function addCollaborator(collectionId: string, userId: string, invitedBy: string): Promise<string | null> {
-  const { error } = await supabase.from('collection_collaborators').insert({ collection_id: collectionId, user_id: userId, invited_by: invitedBy });
+  // Check if already a collaborator to avoid duplicate inserts
+  const { data: existing } = await supabase
+    .from('collection_collaborators')
+    .select('user_id')
+    .eq('collection_id', collectionId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (existing) return null; // already joined, no-op
+  const { error } = await supabase.from('collection_collaborators').insert({ collection_id: collectionId, user_id: userId, invited_by: invitedBy, status: 'pending' });
   return error?.message ?? null;
+}
+
+export async function updateCollectionCollaboratorStatus(collectionId: string, userId: string, status: 'accepted' | 'declined'): Promise<void> {
+  const { error } = await supabase.from('collection_collaborators').update({ status }).eq('collection_id', collectionId).eq('user_id', userId);
+  if (error) console.error('[updateCollectionCollaboratorStatus]', error.message);
 }
 
 export async function removeCollaborator(collectionId: string, userId: string) {
@@ -1018,8 +1201,10 @@ export async function deletePostPlace(postPlaceId: string) {
   await supabase.from('post_places').delete().eq('id', postPlaceId);
 }
 
-export async function deletePost(postId: string) {
-  await supabase.from('posts').delete().eq('id', postId);
+export async function deletePost(postId: string): Promise<boolean> {
+  const { error } = await supabase.from('posts').delete().eq('id', postId);
+  if (error) { console.error('[deletePost]', error.message); return false; }
+  return true;
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────
@@ -1062,8 +1247,10 @@ export async function addComment(userId: string, postId: string, text: string): 
   };
 }
 
-export async function deleteComment(commentId: string): Promise<void> {
-  await supabase.from('post_comments').delete().eq('id', commentId);
+export async function deleteComment(commentId: string): Promise<boolean> {
+  const { error } = await supabase.from('post_comments').delete().eq('id', commentId);
+  if (error) return false;
+  return true;
 }
 
 // ── Post Collaborators ────────────────────────────────────────────────────────
@@ -1157,14 +1344,24 @@ export async function getSuggestedUsers(excludeId: string, alreadyFollowing: str
     .map(p => ({ id: p.id, name: p.name ?? '', username: p.username ?? '', avatarUrl: p.avatar_url ?? null }));
 }
 
-export async function searchProfiles(query: string, excludeId: string): Promise<FollowProfile[]> {
+export async function searchProfiles(query: string, excludeId: string, followerOfUserId?: string): Promise<FollowProfile[]> {
   if (!query.trim()) return [];
-  const { data } = await supabase
+  let q = supabase
     .from('profiles')
     .select('id, name, username, avatar_url')
     .neq('id', excludeId)
     .or(`username.ilike.%${query}%,name.ilike.%${query}%`)
     .limit(10);
+  if (followerOfUserId) {
+    const { data: followRows } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', followerOfUserId);
+    const followingIds = (followRows ?? []).map((r: any) => r.following_id);
+    if (!followingIds.length) return [];
+    q = q.in('id', followingIds);
+  }
+  const { data } = await q;
   return (data ?? []).map((p: any) => ({ id: p.id, name: p.name ?? '', username: p.username ?? '', avatarUrl: p.avatar_url ?? null }));
 }
 
@@ -1623,7 +1820,8 @@ function mapInviteRow(row: any): ItemInvite {
 // ── Notifications ─────────────────────────────────────────────────────────────
 export interface AppNotification {
   id: string;
-  type: 'follow' | 'item_invite' | 'plan_invite' | 'plan_accepted' | 'collection_invite' | 'like' | 'comment' | 'post_invite';
+  type: 'follow' | 'follow_request' | 'item_invite' | 'plan_invite' | 'plan_accepted' | 'collection_invite' | 'collection_accepted' | 'like' | 'comment' | 'post_invite';
+  followRequestStatus?: 'pending' | 'accepted' | 'declined';
   actorId: string;
   actorName: string;
   actorUsername: string;
@@ -1644,6 +1842,10 @@ export interface AppNotification {
   postImage?: string;
   // post_invite specific
   postInviteStatus?: 'pending' | 'accepted' | 'declined';
+  // collection_invite specific
+  collectionInviteId?: string;
+  collectionInviteStatus?: 'pending' | 'accepted' | 'declined';
+  collectionId?: string;
 }
 
 export async function getNotifications(userId: string): Promise<AppNotification[]> {
@@ -1654,11 +1856,17 @@ export async function getNotifications(userId: string): Promise<AppNotification[
     .eq('user_id', userId);
   const userPostIds = (userPosts ?? []).map((p: any) => p.id);
 
-  const [followsRes, itemInvitesRes, planCollabsRes, colCollabsRes, likesRes, commentsRes, postCollabsRes] = await Promise.all([
+  const [followsRes, followRequestsRes, itemInvitesRes, planCollabsRes, colCollabsRes, likesRes, commentsRes, postCollabsRes] = await Promise.all([
     supabase
       .from('follows')
       .select('follower_id, created_at, profiles!follower_id(name, username, avatar_url)')
       .eq('following_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(30),
+    supabase
+      .from('follow_requests')
+      .select('requester_id, created_at, profiles!requester_id(name, username, avatar_url)')
+      .eq('requested_id', userId)
       .order('created_at', { ascending: false })
       .limit(30),
     supabase
@@ -1675,7 +1883,7 @@ export async function getNotifications(userId: string): Promise<AppNotification[
       .limit(30),
     supabase
       .from('collection_collaborators')
-      .select('collection_id, invited_by, created_at, user_collections!collection_id(name), profiles!invited_by(name, username, avatar_url)')
+      .select('id, collection_id, invited_by, created_at, status, user_collections!collection_id(name), profiles!invited_by(name, username, avatar_url)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(30),
@@ -1738,6 +1946,21 @@ export async function getNotifications(userId: string): Promise<AppNotification[
     });
   }
 
+  for (const r of ((followRequestsRes as any).data ?? [])) {
+    const p = (r as any).profiles ?? {};
+    list.push({
+      id: `follow-request-${(r as any).requester_id}`,
+      type: 'follow_request',
+      actorId: (r as any).requester_id,
+      actorName: p.name ?? '',
+      actorUsername: p.username ?? '',
+      actorAvatar: p.avatar_url ?? null,
+      title: 'wants to follow you',
+      createdAt: (r as any).created_at ?? '',
+      followRequestStatus: 'pending',
+    });
+  }
+
   for (const r of (itemInvitesRes.data ?? [])) {
     const p = (r as any).profiles ?? {};
     list.push({
@@ -1777,6 +2000,7 @@ export async function getNotifications(userId: string): Promise<AppNotification[
 
   for (const r of (colCollabsRes.data ?? [])) {
     const p = (r as any).profiles ?? {};
+    const status = (r as any).status ?? 'pending';
     list.push({
       id: `col-${(r as any).collection_id}-${(r as any).invited_by}`,
       type: 'collection_invite',
@@ -1784,9 +2008,11 @@ export async function getNotifications(userId: string): Promise<AppNotification[
       actorName: p.name ?? '',
       actorUsername: p.username ?? '',
       actorAvatar: p.avatar_url ?? null,
-      title: 'added you to their collection',
+      title: 'invited you to collaborate',
       subtitle: (r as any).user_collections?.name ?? '',
       createdAt: (r as any).created_at ?? '',
+      collectionInviteId: (r as any).collection_id,
+      collectionInviteStatus: status,
     });
   }
 
@@ -1869,6 +2095,37 @@ export async function getNotifications(userId: string): Promise<AppNotification[
         subtitle: (r as any).plans?.title ?? '',
         createdAt: (r as any).created_at ?? '',
         planId: (r as any).plan_id,
+      });
+    }
+  }
+
+  // collection_accepted: someone accepted an invite to a collection you own
+  const { data: ownedCollections } = await supabase
+    .from('user_collections')
+    .select('id, name')
+    .eq('user_id', userId);
+  const ownedCollectionIds = (ownedCollections ?? []).map((c: any) => c.id);
+  if (ownedCollectionIds.length > 0) {
+    const { data: acceptedCollabsCol } = await supabase
+      .from('collection_collaborators')
+      .select('user_id, collection_id, created_at, user_collections!collection_id(name), profiles!user_id(name, username, avatar_url)')
+      .in('collection_id', ownedCollectionIds)
+      .eq('status', 'accepted')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    for (const r of (acceptedCollabsCol ?? [])) {
+      const p = (r as any).profiles ?? {};
+      list.push({
+        id: `collection-accepted-${(r as any).collection_id}-${(r as any).user_id}`,
+        type: 'collection_accepted',
+        actorId: (r as any).user_id,
+        actorName: p.name ?? '',
+        actorUsername: p.username ?? '',
+        actorAvatar: p.avatar_url ?? null,
+        title: 'accepted your collection invite to',
+        subtitle: (r as any).user_collections?.name ?? '',
+        createdAt: (r as any).created_at ?? '',
+        collectionInviteId: (r as any).collection_id,
       });
     }
   }
@@ -1971,12 +2228,10 @@ export async function getPostById(postId: string): Promise<RealPost | null> {
   };
 }
 
-export async function getPostsAtPlace(placeName: string): Promise<RealPost[]> {
-  const { data } = await supabase
-    .from('post_places')
-    .select('post_id')
-    .ilike('name', `%${placeName}%`)
-    .limit(50);
+export async function getPostsAtPlace(placeName: string, city?: string): Promise<RealPost[]> {
+  let q = supabase.from('post_places').select('post_id').ilike('name', placeName);
+  if (city) q = q.eq('city', city);
+  const { data } = await q.limit(50);
   const postIds = [...new Set((data ?? []).map((r: any) => r.post_id))];
   if (postIds.length === 0) return [];
   const { data: posts } = await supabase
@@ -2038,18 +2293,20 @@ export async function getSavedPlaceNameCityKeys(userId: string): Promise<Set<str
   return keys;
 }
 
-export async function savePlace(userId: string, postPlaceId: string) {
+export async function savePlace(userId: string, postPlaceId: string): Promise<boolean> {
   const { error } = await supabase.from('saved_places').insert({ user_id: userId, post_place_id: postPlaceId });
-  if (error) console.error('[savePlace]', error.message, error.details);
+  if (error) { console.error('[savePlace]', error.message, error.details); return false; }
+  return true;
 }
 
-export async function unsavePlace(userId: string, postPlaceId: string) {
+export async function unsavePlace(userId: string, postPlaceId: string): Promise<boolean> {
   const { error } = await supabase
     .from('saved_places')
     .delete()
     .eq('user_id', userId)
     .eq('post_place_id', postPlaceId);
-  if (error) console.error('[unsavePlace]', error.message);
+  if (error) { console.error('[unsavePlace]', error.message); return false; }
+  return true;
 }
 
 // ── Direct Messaging ──────────────────────────────────────────────────────────
@@ -2058,6 +2315,7 @@ export interface Conversation {
   otherUser: { id: string; name: string; username: string; avatarUrl: string | null };
   lastMessage: { text: string; senderId: string; createdAt: string } | null;
   unread: boolean;
+  isUser1?: boolean;
 }
 
 export interface Message {
@@ -2099,7 +2357,7 @@ export async function getOrCreateConversation(userId1: string, userId2: string):
 export async function getConversations(userId: string): Promise<Conversation[]> {
   const { data, error } = await supabase
     .from('conversations')
-    .select('id, user1_id, user2_id')
+    .select('id, user1_id, user2_id, user1_last_read_at, user2_last_read_at')
     .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
   if (error) { console.error('[getConversations]', error.message); return []; }
   if (!data || data.length === 0) return [];
@@ -2126,20 +2384,32 @@ export async function getConversations(userId: string): Promise<Conversation[]> 
   }
 
   return data.map((c: any) => {
-    const otherId = c.user1_id === userId ? c.user2_id : c.user1_id;
+    const isUser1 = c.user1_id === userId;
+    const otherId = isUser1 ? c.user2_id : c.user1_id;
     const other = profileMap[otherId] ?? {};
     const last = lastByConv[c.id] ?? null;
+    const myLastRead = isUser1 ? c.user1_last_read_at : c.user2_last_read_at;
+    // Unread if last message was from other user AND sent after we last read
+    const unread = last
+      ? last.sender_id !== userId && (!myLastRead || new Date(last.created_at) > new Date(myLastRead))
+      : false;
     return {
       id: c.id,
       otherUser: { id: otherId, name: other.name ?? '', username: other.username ?? '', avatarUrl: other.avatar_url ?? null },
       lastMessage: last ? { text: last.text, senderId: last.sender_id, createdAt: last.created_at } : null,
-      unread: last ? last.sender_id !== userId : false,
+      unread,
+      isUser1,
     };
   }).sort((a, b) => {
     const ta = a.lastMessage?.createdAt ?? '0';
     const tb = b.lastMessage?.createdAt ?? '0';
     return new Date(tb).getTime() - new Date(ta).getTime();
   });
+}
+
+export async function markConversationRead(conversationId: string, isUser1: boolean): Promise<void> {
+  const col = isUser1 ? 'user1_last_read_at' : 'user2_last_read_at';
+  await supabase.from('conversations').update({ [col]: new Date().toISOString() }).eq('id', conversationId);
 }
 
 export async function getMessages(conversationId: string): Promise<Message[]> {
@@ -2161,9 +2431,12 @@ export async function sendMessage(conversationId: string, senderId: string, text
   return { id: data.id, conversationId: data.conversation_id, senderId: data.sender_id, text: data.text, createdAt: data.created_at };
 }
 
-export async function deleteConversation(conversationId: string): Promise<void> {
-  await supabase.from('messages').delete().eq('conversation_id', conversationId);
-  await supabase.from('conversations').delete().eq('id', conversationId);
+export async function deleteConversation(conversationId: string): Promise<boolean> {
+  const { error: msgError } = await supabase.from('messages').delete().eq('conversation_id', conversationId);
+  if (msgError) return false;
+  const { error: convError } = await supabase.from('conversations').delete().eq('id', conversationId);
+  if (convError) return false;
+  return true;
 }
 
 // ── Plan Bookings ─────────────────────────────────────────────────────────────
@@ -2279,6 +2552,7 @@ export interface Guide {
   description: string | null;
   coverUrl: string | null;
   publishedAt: string;
+  format: 'place_list' | 'itinerary';
   places?: any[];
   profile: {
     name: string;
@@ -2305,6 +2579,7 @@ async function enrichGuidesWithProfiles(guides: any[]): Promise<Guide[]> {
     description: g.description ?? null,
     coverUrl: g.cover_url ?? null,
     publishedAt: g.published_at,
+    format: (g.format === 'itinerary' ? 'itinerary' : 'place_list') as 'place_list' | 'itinerary',
     places: g.places ?? undefined,
     profile: {
       name: profileMap[g.user_id]?.name ?? 'Unknown',
@@ -2314,11 +2589,20 @@ async function enrichGuidesWithProfiles(guides: any[]): Promise<Guide[]> {
   }));
 }
 
-export async function getGuides(): Promise<Guide[]> {
+export async function getGuides(userId: string): Promise<Guide[]> {
   try {
+    // Fetch the list of users the current user follows
+    const { data: followRows } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', userId);
+    const followingIds = [userId, ...(followRows ?? []).map((r: any) => r.following_id)];
+    if (!followingIds.length) return [];
+
     const { data, error } = await supabase
       .from('guides')
       .select('*')
+      .in('user_id', followingIds)
       .order('published_at', { ascending: false })
       .limit(50);
     if (error) return [];
@@ -2349,6 +2633,7 @@ export async function createGuide(guide: {
   destination?: string;
   description?: string;
   coverUrl?: string;
+  format?: 'place_list' | 'itinerary';
   places?: any[];
 }): Promise<string | null> {
   try {
@@ -2359,6 +2644,7 @@ export async function createGuide(guide: {
       destination: guide.destination ?? null,
       description: guide.description ?? null,
       cover_url: guide.coverUrl ?? null,
+      format: guide.format ?? 'place_list',
     };
 
     // Try with places column first
@@ -2446,6 +2732,7 @@ export async function updateGuide(guideId: string, guide: {
   destination?: string;
   description?: string;
   coverUrl?: string;
+  format?: 'place_list' | 'itinerary';
   places?: any[];
 }): Promise<boolean> {
   try {
@@ -2456,6 +2743,7 @@ export async function updateGuide(guideId: string, guide: {
         destination: guide.destination ?? null,
         description: guide.description ?? null,
         cover_url: guide.coverUrl ?? null,
+        ...(guide.format ? { format: guide.format } : {}),
         places: guide.places ?? null,
       })
       .eq('id', guideId);
@@ -2510,4 +2798,297 @@ export async function getSubscribedGuides(userId: string): Promise<Guide[]> {
 export async function getSubscribedGuideIds(userId: string): Promise<Set<string>> {
   const { data } = await supabase.from('guide_subscriptions').select('guide_id').eq('user_id', userId);
   return new Set((data ?? []).map((r: any) => r.guide_id));
+}
+
+// ─── Guide likes ──────────────────────────────────────────────────────────────
+
+export async function likeGuide(userId: string, guideId: string): Promise<boolean> {
+  const { error } = await supabase.from('guide_likes').insert({ user_id: userId, guide_id: guideId });
+  if (error) console.error('[likeGuide]', error.message);
+  return !error;
+}
+
+export async function unlikeGuide(userId: string, guideId: string): Promise<boolean> {
+  const { error } = await supabase.from('guide_likes').delete().eq('user_id', userId).eq('guide_id', guideId);
+  if (error) console.error('[unlikeGuide]', error.message);
+  return !error;
+}
+
+export async function getLikedGuideIds(userId: string): Promise<Set<string>> {
+  const { data } = await supabase.from('guide_likes').select('guide_id').eq('user_id', userId);
+  return new Set((data ?? []).map((r: any) => r.guide_id));
+}
+
+export async function getUserLikedGuides(userId: string): Promise<Set<string>> {
+  return getLikedGuideIds(userId);
+}
+
+export async function getLikedGuidesFull(userId: string): Promise<Guide[]> {
+  const { data: likes } = await supabase
+    .from('guide_likes')
+    .select('guide_id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  const guideIds = (likes ?? []).map((r: any) => r.guide_id);
+  if (guideIds.length === 0) return [];
+  const { data: guides } = await supabase
+    .from('guides')
+    .select('id, user_id, plan_id, title, destination, description, cover_url, published_at, format, places')
+    .in('id', guideIds);
+  if (!guides) return [];
+  return enrichGuidesWithProfiles(guides);
+}
+
+export async function getGuideLikeCounts(guideIds: string[]): Promise<Record<string, number>> {
+  if (!guideIds.length) return {};
+  const { data } = await supabase.from('guide_likes').select('guide_id').in('guide_id', guideIds);
+  const counts: Record<string, number> = {};
+  for (const id of guideIds) counts[id] = 0;
+  for (const row of (data ?? [])) counts[(row as any).guide_id] = (counts[(row as any).guide_id] ?? 0) + 1;
+  return counts;
+}
+
+// ─── Guide comments ───────────────────────────────────────────────────────────
+
+export interface GuideComment {
+  id: string;
+  guideId: string;
+  userId: string;
+  text: string;
+  createdAt: string;
+  profile: { name: string; username: string; avatarUrl: string | null };
+}
+
+export async function addGuideComment(guideId: string, userId: string, text: string): Promise<GuideComment | null> {
+  const { data, error } = await supabase
+    .from('guide_comments')
+    .insert({ guide_id: guideId, user_id: userId, text })
+    .select('id, guide_id, user_id, text, created_at, profiles(name, username, avatar_url)')
+    .single();
+  if (error) { console.error('[addGuideComment]', error.message); return null; }
+  const d = data as any;
+  return { id: d.id, guideId: d.guide_id, userId: d.user_id, text: d.text, createdAt: d.created_at, profile: { name: d.profiles?.name ?? '', username: d.profiles?.username ?? '', avatarUrl: d.profiles?.avatar_url ?? null } };
+}
+
+export async function getGuideComments(guideId: string): Promise<GuideComment[]> {
+  const { data, error } = await supabase
+    .from('guide_comments')
+    .select('id, guide_id, user_id, text, created_at, profiles(name, username, avatar_url)')
+    .eq('guide_id', guideId)
+    .order('created_at', { ascending: true });
+  if (error) { console.error('[getGuideComments]', error.message); return []; }
+  return (data ?? []).map((d: any) => ({
+    id: d.id, guideId: d.guide_id, userId: d.user_id, text: d.text, createdAt: d.created_at,
+    profile: { name: d.profiles?.name ?? '', username: d.profiles?.username ?? '', avatarUrl: d.profiles?.avatar_url ?? null },
+  }));
+}
+
+export async function getGuideCommentCounts(guideIds: string[]): Promise<Record<string, number>> {
+  if (!guideIds.length) return {};
+  const { data } = await supabase.from('guide_comments').select('guide_id').in('guide_id', guideIds);
+  const counts: Record<string, number> = {};
+  for (const row of (data ?? [])) counts[(row as any).guide_id] = (counts[(row as any).guide_id] ?? 0) + 1;
+  return counts;
+}
+
+// ─── Guide Collections ────────────────────────────────────────────────────────
+
+export async function addGuideToCollection(collectionId: string, guideId: string, addedBy?: string): Promise<boolean> {
+  const base = { collection_id: collectionId, guide_id: guideId };
+  const row: any = addedBy ? { ...base, added_by: addedBy } : base;
+  const { error } = await supabase.from('collection_guides').insert(row);
+  if (error) {
+    if (addedBy) {
+      // added_by column might not exist yet — fall back
+      const { error: e2 } = await supabase.from('collection_guides').insert(base);
+      if (e2) { console.error('[addGuideToCollection]', e2.message); return false; }
+    } else {
+      console.error('[addGuideToCollection]', error.message); return false;
+    }
+  }
+  return true;
+}
+
+export async function removeGuideFromCollection(collectionId: string, guideId: string): Promise<void> {
+  await supabase.from('collection_guides').delete()
+    .eq('collection_id', collectionId)
+    .eq('guide_id', guideId);
+}
+
+export async function getGuideCollectionIds(guideId: string, userId: string): Promise<Set<string>> {
+  const { data: userCols } = await supabase.from('user_collections').select('id').eq('user_id', userId);
+  const colIds = (userCols ?? []).map((r: any) => r.id);
+  if (!colIds.length) return new Set();
+  const { data } = await supabase.from('collection_guides').select('collection_id')
+    .eq('guide_id', guideId).in('collection_id', colIds);
+  return new Set((data ?? []).map((r: any) => r.collection_id));
+}
+
+export async function getCollectionGuides(collectionId: string): Promise<Guide[]> {
+  const { data } = await supabase.from('collection_guides').select('guide_id').eq('collection_id', collectionId);
+  const ids = (data ?? []).map((r: any) => r.guide_id);
+  if (!ids.length) return [];
+  const { data: guides } = await supabase.from('guides')
+    .select('id, user_id, plan_id, title, destination, description, cover_url, published_at, format, places')
+    .in('id', ids);
+  if (!guides) return [];
+  return enrichGuidesWithProfiles(guides);
+}
+
+// ─── Post / place search helpers ─────────────────────────────────────────────
+
+const _POST_SELECT = `
+  id, user_id, caption, location_label, created_at, hashtags,
+  profiles ( name, username, avatar_url ),
+  post_places ( id, name, category, neighborhood, city, country, photo_url, extra_photo_urls, position, lat, lng )
+`;
+
+function _mapPostRows(rows: any[]): RealPost[] {
+  return (rows ?? []).map((p: any) => ({
+    id: p.id,
+    userId: p.user_id,
+    caption: p.caption ?? '',
+    locationLabel: p.location_label ?? '',
+    createdAt: p.created_at,
+    hashtags: p.hashtags ?? [],
+    profile: {
+      name: p.profiles?.name ?? 'Unknown',
+      username: p.profiles?.username ?? '',
+      avatarUrl: p.profiles?.avatar_url ?? null,
+    },
+    collaborators: [],
+    places: (p.post_places ?? [])
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((pl: any) => ({
+        id: pl.id,
+        name: pl.name ?? '',
+        category: pl.category ?? '',
+        neighborhood: pl.neighborhood ?? '',
+        city: pl.city ?? '',
+        country: pl.country ?? '',
+        photoUrl: pl.photo_url ?? '',
+        extraPhotoUrls: pl.extra_photo_urls ?? [],
+        position: pl.position ?? 0,
+        lat: pl.lat ?? null,
+        lng: pl.lng ?? null,
+      })),
+  }));
+}
+
+// ─── Hashtag search ───────────────────────────────────────────────────────────
+
+export async function getPostsByHashtag(tag: string): Promise<RealPost[]> {
+  const clean = tag.replace(/^#/, '').toLowerCase();
+  const { data } = await supabase
+    .from('posts')
+    .select(_POST_SELECT)
+    .eq('visibility', 'feed')
+    .contains('hashtags', [clean])
+    .order('created_at', { ascending: false })
+    .limit(30);
+  return _mapPostRows(data ?? []);
+}
+
+// ─── Global search ────────────────────────────────────────────────────────────
+
+export async function globalSearch(query: string): Promise<{ posts: RealPost[]; places: RealPostPlace[] }> {
+  const q = query.trim();
+  if (!q) return { posts: [], places: [] };
+  const [postsRes, placesRes] = await Promise.all([
+    supabase
+      .from('posts')
+      .select(_POST_SELECT)
+      .eq('visibility', 'feed')
+      .ilike('caption', `%${q}%`)
+      .order('created_at', { ascending: false })
+      .limit(20),
+    supabase
+      .from('post_places')
+      .select('id, name, category, neighborhood, city, country, photo_url, position, lat, lng')
+      .or(`name.ilike.%${q}%,city.ilike.%${q}%`)
+      .limit(20),
+  ]);
+  const places: RealPostPlace[] = (placesRes.data ?? []).map((pl: any) => ({
+    id: pl.id,
+    name: pl.name ?? '',
+    category: pl.category ?? '',
+    neighborhood: pl.neighborhood ?? '',
+    city: pl.city ?? '',
+    country: pl.country ?? '',
+    photoUrl: pl.photo_url ?? '',
+    position: pl.position ?? 0,
+    lat: pl.lat ?? null,
+    lng: pl.lng ?? null,
+  }));
+  return { posts: _mapPostRows(postsRes.data ?? []), places };
+}
+
+// ─── Report & Block ───────────────────────────────────────────────────────────
+// SQL to run once in Supabase:
+//   create table if not exists reports (
+//     id uuid primary key default gen_random_uuid(),
+//     reporter_id uuid not null references profiles(id) on delete cascade,
+//     reported_user_id uuid references profiles(id) on delete cascade,
+//     reported_post_id uuid references posts(id) on delete cascade,
+//     reason text not null, created_at timestamptz default now()
+//   );
+//   alter table reports enable row level security;
+//   create policy "insert own reports" on reports for insert with check (auth.uid() = reporter_id);
+//
+//   create table if not exists blocks (
+//     id uuid primary key default gen_random_uuid(),
+//     blocker_id uuid not null references profiles(id) on delete cascade,
+//     blocked_id uuid not null references profiles(id) on delete cascade,
+//     created_at timestamptz default now(),
+//     unique(blocker_id, blocked_id)
+//   );
+//   alter table blocks enable row level security;
+//   create policy "manage own blocks" on blocks for all using (auth.uid() = blocker_id);
+
+export async function reportContent(
+  reporterId: string,
+  payload: { postId?: string; userId?: string; reason: string },
+): Promise<void> {
+  const { error } = await supabase.from('reports').insert({
+    reporter_id: reporterId,
+    reported_post_id: payload.postId ?? null,
+    reported_user_id: payload.userId ?? null,
+    reason: payload.reason,
+  });
+  if (error) console.error('[reportContent]', error.message);
+}
+
+export async function blockUser(blockerId: string, blockedId: string): Promise<void> {
+  const { error } = await supabase.from('blocks').insert({ blocker_id: blockerId, blocked_id: blockedId });
+  if (error) console.error('[blockUser]', error.message);
+}
+
+export async function unblockUser(blockerId: string, blockedId: string): Promise<void> {
+  const { error } = await supabase.from('blocks').delete().eq('blocker_id', blockerId).eq('blocked_id', blockedId);
+  if (error) console.error('[unblockUser]', error.message);
+}
+
+export async function getBlockedUsers(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.from('blocks').select('blocked_id').eq('blocker_id', userId);
+  if (error) console.error('[getBlockedUsers]', error.message);
+  return new Set((data ?? []).map((r: any) => r.blocked_id));
+}
+
+// Returns users who have blocked `userId` (requires the security-definer function in Supabase):
+// create or replace function get_blockers_of_user(target_id uuid) returns setof uuid
+// language sql security definer stable as $$
+//   select blocker_id from blocks where blocked_id = target_id;
+// $$;
+export async function getBlockersOfUser(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.rpc('get_blockers_of_user', { target_id: userId });
+  if (error) console.error('[getBlockersOfUser]', error.message);
+  return new Set((data ?? []) as string[]);
+}
+
+// ─── Private account ──────────────────────────────────────────────────────────
+// SQL to run once in Supabase:
+//   alter table profiles add column if not exists is_private boolean not null default false;
+
+export async function updateProfilePrivacy(userId: string, isPrivate: boolean): Promise<void> {
+  await supabase.from('profiles').update({ is_private: isPrivate }).eq('id', userId);
 }

@@ -1,11 +1,14 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import ActionModal from '../components/ActionModal';
+import SondrrLogo from '../components/SondrLogo';
 import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
-import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles, GripVertical, BookmarkPlus, Check, Heart, MessageCircle, Copy } from 'lucide-react';
+import { Search, Plus, BadgeCheck, Lock, ArrowLeft, CalendarDays, MapPin, ChevronRight, Clock, Plane, Share2, Bookmark, BookmarkCheck, X, AlignLeft, Users, Pencil, UserPlus, Loader2, Link, Map as MapIcon, Send, SlidersHorizontal, Hotel, UtensilsCrossed, Ticket, ChevronDown, ChevronUp, Trash2, ClipboardPaste, Sparkles, GripVertical, BookmarkPlus, Check, Heart, MessageCircle, Copy, MoreHorizontal, Flag, UserX } from 'lucide-react';
+import { gAutocomplete, gPlaceDetails, gTextSearch, gGeocode, TTL } from '../lib/googlePlaces';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY as string;
@@ -14,20 +17,17 @@ function LocationSearch({ value, onChange, onCoverImage }: { value: string; onCh
   const [suggestions, setSuggestions] = useState<{ placeId: string; text: string }[]>([]);
   const [searching, setSearching] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionTokenRef = useRef(crypto.randomUUID());
 
   const handleChange = (val: string) => {
     onChange(val);
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!val.trim()) { setSuggestions([]); return; }
+    if (val.trim().length < 3) { setSuggestions([]); return; }
     timerRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-          body: JSON.stringify({ input: val, languageCode: 'en' }),
-        });
-        const data = await res.json();
+        const data = await gAutocomplete({ input: val, languageCode: 'en', sessionToken: sessionTokenRef.current });
         setSuggestions(
           (data.suggestions ?? [])
             .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
@@ -42,12 +42,11 @@ function LocationSearch({ value, onChange, onCoverImage }: { value: string; onCh
   const handleSelect = async (placeId: string, text: string) => {
     onChange(text);
     setSuggestions([]);
+    const token = sessionTokenRef.current;
+    sessionTokenRef.current = crypto.randomUUID();
     if (onCoverImage) {
       try {
-        const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=photos`, {
-          headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'photos' },
-        });
-        const data = await res.json();
+        const data = await gPlaceDetails(placeId, 'photos', token, TTL.PHOTOS);
         const photoName = data.photos?.[0]?.name;
         if (photoName) {
           onCoverImage(`https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}`);
@@ -173,28 +172,18 @@ function CoverCropModal({ file, onConfirm, onCancel }: {
 import type { Category, Collection, Place } from '../types';
 import { getPlans, createPlan as dbCreatePlan, updatePlan as dbUpdatePlan, deletePlan as dbDeletePlan, syncPlanCollaborators, getUserCollections, getSubscribedCollections, createCollection, searchProfiles, getFollowerProfiles, getFollowingProfiles, createPlanDay, createPlanItem, updatePlanItem, deletePlanDay, updatePlanDay, deletePlanItem, purgeDuplicatePlanItems, createItemInvite, getItemInvites, updateItemInviteStatus, leavePlan, addCollaborator, getPlanBookings, createPlanBooking, updatePlanBooking, deletePlanBooking, type Plan as DBPlan, type SavedPlace, type FollowProfile, type ItemInvite, type PlanBooking, type BookingType } from '../lib/supabase';
 import { getBookingUrl, isBookable } from '../lib/placeUtils';
-import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, addPlaceToCollection, getPlaceCollectionIds, getSubscribedGuides, likePost, unlikePost, getLikedPosts, getPostLikeCounts, getPostComments, addComment, deleteComment, getConversations, getOrCreateConversation, sendMessage, type PostComment, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide, type Conversation } from '../lib/supabase';
-
-function timeAgo(iso: string): string {
-  if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d`;
-  return `${Math.floor(d / 7)}w`;
-}
+import { getSavedPlaces, savePlace, unsavePlace, unsubscribeFromCollection, supabase, getPublicUrl, getCollectionPlaces, geocodeMissingPlaces, removePlaceFromCollection, updateCollection, deleteCollection, getPostById, getCollectionCollaborators, removeCollaborator, createGuide, getUserGuides, deleteGuide, addPlaceToCollection, getPlaceCollectionIds, getSubscribedGuides, subscribeToGuide, unsubscribeFromGuide, getSubscribedGuideIds, addGuideToCollection, removeGuideFromCollection, getGuideCollectionIds, likePost, unlikePost, getLikedPosts, getPostLikeCounts, getPostComments, addComment, deleteComment, getConversations, getOrCreateConversation, sendMessage, blockUser, unblockUser, getBlockedUsers, getBlockersOfUser, reportContent, deletePost, getCollectionGuides, type PostComment, type RealPostPlace, type RealPost, type CollectionCollaborator, type Guide, type Conversation } from '../lib/supabase';
+import { CATEGORY_EMOJI, timeAgo } from '../lib/constants';
 import BookingSheet from '../components/BookingSheet';
 import PlaceSearch from '../components/PlaceSearch';
 import PlacePage from '../components/PlacePage';
 import ImageCarousel from '../components/ImageCarousel';
+import GuideDetail from '../components/GuideDetail';
+import UserProfile from './UserProfile';
 
 const MapView = lazy(() => import('../components/MapView'));
 
-type SavedTab = 'Places' | 'Collections' | 'Subscribed' | 'Trips';
+type SavedTab = 'Places' | 'Collections' | 'Guides' | 'Trips';
 
 interface TripItem {
   id: string;
@@ -269,19 +258,7 @@ const placeCategories: { id: Category | 'all'; label: string; emoji: string }[] 
   { id: 'transport',     label: 'Transport',     emoji: '🚗' },
 ];
 
-const categoryEmoji: Record<string, string> = {
-  restaurant: '🍽️', cafe: '☕', treats: '🍰', bar: '🍸', nightlife: '🎵', food: '🍕',
-  hotel: '🏨', stay: '🏨', landmark: '🏛️', attraction: '🏛️', art: '🎨',
-  nature: '🌿', beach: '🏖️', shop: '🛍️', experience: '🎡',
-  neighbourhood: '🏘️', street: '🏙️', sports: '🎾', wellness: '💆',
-  event: '🎟️', flight: '✈️', transport: '🚗',
-  // capitalised fallbacks
-  Restaurant: '🍽️', Cafe: '☕', Treats: '🍰', Bar: '🍸', Nightlife: '🎵', Food: '🍕',
-  Hotel: '🏨', Landmark: '🏛️', Attraction: '🏛️', Art: '🎨',
-  Nature: '🌿', Beach: '🏖️', Shop: '🛍️', Experience: '🎡',
-  Neighbourhood: '🏘️', Street: '🏙️', Sports: '🎾', Wellness: '💆',
-  Event: '🎟️', Flight: '✈️', Transport: '🚗',
-};
+const categoryEmoji = CATEGORY_EMOJI;
 
 const categoryDisplayName: Record<string, string> = {
   restaurant: 'Restaurant', cafe: 'Cafe', treats: 'Treats', bar: 'Bar', nightlife: 'Nightlife', food: 'Food',
@@ -621,7 +598,7 @@ function EventCard({ trip, onClick }: { trip: Trip; onClick: () => void }) {
   );
 }
 
-export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: boolean; userId?: string; userAvatar?: string | null }) {
+export default function Saved({ userId, userAvatar }: { userId?: string; userAvatar?: string | null }) {
   const [activeTab, setActiveTab] = useState<SavedTab>('Places');
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [showEventSheet, setShowEventSheet] = useState(false);
@@ -642,13 +619,19 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [newPlanDates, setNewPlanDates] = useState('');
   const [newPlanStatus, setNewPlanStatus] = useState<Trip['status']>('planning');
   const [newPlanType, setNewPlanType] = useState<'trip' | 'event'>('trip');
+  const [newPlanImportCollection, setNewPlanImportCollection] = useState<import('../lib/supabase').RealCollection | null>(null);
+  const [newPlanImportPlaces, setNewPlanImportPlaces] = useState<RealPostPlace[]>([]);
+  const [newPlanImportSelectedIds, setNewPlanImportSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingImportPlaces, setLoadingImportPlaces] = useState(false);
   const coverImageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coverImageSessionTokenRef = useRef(crypto.randomUUID());
   const [newEventAddress, setNewEventAddress] = useState('');
   const [newEventNeighborhood, setNewEventNeighborhood] = useState('');
   const [newEventCategory, setNewEventCategory] = useState('');
   const [newEventAddressSuggestions, setNewEventAddressSuggestions] = useState<{ placeId: string; label: string }[]>([]);
   const [newEventAddressLoading, setNewEventAddressLoading] = useState(false);
   const newEventAddressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newEventAddressSessionTokenRef = useRef(crypto.randomUUID());
   const [showEventSingleCal, setShowEventSingleCal] = useState(false);
   const [eventSingleDate, setEventSingleDate] = useState<Date | undefined>();
   const [newEventTimeStart, setNewEventTimeStart] = useState('');
@@ -671,6 +654,13 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [savedPostCommentText, setSavedPostCommentText] = useState('');
   const [savedPostCommentSending, setSavedPostCommentSending] = useState(false);
   const savedPostCommentRef = useRef<HTMLInputElement>(null);
+  const [savedPostOptionsStep, setSavedPostOptionsStep] = useState<'options' | 'reason' | 'done' | 'blockConfirm' | 'deleteConfirm' | null>(null);
+  const [savedBlockedUsers, setSavedBlockedUsers] = useState<Set<string>>(new Set());
+  const [savedActionModal, setSavedActionModal] = useState<{
+    avatarUrl?: string | null; iconType?: 'check'; title: string; subtitle: string;
+    confirmLabel?: string; confirmVariant?: 'red' | 'dark'; onConfirm?: () => void;
+  } | null>(null);
+  const [savedPostOptionsReason, setSavedPostOptionsReason] = useState('');
   const [showSavedPostShare, setShowSavedPostShare] = useState(false);
   const [savedPostShareSentTo, setSavedPostShareSentTo] = useState<Set<string>>(new Set());
   const [savedPostShareSearch, setSavedPostShareSearch] = useState('');
@@ -679,12 +669,54 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [savedPostShareLinkCopied, setSavedPostShareLinkCopied] = useState(false);
   const [savedPostConversations, setSavedPostConversations] = useState<Conversation[]>([]);
   const savedPostShareSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Collection share sheet
+  const [showCollectionShareSheet, setShowCollectionShareSheet] = useState(false);
+  const [collectionShareSearchQuery, setCollectionShareSearchQuery] = useState('');
+  const [collectionShareSearchResults, setCollectionShareSearchResults] = useState<FollowProfile[]>([]);
+  const [collectionShareSentTo, setCollectionShareSentTo] = useState<Set<string>>(new Set());
+  const [searchingCollectionShare, setSearchingCollectionShare] = useState(false);
+  const [collectionShareLinkCopied, setCollectionShareLinkCopied] = useState(false);
+  const collectionShareSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [postsBrowseGroup, setPostsBrowseGroup] = useState<SavedPlace[] | null>(null);
   const [postsBrowsePosts, setPostsBrowsePosts] = useState<(RealPost | null)[]>([]);
   const [addToColPlace, setAddToColPlace] = useState<SavedPlace | null>(null);
   const [addToColIds, setAddToColIds] = useState<Set<string>>(new Set());
   const [addToColLoading, setAddToColLoading] = useState(false);
   const [addToColSaving, setAddToColSaving] = useState<Set<string>>(new Set());
+  // All Saved → place card bookmark sheet: trips state
+  const [addToColPlans, setAddToColPlans] = useState<Trip[]>([]);
+  const [addToColPlanAdded, setAddToColPlanAdded] = useState<Set<string>>(new Set());
+  const [addToColPlanAdding, setAddToColPlanAdding] = useState<string | null>(null);
+  const [addToColShowNewTrip, setAddToColShowNewTrip] = useState(false);
+  const [addToColNewTripName, setAddToColNewTripName] = useState('');
+  const [addToColCreatingTrip, setAddToColCreatingTrip] = useState(false);
+  // Post detail overlay bookmark sheet state
+  const [postDetailSaveSheet, setPostDetailSaveSheet] = useState(false);
+  const [postDetailSaveColIds, setPostDetailSaveColIds] = useState<Set<string>>(new Set());
+  const [postDetailSaveColSaving, setPostDetailSaveColSaving] = useState<Set<string>>(new Set());
+  const [postDetailSavePlans, setPostDetailSavePlans] = useState<Trip[]>([]);
+  const [postDetailSavePlanAdded, setPostDetailSavePlanAdded] = useState<Set<string>>(new Set());
+  const [postDetailSavePlanAdding, setPostDetailSavePlanAdding] = useState<string | null>(null);
+  const [postDetailSaveShowNewTrip, setPostDetailSaveShowNewTrip] = useState(false);
+  const [postDetailSaveNewTripName, setPostDetailSaveNewTripName] = useState('');
+  const [postDetailSaveCreatingTrip, setPostDetailSaveCreatingTrip] = useState(false);
+  // Collection detail → non-owner place card sheet: trips state
+  const [colSavePlans, setColSavePlans] = useState<Trip[]>([]);
+  const [colSavePlanAdded, setColSavePlanAdded] = useState<Set<string>>(new Set());
+  const [colSavePlanAdding, setColSavePlanAdding] = useState<string | null>(null);
+  const [colSaveShowNewTrip, setColSaveShowNewTrip] = useState(false);
+  const [colSaveNewTripName, setColSaveNewTripName] = useState('');
+  const [colSaveCreatingTrip, setColSaveCreatingTrip] = useState(false);
+  // Collection detail → owner place card bookmark sheet state
+  const [colOwnerBookmarkSheet, setColOwnerBookmarkSheet] = useState<RealPostPlace | null>(null);
+  const [colOwnerBookmarkColIds, setColOwnerBookmarkColIds] = useState<Set<string>>(new Set());
+  const [colOwnerBookmarkColSaving, setColOwnerBookmarkColSaving] = useState<Set<string>>(new Set());
+  const [colOwnerBookmarkPlans, setColOwnerBookmarkPlans] = useState<Trip[]>([]);
+  const [colOwnerBookmarkPlanAdded, setColOwnerBookmarkPlanAdded] = useState<Set<string>>(new Set());
+  const [colOwnerBookmarkPlanAdding, setColOwnerBookmarkPlanAdding] = useState<string | null>(null);
+  const [colOwnerBookmarkShowNewTrip, setColOwnerBookmarkShowNewTrip] = useState(false);
+  const [colOwnerBookmarkNewTripName, setColOwnerBookmarkNewTripName] = useState('');
+  const [colOwnerBookmarkCreatingTrip, setColOwnerBookmarkCreatingTrip] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [mapDayFilter, setMapDayFilter] = useState<string>('all'); // 'all' or day label
   const [planViewMode, setPlanViewMode] = useState<'brainstorm' | 'itinerary'>('brainstorm');
@@ -790,6 +822,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [editItemAddressSuggestions, setEditItemAddressSuggestions] = useState<{ placeId: string; text: string }[]>([]);
   const [editItemAddressSearching, setEditItemAddressSearching] = useState(false);
   const editItemAddressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editItemAddressSessionTokenRef = useRef(crypto.randomUUID());
   const editItemSuggestionsRef = useRef<HTMLDivElement | null>(null);
   const editItemScrollRef = useRef<HTMLDivElement | null>(null);
   const [showItemInvite, setShowItemInvite] = useState(false);
@@ -804,10 +837,21 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [newColEmoji, setNewColEmoji] = useState('');
   const [newColDesc, setNewColDesc] = useState('');
   const [newColSaving, setNewColSaving] = useState(false);
+  const [newColCoverUrl, setNewColCoverUrl] = useState<string | null>(null);
+  const [newColCoverUploading, setNewColCoverUploading] = useState(false);
+  const [editColCoverUrl, setEditColCoverUrl] = useState<string | null>(null);
+  const [editColCoverUploading, setEditColCoverUploading] = useState(false);
   const [dbCollections, setDbCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
   const [dbSubscribedCollections, setDbSubscribedCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
   const [selectedRealCollection, setSelectedRealCollection] = useState<import('../lib/supabase').RealCollection | null>(null);
   const [realCollectionPlaces, setRealCollectionPlaces] = useState<RealPostPlace[]>([]);
+  const [realCollectionGuides, setRealCollectionGuides] = useState<Guide[]>([]);
+  const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
+  const [savedGuidesFilter, setSavedGuidesFilter] = useState<string>('All');
+  const [savedSubscribedGuideIds, setSavedSubscribedGuideIds] = useState<Set<string>>(new Set());
+  const [savedGuideColSheet, setSavedGuideColSheet] = useState<Guide | null>(null);
+  const [savedGuideColIds, setSavedGuideColIds] = useState<Set<string>>(new Set());
+  const [savedGuideColLoading, setSavedGuideColLoading] = useState(false);
   const [loadingRealCollectionPlaces, setLoadingRealCollectionPlaces] = useState(false);
   const [realColFilter, setRealColFilter] = useState('all');
   const [showRealColMap, setShowRealColMap] = useState(true);
@@ -815,6 +859,16 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
   const [editColName, setEditColName] = useState('');
   const [editColDesc, setEditColDesc] = useState('');
   const [editColSaving, setEditColSaving] = useState(false);
+  const [confirmUnfollowCol, setConfirmUnfollowCol] = useState(false);
+  const [selectedPlacePage, setSelectedPlacePage] = useState<RealPostPlace | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [showColSaveSheet, setShowColSaveSheet] = useState<string | null>(null); // placeId
+  const [colSaveSheetColIds, setColSaveSheetColIds] = useState<Set<string>>(new Set());
+  const [showNewColSave, setShowNewColSave] = useState(false);
+  const [newColSaveName, setNewColSaveName] = useState('');
+  const [savingNewColSave, setSavingNewColSave] = useState(false);
+  const [colSaveUserCollections, setColSaveUserCollections] = useState<import('../lib/supabase').RealCollection[]>([]);
+  const [collectionOwnerProfile, setCollectionOwnerProfile] = useState<{ name: string; username: string; avatarUrl: string | null } | null>(null);
   const [showColInviteSheet, setShowColInviteSheet] = useState(false);
   const [colInviteSearch, setColInviteSearch] = useState('');
   const [colInviteResults, setColInviteResults] = useState<import('../lib/supabase').FollowProfile[]>([]);
@@ -1026,16 +1080,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
         body.locationBias = { circle: { center: { latitude: lat, longitude: lng }, radius: 200 } };
       }
 
-      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.photos',
-        },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
+      const data = await gTextSearch(
+        body,
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.photos',
+        TTL.ENRICHMENT,
+      );
       const place = data.places?.[0];
 
       if (place) {
@@ -1117,16 +1166,11 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       // No placeId — do a text search to resolve one and get all details
       if (!resolvedPlaceId && name) {
         try {
-          const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'places.id,places.photos,places.types,places.displayName,places.formattedAddress,places.addressComponents,places.location',
-            },
-            body: JSON.stringify({ textQuery: address ? `${name} ${address}` : name, languageCode: 'en' }),
-          });
-          const searchData = await searchRes.json();
+          const searchData = await gTextSearch(
+            { textQuery: address ? `${name} ${address}` : name, languageCode: 'en' },
+            'places.id,places.photos,places.types,places.displayName,places.formattedAddress,places.addressComponents,places.location',
+            TTL.ENRICHMENT,
+          );
           const found = searchData.places?.[0];
           if (found) {
             resolvedPlaceId = found.id ?? '';
@@ -1143,14 +1187,7 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
 
       if (resolvedPlaceId) {
         try {
-          const res = await fetch(`https://places.googleapis.com/v1/places/${resolvedPlaceId}`, {
-            headers: {
-              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'displayName,types,photos,formattedAddress,addressComponents,location',
-              'X-Goog-LanguageCode': 'en',
-            },
-          });
-          const place = await res.json();
+          const place = await gPlaceDetails(resolvedPlaceId, 'displayName,types,photos,formattedAddress,addressComponents,location', undefined, TTL.PHOTOS);
           if (place.displayName?.text) name = place.displayName.text;
           if (!categoryOverride && place.types) category = googleTypesToCategory(place.types);
           const photoName = place.photos?.[0]?.name;
@@ -1194,7 +1231,6 @@ export default function Saved({ isNewUser, userId, userAvatar }: { isNewUser?: b
       const position = day.items.length;
 
       const finalImage = imageUrl; // imageUrl already prefers addPlaceCustomImage (set at top of function)
-      console.log('[handleSelectPlace] before save — address:', address, '| imageUrl:', finalImage?.slice(0, 60));
       let newItem: TripItem;
       if (userId && day.id) {
         const dbItem = await createPlanItem(selectedTrip.id, day.id, {
@@ -1857,6 +1893,14 @@ Return ONLY valid JSON, no markdown, no explanation:
     return `${fmt(range.from)} – ${fmt(range.to)}`;
   };
 
+  // Cleanup search timers on unmount
+  useEffect(() => {
+    return () => {
+      if (savedPostShareSearchRef.current) clearTimeout(savedPostShareSearchRef.current);
+      if (collectionShareSearchRef.current) clearTimeout(collectionShareSearchRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!userId) return;
     getUserGuides(userId).then(setMyGuides);
@@ -1933,8 +1977,14 @@ Return ONLY valid JSON, no markdown, no explanation:
 
     getItemInvites(userId).then(setItemInvites);
     getUserCollections(userId).then(setDbCollections);
+    Promise.all([getBlockedUsers(userId), getBlockersOfUser(userId)])
+      .then(([blocked, blockers]) => setSavedBlockedUsers(new Set([...blocked, ...blockers])));
     getSubscribedCollections(userId).then(setDbSubscribedCollections);
-    getSubscribedGuides(userId).then(setSubscribedGuides);
+    getSubscribedGuides(userId).then(guides => {
+      setSubscribedGuides(guides);
+      setSavedSubscribedGuideIds(new Set(guides.map((g: Guide) => g.id)));
+    });
+    getSubscribedGuideIds(userId).then(ids => setSavedSubscribedGuideIds(new Set(ids)));
   }, [userId]);
 
   // ── Load likes + comments when a saved post is opened ────────────────
@@ -2012,16 +2062,11 @@ Return ONLY valid JSON, no markdown, no explanation:
               ? resolvedAddress
               : [item.name, plan.destination, plan.country].filter(Boolean).join(', ');
 
-            const stRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.addressComponents,places.photos',
-              },
-              body: JSON.stringify({ textQuery: searchQuery, languageCode: 'en', ...(locationBias ? { locationBias } : {}) }),
-            });
-            const stData = await stRes.json();
+            const stData = await gTextSearch(
+              { textQuery: searchQuery, languageCode: 'en', ...(locationBias ? { locationBias } : {}) },
+              'places.displayName,places.formattedAddress,places.addressComponents,places.photos',
+              TTL.ENRICHMENT,
+            );
             const place = stData.places?.[0];
 
             let newNeighborhood = '';
@@ -2037,10 +2082,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                 const addr = place.formattedAddress || item.address || '';
                 if (addr) {
                   try {
-                    const geoRes = await fetch(
-                      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GOOGLE_PLACES_KEY}`
-                    );
-                    const geoData = await geoRes.json();
+                    const geoData = await gGeocode(addr);
                     const geoResult = geoData.results?.[0];
                     if (geoResult) {
                       const geoComps = (geoResult.address_components ?? []).map((c: any) => ({
@@ -2151,16 +2193,11 @@ Return ONLY valid JSON, no markdown, no explanation:
             selectedTrip.destination,
             selectedTrip.country,
           ].filter(Boolean).join(', ');
-          const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-              'X-Goog-FieldMask': 'places.location',
-            },
-            body: JSON.stringify({ textQuery: q, languageCode: 'en' }),
-          });
-          const data = await res.json();
+          const data = await gTextSearch(
+            { textQuery: q, languageCode: 'en' },
+            'places.location',
+            TTL.ENRICHMENT,
+          );
           const loc = data.places?.[0]?.location;
           if (loc?.latitude && loc?.longitude) {
             const lat = loc.latitude;
@@ -4107,16 +4144,11 @@ Return ONLY valid JSON, no markdown, no explanation:
                           setEditItemAddressSearch(val);
                           setEditItem(prev => prev ? { ...prev, address: val } : prev);
                           if (editItemAddressTimerRef.current) clearTimeout(editItemAddressTimerRef.current);
-                          if (!val.trim()) { setEditItemAddressSuggestions([]); return; }
+                          if (!val.trim() || val.trim().length < 3) { setEditItemAddressSuggestions([]); return; }
                           editItemAddressTimerRef.current = setTimeout(async () => {
                             setEditItemAddressSearching(true);
                             try {
-                              const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-                                body: JSON.stringify({ input: val, languageCode: 'en' }),
-                              });
-                              const data = await res.json();
+                              const data = await gAutocomplete({ input: val, languageCode: 'en', sessionToken: editItemAddressSessionTokenRef.current });
                               setEditItemAddressSuggestions(
                                 (data.suggestions ?? [])
                                   .map((s: any) => ({ placeId: s.placePrediction?.placeId ?? '', text: s.placePrediction?.text?.text ?? '' }))
@@ -4148,16 +4180,11 @@ Return ONLY valid JSON, no markdown, no explanation:
                               setEditItemAddressSuggestions([]);
                               setEditItemAddressSearch(s.text);
                               setEditItem(prev => prev ? { ...prev, address: s.text } : prev);
+                              const editToken = editItemAddressSessionTokenRef.current;
+                              editItemAddressSessionTokenRef.current = crypto.randomUUID();
                               // Fetch full details for formatted address + neighborhood
                               try {
-                                const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
-                                  headers: {
-                                    'X-Goog-Api-Key': GOOGLE_PLACES_KEY,
-                                    'X-Goog-FieldMask': 'displayName,formattedAddress,addressComponents,photos',
-                                    'X-Goog-LanguageCode': 'en',
-                                  },
-                                });
-                                const data = await res.json();
+                                const data = await gPlaceDetails(s.placeId, 'displayName,formattedAddress,addressComponents,photos', editToken, TTL.PHOTOS);
                                 if (data.formattedAddress) {
                                   setEditItemAddressSearch(data.formattedAddress);
                                   setEditItem(prev => prev ? { ...prev, address: data.formattedAddress } : prev);
@@ -4467,12 +4494,14 @@ Return ONLY valid JSON, no markdown, no explanation:
     );
   }
 
+  // ── User Profile overlay ──────────────────────────────────────
+  if (viewingUserId && userId) {
+    return <UserProfile userId={viewingUserId} currentUserId={userId} onBack={() => setViewingUserId(null)} onFollowChange={() => {}} onMessage={() => {}} />;
+  }
+
   // ── Real Collection Detail ────────────────────────────────────
   if (selectedRealCollection) {
-    const catEmoji = (cat: string) => {
-      const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', dining: '🍽️', bar: '🍸', cocktail: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
-      return m[cat.toLowerCase()] ?? '📍';
-    };
+    const catEmoji = (cat: string) => CATEGORY_EMOJI[cat] ?? CATEGORY_EMOJI[cat.toLowerCase()] ?? '📍';
     const mapPlaces = realCollectionPlaces
       .filter(pl => pl.lat != null && pl.lng != null)
       .map(pl => ({ id: pl.id, lat: pl.lat!, lng: pl.lng!, name: pl.name, city: pl.city, country: pl.country }));
@@ -4482,57 +4511,114 @@ Return ONLY valid JSON, no markdown, no explanation:
       const isSaved = realSavedPlaceIds.has(place.id);
       return (
         <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-3">
-          {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
-            <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
-              <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
-              {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
-            </p>
-            {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
-            {realColCollaborators.length > 0 && place.addedBy && (
-              <div className="flex items-center gap-1 mt-1.5">
-                {place.addedByAvatar
-                  ? <img src={place.addedByAvatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover flex-shrink-0" />
-                  : <div className="w-3.5 h-3.5 rounded-full bg-gray-300 flex items-center justify-center text-[7px] font-bold text-white flex-shrink-0">{(place.addedByName ?? '?')[0].toUpperCase()}</div>
-                }
-                <span className="text-[10px] text-gray-400">
-                  {place.addedBy === userId ? 'You' : (place.addedByName ?? 'Someone')} added this
-                </span>
-              </div>
-            )}
-          </div>
+          {/* Tappable area → opens PlacePage */}
+          <button
+            className="flex items-center gap-3 flex-1 min-w-0 text-left active:opacity-70 transition-opacity"
+            onClick={() => setSelectedPlacePage(place)}
+          >
+            {place.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 truncate">{place.name}</p>
+              <p className="text-xs text-gray-400 flex items-center gap-0.5 mt-0.5">
+                <MapPin size={10} strokeWidth={1.5} className="flex-shrink-0" />
+                {[place.neighborhood, place.city].filter(Boolean).join(', ') || place.country}
+              </p>
+              {place.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(place.category)} {place.category.charAt(0).toUpperCase() + place.category.slice(1)}</p>}
+              {realColCollaborators.length > 0 && place.addedBy && (
+                <div className="flex items-center gap-1 mt-1.5">
+                  {place.addedByAvatar
+                    ? <img src={place.addedByAvatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover flex-shrink-0" />
+                    : <div className="w-3.5 h-3.5 rounded-full bg-gray-300 flex items-center justify-center text-[7px] font-bold text-white flex-shrink-0">{(place.addedByName ?? '?')[0].toUpperCase()}</div>
+                  }
+                  <span className="text-[10px] text-gray-400">
+                    {place.addedBy === userId ? 'You' : (place.addedByName ?? 'Someone')} added this
+                  </span>
+                </div>
+              )}
+            </div>
+          </button>
+          {/* Action button — separate from tap target */}
           {userId && isOwn ? (
-            /* Owner: show X to remove from collection */
-            <button
-              onClick={async () => {
-                await removePlaceFromCollection(selectedRealCollection.id, place.id);
-                setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
-                setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
-                setDbCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
-              }}
-              className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0"
-            >
-              <X size={12} strokeWidth={2} className="text-gray-500" />
-            </button>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                onClick={async () => {
+                  if (!userId) return;
+                  // Load collections and plans for the owner bookmark sheet
+                  const [cols, planIds] = await Promise.all([
+                    getUserCollections(userId),
+                    getPlaceCollectionIds(place.id),
+                  ]);
+                  setColSaveUserCollections(cols);
+                  setColOwnerBookmarkColIds(planIds);
+                  setColOwnerBookmarkColSaving(new Set());
+                  setColOwnerBookmarkPlanAdded(new Set());
+                  setColOwnerBookmarkPlanAdding(null);
+                  setColOwnerBookmarkShowNewTrip(false);
+                  setColOwnerBookmarkNewTripName('');
+                  // Reuse the top-level plans already loaded
+                  setColOwnerBookmarkPlans(plans.filter(p => !p.description?.includes('[event]')));
+                  setColOwnerBookmarkSheet(place);
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 flex-shrink-0"
+              >
+                <Bookmark size={12} strokeWidth={2} className="text-gray-500" />
+              </button>
+              <button
+                onClick={async () => {
+                  await removePlaceFromCollection(selectedRealCollection.id, place.id);
+                  setRealCollectionPlaces(prev => prev.filter(p => p.id !== place.id));
+                  setSelectedRealCollection(prev => prev ? { ...prev, placesCount: Math.max(0, prev.placesCount - 1) } : prev);
+                  setDbCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, placesCount: Math.max(0, c.placesCount - 1) } : c));
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 flex-shrink-0"
+              >
+                <X size={12} strokeWidth={2} className="text-gray-500" />
+              </button>
+            </div>
           ) : userId ? (
-            /* Non-owner: show bookmark toggle */
             <button
               onClick={async () => {
                 if (isSaved) {
-                  await unsavePlace(userId, place.id);
-                  setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(place.id); return n; });
-                  setRealSavedPlaces(prev => prev.filter(p => p.id !== place.id));
+                  // Already saved — open the full sheet for management
+                  const [cols, colIds] = await Promise.all([
+                    getUserCollections(userId),
+                    getPlaceCollectionIds(place.id),
+                  ]);
+                  setColSaveUserCollections(cols);
+                  setColSaveSheetColIds(colIds);
+                  setColSavePlans(plans.filter(p => !p.description?.includes('[event]')));
+                  setColSavePlanAdded(new Set());
+                  setColSavePlanAdding(null);
+                  setColSaveShowNewTrip(false);
+                  setColSaveNewTripName('');
+                  setShowNewColSave(false);
+                  setNewColSaveName('');
+                  setShowColSaveSheet(place.id);
                 } else {
                   await savePlace(userId, place.id);
                   setRealSavedPlaceIds(prev => new Set(prev).add(place.id));
                   setRealSavedPlaces(prev => [...prev, { id: place.id, postId: '', name: place.name, category: place.category ?? '', neighborhood: place.neighborhood ?? '', city: place.city ?? '', country: place.country ?? '', photoUrl: place.photoUrl ?? '', lat: place.lat ?? null, lng: place.lng ?? null }]);
+                  // Load user's collections and open the sheet
+                  const [cols, colIds] = await Promise.all([
+                    getUserCollections(userId),
+                    getPlaceCollectionIds(place.id),
+                  ]);
+                  setColSaveUserCollections(cols);
+                  setColSaveSheetColIds(colIds);
+                  setColSavePlans(plans.filter(p => !p.description?.includes('[event]')));
+                  setColSavePlanAdded(new Set());
+                  setColSavePlanAdding(null);
+                  setColSaveShowNewTrip(false);
+                  setColSaveNewTripName('');
+                  setShowNewColSave(false);
+                  setNewColSaveName('');
+                  setShowColSaveSheet(place.id);
                 }
               }}
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-200 flex-shrink-0"
+              className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 transition-colors ${isSaved ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'}`}
             >
               {isSaved
-                ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-gray-900" />
+                ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
                 : <Bookmark size={14} strokeWidth={1.5} className="text-gray-400" />
               }
             </button>
@@ -4555,7 +4641,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-black/10" />
           <button
-            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); setRealColFilter('all'); setShowRealColMap(true); setRealColCollaborators([]); }}
+            onClick={() => { setSelectedRealCollection(null); setRealCollectionPlaces([]); setRealCollectionGuides([]); setRealColFilter('all'); setShowRealColMap(true); setRealColCollaborators([]); setConfirmUnfollowCol(false); }}
             className="absolute top-4 left-4 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
           >
             <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
@@ -4563,15 +4649,10 @@ Return ONLY valid JSON, no markdown, no explanation:
           <div className="absolute top-4 right-4 flex gap-2">
             {!isOwn && userId && (
               <button
-                onClick={async () => {
-                  await unsubscribeFromCollection(userId, selectedRealCollection.id);
-                  setDbSubscribedCollections(prev => prev.filter(c => c.id !== selectedRealCollection.id));
-                  setSelectedRealCollection(null);
-                  setRealCollectionPlaces([]);
-                }}
-                className="h-8 px-3 rounded-full bg-white/90 flex items-center justify-center text-xs font-semibold text-gray-700"
+                onClick={() => setConfirmUnfollowCol(true)}
+                className="h-8 px-3 rounded-full bg-white/90 flex items-center justify-center text-xs font-semibold text-gray-500"
               >
-                Unsubscribe
+                Following
               </button>
             )}
             {isOwn && (
@@ -4584,13 +4665,18 @@ Return ONLY valid JSON, no markdown, no explanation:
             )}
             <button
               onClick={() => {
-                const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
-                if (navigator.share) navigator.share({ title: selectedRealCollection.name, url });
-                else navigator.clipboard?.writeText(url);
+                setCollectionShareSearchQuery('');
+                setCollectionShareSearchResults([]);
+                setCollectionShareSentTo(new Set());
+                setCollectionShareLinkCopied(false);
+                setShowCollectionShareSheet(true);
+                if (savedPostConversations.length === 0 && userId) {
+                  getConversations(userId).then(setSavedPostConversations);
+                }
               }}
               className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
             >
-              <Share2 size={15} strokeWidth={1.5} className="text-gray-700" />
+              <Share2 size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
             {isOwn && (
               <button
@@ -4608,6 +4694,62 @@ Return ONLY valid JSON, no markdown, no explanation:
             )}
           </div>
         </div>
+
+        {/* Add places button — owner only, sits just below cover */}
+        {isOwn && (
+          <div className="flex justify-end px-4 pt-3 pb-1">
+            <button
+              onClick={() => {
+                setShowAddPlaces(true);
+                // Refresh saved places in case they haven't loaded yet
+                if (userId && realSavedPlaces.length === 0) {
+                  import('../lib/supabase').then(({ getSavedPlaces }) =>
+                    getSavedPlaces(userId).then(sp => {
+                      setRealSavedPlaces(sp);
+                      setRealSavedPlaceIds(new Set(sp.map(p => p.id)));
+                    })
+                  );
+                }
+              }}
+              className="flex items-center gap-1.5 bg-gray-900 text-white text-xs font-semibold px-3 py-1.5 rounded-full active:opacity-80"
+            >
+              <Plus size={12} strokeWidth={2.5} />
+              Add places
+            </button>
+          </div>
+        )}
+
+        {/* Owner profile strip (only when viewing someone else's collection) */}
+        {!isOwn && (
+          <button
+            className="w-full flex items-center gap-3 px-4 py-3 border-b border-gray-100 active:bg-gray-50 transition-colors text-left"
+            onClick={() => setViewingUserId(selectedRealCollection.userId)}
+          >
+            {collectionOwnerProfile?.avatarUrl ? (
+              <img src={collectionOwnerProfile.avatarUrl} alt={collectionOwnerProfile.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+            ) : (
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${collectionOwnerProfile ? 'bg-gray-200 text-gray-500' : 'bg-gray-100 animate-pulse'}`}>
+                {collectionOwnerProfile ? (collectionOwnerProfile.name || collectionOwnerProfile.username || '?')[0].toUpperCase() : ''}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              {collectionOwnerProfile ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-900 truncate">{collectionOwnerProfile.name || collectionOwnerProfile.username}</p>
+                  {collectionOwnerProfile.username && (
+                    <p className="text-xs text-gray-400 truncate">@{collectionOwnerProfile.username}</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="h-3.5 w-28 bg-gray-100 rounded animate-pulse mb-1.5" />
+                  <div className="h-3 w-20 bg-gray-100 rounded animate-pulse" />
+                </>
+              )}
+            </div>
+            <ChevronRight size={14} strokeWidth={1.5} className="text-gray-300 flex-shrink-0" />
+          </button>
+        )}
 
         {/* Places */}
         {loadingRealCollectionPlaces ? (
@@ -4712,46 +4854,582 @@ Return ONLY valid JSON, no markdown, no explanation:
             </>
           );
         })()}
+
+      {/* Guides in this collection */}
+      {realCollectionGuides.length > 0 && (
+        <div className="px-4 pt-6 pb-4">
+          <p className="text-sm font-bold text-gray-900 mb-3">{realCollectionGuides.length} guide{realCollectionGuides.length !== 1 ? 's' : ''}</p>
+          <div className="grid grid-cols-2 gap-3">
+            {realCollectionGuides.map(guide => (
+              <button
+                key={guide.id}
+                className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform bg-gray-200"
+                style={{ aspectRatio: '3/4' }}
+                onClick={() => setSelectedGuide(guide)}
+              >
+                {guide.coverUrl
+                  ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                  : <div className="absolute inset-0 bg-gradient-to-br from-gray-300 to-gray-400" />}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                <div className="absolute top-2.5 left-2.5">
+                  <span className="text-xs font-semibold text-white bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full">
+                    {guide.format === 'itinerary' ? 'Itinerary' : 'Guide'}
+                  </span>
+                </div>
+                <button
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center active:scale-90 transition-transform z-10"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!userId) return;
+                    setSavedGuideColLoading(true);
+                    if (!savedSubscribedGuideIds.has(guide.id)) {
+                      subscribeToGuide(userId, guide.id);
+                      setSavedSubscribedGuideIds(prev => new Set(prev).add(guide.id));
+                    }
+                    const ids = await getGuideCollectionIds(guide.id, userId);
+                    setSavedGuideColIds(ids);
+                    setSavedGuideColSheet(guide);
+                    setSavedGuideColLoading(false);
+                  }}
+                >
+                  {savedGuideColLoading && savedGuideColSheet?.id === guide.id
+                    ? <Loader2 size={14} strokeWidth={1.5} className="animate-spin text-white" />
+                    : savedSubscribedGuideIds.has(guide.id)
+                      ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                      : <Bookmark size={14} strokeWidth={1.5} className="text-white" />}
+                </button>
+                <div className="absolute bottom-0 left-0 right-0 p-3">
+                  <p className="text-white font-bold text-sm leading-tight line-clamp-2">{guide.title}</p>
+                  {guide.destination && (
+                    <p className="text-white/70 text-xs mt-0.5 truncate">📍 {guide.destination}</p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       </div>
+
+      {/* Place detail overlay */}
+      {selectedPlacePage && (
+        <PlacePage
+          place={selectedPlacePage}
+          appUser={userId ? { id: userId, avatar: userAvatar ?? null } as any : undefined}
+          isSaved={realSavedPlaceIds.has(selectedPlacePage.id)}
+          onClose={() => setSelectedPlacePage(null)}
+          onToggleSave={async () => {
+            if (!userId) return;
+            const isSaved = realSavedPlaceIds.has(selectedPlacePage.id);
+            if (isSaved) {
+              await unsavePlace(userId, selectedPlacePage.id);
+              setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(selectedPlacePage.id); return n; });
+              setRealSavedPlaces(prev => prev.filter(p => p.id !== selectedPlacePage.id));
+            } else {
+              await savePlace(userId, selectedPlacePage.id);
+              setRealSavedPlaceIds(prev => new Set(prev).add(selectedPlacePage.id));
+            }
+          }}
+        />
+      )}
+
+      {/* Guide detail from collection */}
+      {selectedGuide && (
+        <GuideDetail
+          guide={selectedGuide}
+          currentUserId={userId ?? undefined}
+          onClose={() => setSelectedGuide(null)}
+          onViewUser={(uid) => { setSelectedGuide(null); setViewingUserId(uid); }}
+        />
+      )}
+
+      {/* Save-to-collection sheet (non-owner) */}
+      {showColSaveSheet && (
+        <div className="fixed inset-0 z-[210] flex items-end justify-center bg-black/50" onClick={() => { setShowColSaveSheet(null); setColSaveSheetColIds(new Set()); setShowNewColSave(false); setNewColSaveName(''); setColSaveShowNewTrip(false); setColSaveNewTripName(''); setColSavePlanAdded(new Set()); }}>
+          <div className="w-full bg-white rounded-t-3xl pb-8 max-h-[85vh] overflow-y-auto" style={{ maxWidth: '384px' }} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 bg-gray-200 rounded-full" /></div>
+            <div className="px-4 pt-2 pb-3">
+              <p className="text-sm font-bold text-gray-900">Saved to All Saved ✓</p>
+              <p className="text-xs text-gray-400 mt-0.5">Also add to a collection?</p>
+            </div>
+            <div className="px-4 space-y-2 max-h-48 overflow-y-auto">
+              {colSaveUserCollections.map(col => {
+                const inCol = colSaveSheetColIds.has(col.id);
+                return (
+                  <button
+                    key={col.id}
+                    onClick={async () => {
+                      if (!showColSaveSheet) return;
+                      if (inCol) {
+                        await removePlaceFromCollection(col.id, showColSaveSheet);
+                        setColSaveSheetColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                      } else {
+                        await addPlaceToCollection(col.id, showColSaveSheet);
+                        setColSaveSheetColIds(prev => new Set(prev).add(col.id));
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-2xl active:bg-gray-100 text-left"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                      {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-4 pt-3">
+              <button
+                onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }}
+                className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2"
+              >
+                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Plus size={15} strokeWidth={2} className="text-gray-600" />
+                </div>
+                New collection
+              </button>
+            </div>
+            {/* ── Trips section ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-3 pb-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add to a trip</p>
+              {colSavePlans.length === 0 && !colSaveShowNewTrip && (
+                <p className="text-xs text-gray-400 mb-2">No trips yet.</p>
+              )}
+              {colSavePlans.length > 0 && (() => {
+                const placeId = showColSaveSheet;
+                const place = realCollectionPlaces.find(p => p.id === placeId);
+                if (!place) return null;
+                return (
+                  <div className="space-y-2 max-h-44 overflow-y-auto mb-2">
+                    {colSavePlans.map(plan => {
+                      const added = colSavePlanAdded.has(plan.id);
+                      const adding = colSavePlanAdding === plan.id;
+                      return (
+                        <button
+                          key={plan.id}
+                          disabled={added || adding}
+                          onClick={async () => {
+                            setColSavePlanAdding(plan.id);
+                            try {
+                              const existingBrainstorm = plan.days.find(d => d.label === 'Brainstorm');
+                              const day = existingBrainstorm ?? await createPlanDay(plan.id, 'Brainstorm', 0);
+                              if (day) {
+                                await createPlanItem(plan.id, day.id!, {
+                                  name: place.name,
+                                  category: place.category || '',
+                                  image_url: place.photoUrl || '',
+                                  time_label: '',
+                                  address: [place.neighborhood, place.city, place.country].filter(Boolean).join(', '),
+                                  neighborhood: place.neighborhood || '',
+                                  position: day.items.length,
+                                  lat: place.lat ?? null,
+                                  lng: place.lng ?? null,
+                                });
+                                setColSavePlanAdded(prev => new Set(prev).add(plan.id));
+                              }
+                            } finally {
+                              setColSavePlanAdding(null);
+                            }
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ${added ? 'bg-gray-900' : 'bg-gray-50 active:bg-gray-100'}`}
+                        >
+                          <div className="w-9 h-9 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
+                            {plan.coverImage ? <img src={plan.coverImage} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full flex items-center justify-center text-lg">✈️</div>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold truncate ${added ? 'text-white' : 'text-gray-900'}`}>{plan.destination}</p>
+                            {plan.country && <p className={`text-xs truncate ${added ? 'text-gray-300' : 'text-gray-400'}`}>{plan.country}</p>}
+                          </div>
+                          {adding && <Loader2 size={16} className="animate-spin text-gray-400 flex-shrink-0" />}
+                          {added && !adding && <svg width="16" height="16" viewBox="0 0 12 12" fill="none" className="flex-shrink-0"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                          {!added && !adding && <Plus size={16} strokeWidth={2} className="text-gray-400 flex-shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              {colSaveShowNewTrip ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={colSaveNewTripName}
+                    onChange={e => setColSaveNewTripName(e.target.value)}
+                    placeholder="Trip name…"
+                    className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none border border-gray-200 focus:border-gray-400"
+                    onKeyDown={async e => {
+                      if (e.key === 'Escape') { setColSaveShowNewTrip(false); setColSaveNewTripName(''); }
+                      if (e.key === 'Enter' && colSaveNewTripName.trim() && userId) {
+                        setColSaveCreatingTrip(true);
+                        const newPlan = await dbCreatePlan(userId, { title: colSaveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                        if (newPlan) {
+                          const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                          setColSavePlans(prev => [converted, ...prev]);
+                          setPlans(prev => [converted, ...prev]);
+                          setColSaveShowNewTrip(false);
+                          setColSaveNewTripName('');
+                        }
+                        setColSaveCreatingTrip(false);
+                      }
+                    }}
+                  />
+                  <button
+                    disabled={!colSaveNewTripName.trim() || colSaveCreatingTrip}
+                    onClick={async () => {
+                      if (!colSaveNewTripName.trim() || !userId) return;
+                      setColSaveCreatingTrip(true);
+                      const newPlan = await dbCreatePlan(userId, { title: colSaveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                      if (newPlan) {
+                        const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                        setColSavePlans(prev => [converted, ...prev]);
+                        setPlans(prev => [converted, ...prev]);
+                        setColSaveShowNewTrip(false);
+                        setColSaveNewTripName('');
+                      }
+                      setColSaveCreatingTrip(false);
+                    }}
+                    className="px-3 py-2 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                  >
+                    {colSaveCreatingTrip ? <Loader2 size={14} className="animate-spin" /> : 'Create'}
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setColSaveShowNewTrip(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                  New trip
+                </button>
+              )}
+            </div>
+            {/* ── Remove from Saved ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  if (!userId || !showColSaveSheet) return;
+                  await unsavePlace(userId, showColSaveSheet);
+                  setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(showColSaveSheet); return n; });
+                  setRealSavedPlaces(prev => prev.filter(p => p.id !== showColSaveSheet));
+                  setShowColSaveSheet(null);
+                  setColSaveSheetColIds(new Set());
+                  setColSaveShowNewTrip(false);
+                  setColSaveNewTripName('');
+                  setColSavePlanAdded(new Set());
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unfollow collection confirmation sheet */}
+      {confirmUnfollowCol && !isOwn && userId && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmUnfollowCol(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-4">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex flex-col items-center px-6 pb-2">
+              {selectedRealCollection.coverImageUrl ? (
+                <img src={selectedRealCollection.coverImageUrl} alt={selectedRealCollection.name} className="w-16 h-16 rounded-2xl object-cover mb-3" />
+              ) : (
+                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+                  <span className="text-3xl">{selectedRealCollection.emoji || '🗂️'}</span>
+                </div>
+              )}
+              <p className="text-base font-bold text-gray-900 mb-1">Unfollow this collection?</p>
+              <p className="text-sm text-gray-400 text-center mb-6">
+                "{selectedRealCollection.name}" will be removed from your Following.
+              </p>
+              <button
+                onClick={async () => {
+                  setConfirmUnfollowCol(false);
+                  await unsubscribeFromCollection(userId, selectedRealCollection.id);
+                  setDbSubscribedCollections(prev => prev.filter(c => c.id !== selectedRealCollection.id));
+                  setSelectedRealCollection(null);
+                  setRealCollectionPlaces([]);
+                }}
+                className="w-full py-3.5 bg-red-500 text-white rounded-2xl text-sm font-bold mb-3"
+              >
+                Unfollow
+              </button>
+              <button
+                onClick={() => setConfirmUnfollowCol(false)}
+                className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Owner bookmark sheet — Collections + Trips + Remove from Saved */}
+      {colOwnerBookmarkSheet && userId && (
+        <div className="fixed inset-0 z-[210] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }} onClick={() => { setColOwnerBookmarkSheet(null); setColOwnerBookmarkColIds(new Set()); setColOwnerBookmarkColSaving(new Set()); setColOwnerBookmarkShowNewTrip(false); setColOwnerBookmarkNewTripName(''); setColOwnerBookmarkPlanAdded(new Set()); }}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-white rounded-t-3xl pb-8 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 bg-gray-200 rounded-full" /></div>
+            <div className="px-4 pt-2 pb-3">
+              <p className="text-sm font-bold text-gray-900">Saved to All Saved ✓</p>
+              <p className="text-xs text-gray-400 mt-0.5">Also add {colOwnerBookmarkSheet.name.split(',')[0].trim()} to a collection?</p>
+            </div>
+            {/* Collections */}
+            <div className="px-4 space-y-2 max-h-48 overflow-y-auto">
+              {colSaveUserCollections.map(col => {
+                const inCol = colOwnerBookmarkColIds.has(col.id);
+                const isSaving = colOwnerBookmarkColSaving.has(col.id);
+                return (
+                  <button
+                    key={col.id}
+                    disabled={isSaving}
+                    onClick={async () => {
+                      setColOwnerBookmarkColSaving(prev => new Set(prev).add(col.id));
+                      if (inCol) {
+                        await removePlaceFromCollection(col.id, colOwnerBookmarkSheet.id);
+                        setColOwnerBookmarkColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                      } else {
+                        await addPlaceToCollection(col.id, colOwnerBookmarkSheet.id, userId);
+                        setColOwnerBookmarkColIds(prev => new Set(prev).add(col.id));
+                      }
+                      setColOwnerBookmarkColSaving(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-2xl active:bg-gray-100 text-left"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                      {isSaving ? <Loader2 size={10} className="animate-spin text-white" /> : inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-4 pt-3">
+              <button
+                onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }}
+                className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2"
+              >
+                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Plus size={15} strokeWidth={2} className="text-gray-600" />
+                </div>
+                New collection
+              </button>
+            </div>
+            {/* ── Trips section ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-3 pb-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add to a trip</p>
+              {colOwnerBookmarkPlans.length === 0 && !colOwnerBookmarkShowNewTrip && (
+                <p className="text-xs text-gray-400 mb-2">No trips yet.</p>
+              )}
+              {colOwnerBookmarkPlans.length > 0 && (
+                <div className="space-y-2 max-h-44 overflow-y-auto mb-2">
+                  {colOwnerBookmarkPlans.map(plan => {
+                    const added = colOwnerBookmarkPlanAdded.has(plan.id);
+                    const adding = colOwnerBookmarkPlanAdding === plan.id;
+                    const place = colOwnerBookmarkSheet;
+                    return (
+                      <button
+                        key={plan.id}
+                        disabled={added || adding}
+                        onClick={async () => {
+                          setColOwnerBookmarkPlanAdding(plan.id);
+                          try {
+                            const existingBrainstorm = plan.days.find(d => d.label === 'Brainstorm');
+                            const day = existingBrainstorm ?? await createPlanDay(plan.id, 'Brainstorm', 0);
+                            if (day) {
+                              await createPlanItem(plan.id, day.id!, {
+                                name: place.name,
+                                category: place.category || '',
+                                image_url: place.photoUrl || '',
+                                time_label: '',
+                                address: [place.neighborhood, place.city, place.country].filter(Boolean).join(', '),
+                                neighborhood: place.neighborhood || '',
+                                position: day.items.length,
+                                lat: place.lat ?? null,
+                                lng: place.lng ?? null,
+                              });
+                              setColOwnerBookmarkPlanAdded(prev => new Set(prev).add(plan.id));
+                            }
+                          } finally {
+                            setColOwnerBookmarkPlanAdding(null);
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ${added ? 'bg-gray-900' : 'bg-gray-50 active:bg-gray-100'}`}
+                      >
+                        <div className="w-9 h-9 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
+                          {plan.coverImage ? <img src={plan.coverImage} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full flex items-center justify-center text-lg">✈️</div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${added ? 'text-white' : 'text-gray-900'}`}>{plan.destination}</p>
+                          {plan.country && <p className={`text-xs truncate ${added ? 'text-gray-300' : 'text-gray-400'}`}>{plan.country}</p>}
+                        </div>
+                        {adding && <Loader2 size={16} className="animate-spin text-gray-400 flex-shrink-0" />}
+                        {added && !adding && <svg width="16" height="16" viewBox="0 0 12 12" fill="none" className="flex-shrink-0"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        {!added && !adding && <Plus size={16} strokeWidth={2} className="text-gray-400 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {colOwnerBookmarkShowNewTrip ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={colOwnerBookmarkNewTripName}
+                    onChange={e => setColOwnerBookmarkNewTripName(e.target.value)}
+                    placeholder="Trip name…"
+                    className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none border border-gray-200 focus:border-gray-400"
+                    onKeyDown={async e => {
+                      if (e.key === 'Escape') { setColOwnerBookmarkShowNewTrip(false); setColOwnerBookmarkNewTripName(''); }
+                      if (e.key === 'Enter' && colOwnerBookmarkNewTripName.trim() && userId) {
+                        setColOwnerBookmarkCreatingTrip(true);
+                        const newPlan = await dbCreatePlan(userId, { title: colOwnerBookmarkNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                        if (newPlan) {
+                          const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                          setColOwnerBookmarkPlans(prev => [converted, ...prev]);
+                          setPlans(prev => [converted, ...prev]);
+                          setColOwnerBookmarkShowNewTrip(false);
+                          setColOwnerBookmarkNewTripName('');
+                        }
+                        setColOwnerBookmarkCreatingTrip(false);
+                      }
+                    }}
+                  />
+                  <button
+                    disabled={!colOwnerBookmarkNewTripName.trim() || colOwnerBookmarkCreatingTrip}
+                    onClick={async () => {
+                      if (!colOwnerBookmarkNewTripName.trim() || !userId) return;
+                      setColOwnerBookmarkCreatingTrip(true);
+                      const newPlan = await dbCreatePlan(userId, { title: colOwnerBookmarkNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                      if (newPlan) {
+                        const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                        setColOwnerBookmarkPlans(prev => [converted, ...prev]);
+                        setPlans(prev => [converted, ...prev]);
+                        setColOwnerBookmarkShowNewTrip(false);
+                        setColOwnerBookmarkNewTripName('');
+                      }
+                      setColOwnerBookmarkCreatingTrip(false);
+                    }}
+                    className="px-3 py-2 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                  >
+                    {colOwnerBookmarkCreatingTrip ? <Loader2 size={14} className="animate-spin" /> : 'Create'}
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setColOwnerBookmarkShowNewTrip(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                  New trip
+                </button>
+              )}
+            </div>
+            {/* ── Remove from Saved ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  if (!userId || !colOwnerBookmarkSheet) return;
+                  await unsavePlace(userId, colOwnerBookmarkSheet.id);
+                  setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(colOwnerBookmarkSheet.id); return n; });
+                  setRealSavedPlaces(prev => prev.filter(p => p.id !== colOwnerBookmarkSheet.id));
+                  setColOwnerBookmarkSheet(null);
+                  setColOwnerBookmarkColIds(new Set());
+                  setColOwnerBookmarkPlanAdded(new Set());
+                  setColOwnerBookmarkShowNewTrip(false);
+                  setColOwnerBookmarkNewTripName('');
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Collection Sheet */}
       {showEditColSheet && selectedRealCollection && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditColSheet(false)} />
-          <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10">
-            <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-            <button onClick={() => setShowEditColSheet(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-              <X size={15} strokeWidth={2} className="text-gray-500" />
-            </button>
-            <p className="text-sm font-bold text-gray-900 mb-4">Edit collection</p>
-            <input
-              value={editColName}
-              onChange={e => setEditColName(e.target.value)}
-              placeholder="Collection name"
-              className="w-full text-xl font-black text-gray-900 outline-none placeholder:text-gray-300 mb-3 bg-transparent border-b border-gray-100 pb-2"
-            />
-            <textarea
-              value={editColDesc}
-              onChange={e => setEditColDesc(e.target.value)}
-              placeholder="Description (optional)"
-              rows={2}
-              className="w-full text-sm text-gray-700 outline-none placeholder:text-gray-400 bg-gray-50 rounded-xl px-3 py-2.5 resize-none mb-4"
-            />
-            <button
-              disabled={editColSaving || !editColName.trim()}
-              onClick={async () => {
-                setEditColSaving(true);
-                await updateCollection(selectedRealCollection.id, { name: editColName.trim(), description: editColDesc.trim() });
-                const updated = { ...selectedRealCollection, name: editColName.trim(), description: editColDesc.trim() };
-                setSelectedRealCollection(updated);
-                setDbCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, name: editColName.trim(), description: editColDesc.trim() } : c));
-                setEditColSaving(false);
-                setShowEditColSheet(false);
-              }}
-              className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-semibold disabled:opacity-40"
-            >
-              {editColSaving ? 'Saving…' : 'Save changes'}
-            </button>
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-4">
+              <h3 className="text-base font-bold text-gray-900">Edit Collection</h3>
+              <button
+                disabled={editColSaving || !editColName.trim()}
+                onClick={async () => {
+                  setEditColSaving(true);
+                  const coverUrl = editColCoverUrl ?? selectedRealCollection.coverImageUrl ?? null;
+                  await updateCollection(selectedRealCollection.id, { name: editColName.trim(), description: editColDesc.trim(), cover_image_url: coverUrl });
+                  const updated = { ...selectedRealCollection, name: editColName.trim(), description: editColDesc.trim(), coverImageUrl: coverUrl };
+                  setSelectedRealCollection(updated);
+                  setDbCollections(prev => prev.map(c => c.id === selectedRealCollection.id ? { ...c, name: editColName.trim(), description: editColDesc.trim(), coverImageUrl: coverUrl } : c));
+                  setEditColSaving(false);
+                  setEditColCoverUrl(null);
+                  setShowEditColSheet(false);
+                }}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-40"
+              >{editColSaving ? 'Saving…' : 'Save'}</button>
+            </div>
+            <div className="px-4 space-y-4">
+              {/* Cover image */}
+              <label className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center relative cursor-pointer overflow-hidden">
+                <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                  const file = e.target.files?.[0]; if (!file || !userId) return;
+                  setEditColCoverUploading(true);
+                  const path = `collections/${userId}/${Date.now()}.${file.name.split('.').pop() ?? 'jpg'}`;
+                  const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                  if (!error) setEditColCoverUrl(getPublicUrl('avatars', path));
+                  setEditColCoverUploading(false);
+                  e.target.value = '';
+                }} />
+                {(editColCoverUrl ?? selectedRealCollection.coverImageUrl)
+                  ? <img src={editColCoverUrl ?? selectedRealCollection.coverImageUrl!} alt="" className="w-full h-full object-cover" />
+                  : editColCoverUploading
+                    ? <Loader2 size={20} className="text-gray-400 animate-spin" />
+                    : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Change cover photo</span></div>
+                }
+                {(editColCoverUrl ?? selectedRealCollection.coverImageUrl) && !editColCoverUploading && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">Change photo</span>
+                  </div>
+                )}
+              </label>
+              <input value={editColName} onChange={e => setEditColName(e.target.value)} placeholder="Collection name" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              <input value={editColDesc} onChange={e => setEditColDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              <button
+                onClick={async () => {
+                  setShowEditColSheet(false);
+                  await deleteCollection(selectedRealCollection.id);
+                  setDbCollections(prev => prev.filter(c => c.id !== selectedRealCollection.id));
+                  setSelectedRealCollection(null);
+                  setRealCollectionPlaces([]);
+                }}
+                className="w-full py-3 text-sm font-semibold text-red-500 bg-red-50 rounded-xl"
+              >Delete collection</button>
+            </div>
           </div>
         </div>
       )}
@@ -4868,7 +5546,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                 );
               })}
               {colInviteSearch.length > 0 && colInviteResults.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-4">No users found on curio</p>
+                <p className="text-sm text-gray-400 text-center py-4">No users found on sondrr</p>
               )}
             </div>
 
@@ -4877,9 +5555,9 @@ Return ONLY valid JSON, no markdown, no explanation:
               <button
                 onClick={async () => {
                   const url = `${window.location.origin}/collection/${selectedRealCollection?.id}`;
-                  const msg = `Join me on curio and collaborate on my collection! ${url}`;
+                  const msg = `Join me on sondrr and collaborate on my collection! ${url}`;
                   if (navigator.share) {
-                    try { await navigator.share({ url, title: 'Join my curio collection', text: msg }); } catch {}
+                    try { await navigator.share({ url, title: 'Join my sondrr collection', text: msg }); } catch {}
                   } else {
                     navigator.clipboard.writeText(msg).catch(() => {});
                   }
@@ -4891,9 +5569,282 @@ Return ONLY valid JSON, no markdown, no explanation:
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-semibold text-gray-900">Invite externally</p>
-                  <p className="text-xs text-gray-400">They'll need to create a curio account</p>
+                  <p className="text-xs text-gray-400">They'll need to create a sondrr account</p>
                 </div>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Collection Share Sheet */}
+      {showCollectionShareSheet && (
+        <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowCollectionShareSheet(false); setCollectionShareSearchQuery(''); setCollectionShareSearchResults([]); setCollectionShareSentTo(new Set()); }} />
+          <div className="relative bg-white rounded-t-3xl">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Send to</h3>
+              <button onClick={() => { setShowCollectionShareSheet(false); setCollectionShareSearchQuery(''); setCollectionShareSearchResults([]); setCollectionShareSentTo(new Set()); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={14} strokeWidth={2} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="px-5 pb-3">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3">
+                <Search size={14} className="text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={collectionShareSearchQuery}
+                  onChange={e => {
+                    const q = e.target.value;
+                    setCollectionShareSearchQuery(q);
+                    if (collectionShareSearchRef.current) clearTimeout(collectionShareSearchRef.current);
+                    if (!q.trim()) { setCollectionShareSearchResults([]); setSearchingCollectionShare(false); return; }
+                    setSearchingCollectionShare(true);
+                    collectionShareSearchRef.current = setTimeout(async () => {
+                      const results = await searchProfiles(q, userId ?? '');
+                      setCollectionShareSearchResults(results);
+                      setSearchingCollectionShare(false);
+                    }, 300);
+                  }}
+                  placeholder="Search people..."
+                  className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder-gray-400"
+                />
+                {searchingCollectionShare && <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin flex-shrink-0" />}
+              </div>
+            </div>
+            {(() => {
+              const showSearch = collectionShareSearchQuery.trim().length > 0;
+              const list = showSearch ? collectionShareSearchResults : savedPostConversations.map(c => ({ id: c.otherUser.id, name: c.otherUser.name, username: c.otherUser.username, avatarUrl: c.otherUser.avatarUrl }));
+              if (showSearch && collectionShareSearchResults.length === 0 && !searchingCollectionShare) {
+                return <p className="text-sm text-gray-400 text-center py-4 px-5">No users found</p>;
+              }
+              if (!showSearch && savedPostConversations.length === 0) return null;
+              return (
+                <div className="px-3 max-h-44 overflow-y-auto">
+                  {list.map(person => {
+                    const sent = collectionShareSentTo.has(person.id);
+                    const initials = person.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <button
+                        key={person.id}
+                        onClick={async () => {
+                          if (sent || !userId) return;
+                          const convId = await getOrCreateConversation(userId, person.id);
+                          if (convId) {
+                            const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                            await sendMessage(convId, userId, `Check out my collection "${selectedRealCollection.name}" on sondrr: ${url}`);
+                            setCollectionShareSentTo(prev => new Set(prev).add(person.id));
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 py-2.5 px-2 rounded-2xl active:bg-gray-50 text-left"
+                      >
+                        {person.avatarUrl
+                          ? <img src={person.avatarUrl} className="w-11 h-11 rounded-full object-cover object-top flex-shrink-0" />
+                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-500">{initials}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{person.name}</p>
+                          <p className="text-xs text-gray-400 truncate">@{person.username}</p>
+                        </div>
+                        <div className={`px-5 py-2 rounded-full text-xs font-bold flex-shrink-0 transition-colors ${sent ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}>
+                          {sent ? 'Sent ✓' : 'Send'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            <div className="mt-2 border-t border-gray-100 px-3 pb-10">
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={async () => {
+                  const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ url, title: selectedRealCollection.name }); } catch {}
+                  } else {
+                    navigator.clipboard.writeText(url).catch(() => {});
+                  }
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Send size={16} strokeWidth={1.5} className="text-gray-700" />
+                </div>
+                <span className="text-sm font-semibold text-gray-900">Share externally</span>
+              </button>
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/collection/${selectedRealCollection.id}`).catch(() => {});
+                  setCollectionShareLinkCopied(true);
+                  setTimeout(() => setCollectionShareLinkCopied(false), 1500);
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  {collectionShareLinkCopied ? <Check size={16} strokeWidth={2} className="text-green-500" /> : <Copy size={16} strokeWidth={1.5} className="text-gray-700" />}
+                </div>
+                <span className="text-sm font-semibold text-gray-900">{collectionShareLinkCopied ? 'Link copied!' : 'Copy link'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Collection Sheet (accessible from within collection detail) */}
+      {showNewCollection && (
+        <div className="fixed inset-0 z-[220] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewCollection(false)} />
+          <div className="relative bg-white rounded-t-3xl pb-10">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-3">
+              <h3 className="text-base font-bold text-gray-900">New Collection</h3>
+              <button
+                disabled={!newColName.trim() || newColSaving || newColCoverUploading}
+                onClick={async () => {
+                  if (!newColName.trim() || !userId) return;
+                  setNewColSaving(true);
+                  const { data } = await createCollection(userId, { name: newColName.trim(), emoji: newColEmoji || '', description: newColDesc.trim(), cover_image_url: newColCoverUrl });
+                  if (data) { setDbCollections(prev => [data, ...prev]); setColSaveUserCollections(prev => [data, ...prev]); }
+                  setNewColSaving(false);
+                  setNewColCoverUrl(null);
+                  setNewColEmoji('');
+                  setShowNewCollection(false);
+                }}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-40"
+              >
+                {newColSaving ? 'Saving…' : 'Create'}
+              </button>
+            </div>
+            <div className="px-4 space-y-3 pb-6">
+              {/* Cover image */}
+              <label className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center relative cursor-pointer overflow-hidden block">
+                <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                  const file = e.target.files?.[0]; if (!file || !userId) return;
+                  setNewColCoverUploading(true);
+                  const path = `collections/${userId}/${Date.now()}.${file.name.split('.').pop() ?? 'jpg'}`;
+                  const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                  if (!error) setNewColCoverUrl(getPublicUrl('avatars', path));
+                  setNewColCoverUploading(false);
+                  e.target.value = '';
+                }} />
+                {newColCoverUrl
+                  ? <img src={newColCoverUrl} className="w-full h-full object-cover" />
+                  : newColCoverUploading
+                    ? <Loader2 size={20} className="text-gray-400 animate-spin" />
+                    : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Add cover photo</span></div>
+                }
+                {newColCoverUrl && !newColCoverUploading && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">Change photo</span>
+                  </div>
+                )}
+              </label>
+              {/* Name */}
+              <input autoFocus value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="Collection name" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              {/* Description */}
+              <input value={newColDesc} onChange={e => setNewColDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Places Sheet */}
+      {showAddPlaces && (
+        <div className="fixed inset-0 z-[230] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/50" onClick={() => { setShowAddPlaces(false); setAddSearch(''); setAddCatFilter('all'); }} />
+          <div className="relative bg-white rounded-t-3xl max-h-[88vh] flex flex-col">
+            <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <button
+              onClick={() => { setShowAddPlaces(false); setAddSearch(''); setAddCatFilter('all'); }}
+              className="absolute top-3 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100"
+            >
+              <X size={15} strokeWidth={2} className="text-gray-600" />
+            </button>
+            <div className="px-4 pt-1 pb-3 flex-shrink-0 border-b border-gray-100">
+              <h3 className="text-base font-black text-gray-900 mb-3">Add places</h3>
+              <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+                <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={addSearch}
+                  onChange={e => setAddSearch(e.target.value)}
+                  placeholder="Search places..."
+                  className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
+                />
+              </div>
+              <div className="flex gap-2 overflow-x-auto scrollbar-none mt-2.5 -mx-4 px-4">
+                {['all','cafe','restaurant','hotel','attraction','bar','nature','shop','experience'].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setAddCatFilter(c)}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${addCatFilter === c ? 'bg-gray-900 border-gray-900 text-white' : 'bg-gray-50 border-gray-100 text-gray-500'}`}
+                  >
+                    {c === 'all' ? 'All' : c.charAt(0).toUpperCase() + c.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 px-4 py-3 pb-8">
+              {(() => {
+                const alreadyInCol = new Set(realCollectionPlaces.map(rp => rp.id));
+                const q = addSearch.toLowerCase();
+                const candidates = realSavedPlaces.filter(sp => {
+                  if (addCatFilter !== 'all' && sp.category !== addCatFilter) return false;
+                  if (q && !sp.name.toLowerCase().includes(q) && !(sp.city ?? '').toLowerCase().includes(q)) return false;
+                  return true;
+                });
+                if (!candidates.length) return (
+                  <p className="text-sm text-gray-400 text-center py-8">
+                    {realSavedPlaces.length === 0 ? 'Save some places first to add them here' : 'No places match'}
+                  </p>
+                );
+                return (
+                  <div className="space-y-2.5">
+                    {candidates.map(savedPlace => {
+                      const inCol = alreadyInCol.has(savedPlace.id);
+                      return (
+                        <div key={savedPlace.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
+                          {savedPlace.photoUrl
+                            ? <img src={savedPlace.photoUrl} alt={savedPlace.name} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                            : <div className="w-12 h-12 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 text-xl">{catEmoji(savedPlace.category)}</div>
+                          }
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{savedPlace.name}</p>
+                            <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-0.5">
+                              <MapPin size={9} strokeWidth={1.5} />
+                              {savedPlace.neighborhood ?? savedPlace.city} · {catEmoji(savedPlace.category)} {savedPlace.category}
+                            </p>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              if (!selectedRealCollection) return;
+                              if (inCol) {
+                                await removePlaceFromCollection(selectedRealCollection.id, savedPlace.id);
+                                setRealCollectionPlaces(prev => prev.filter(pl => pl.id !== savedPlace.id));
+                              } else {
+                                await addPlaceToCollection(selectedRealCollection.id, savedPlace.id);
+                                setRealCollectionPlaces(prev => [...prev, {
+                                  id: savedPlace.id, name: savedPlace.name, photoUrl: savedPlace.photoUrl,
+                                  category: savedPlace.category, city: savedPlace.city, country: savedPlace.country,
+                                  neighborhood: savedPlace.neighborhood, lat: savedPlace.lat, lng: savedPlace.lng,
+                                } as RealPostPlace]);
+                              }
+                            }}
+                            className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-green-500' : 'bg-gray-900'}`}
+                          >
+                            {inCol
+                              ? <Check size={12} strokeWidth={2.5} className="text-white" />
+                              : <Plus size={13} strokeWidth={2.5} className="text-white" />
+                            }
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -5094,79 +6045,6 @@ Return ONLY valid JSON, no markdown, no explanation:
 
       {/* Booking Sheet */}
       <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
-
-      {/* Add Places Sheet */}
-      {showAddPlaces && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/50" onClick={() => { setShowAddPlaces(false); setAddSearch(''); setAddCatFilter('all'); }} />
-          <div className="relative bg-white rounded-t-3xl max-h-[88vh] flex flex-col">
-            <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-gray-200" />
-            </div>
-            <button
-              onClick={() => { setShowAddPlaces(false); setAddSearch(''); setAddCatFilter('all'); }}
-              className="absolute top-3 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100"
-            >
-              <X size={15} strokeWidth={2} className="text-gray-600" />
-            </button>
-            <div className="px-4 pt-1 pb-3 flex-shrink-0 border-b border-gray-100">
-              <h3 className="text-base font-black text-gray-900 mb-3">Add places</h3>
-              <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
-                <Search size={14} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
-                <input
-                  autoFocus
-                  value={addSearch}
-                  onChange={e => setAddSearch(e.target.value)}
-                  placeholder="Search places..."
-                  className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder-gray-400"
-                />
-              </div>
-              <div className="flex gap-2 overflow-x-auto scrollbar-none mt-2.5 -mx-4 px-4">
-                {['all','cafe','restaurant','hotel','attraction','bar','nature','shop','experience'].map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setAddCatFilter(c)}
-                    className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${addCatFilter === c ? 'bg-gray-900 border-gray-900 text-white' : 'bg-gray-50 border-gray-100 text-gray-500'}`}
-                  >
-                    {c === 'all' ? 'All' : c.charAt(0).toUpperCase() + c.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="overflow-y-auto flex-1 px-4 py-3 pb-8">
-              {(() => {
-                const candidates: Place[] = [];
-                if (!candidates.length) return <p className="text-sm text-gray-400 text-center py-8">No places found</p>;
-                return (
-                  <div className="space-y-2.5">
-                    {candidates.map(p => (
-                      <div key={p.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3">
-                        <img src={p.image} alt={p.name} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{p.name}</p>
-                          <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-0.5">
-                            <MapPin size={9} strokeWidth={1.5} />
-                            {p.neighbourhood ?? p.city} · {categoryEmoji[p.category] ?? '📍'} {p.category}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setColAdditions(prev => ({
-                            ...prev,
-                            [selectedCollection!.id]: [...(prev[selectedCollection!.id] ?? []), p.id],
-                          }))}
-                          className="w-7 h-7 bg-gray-900 rounded-full flex items-center justify-center flex-shrink-0"
-                        >
-                          <Plus size={13} strokeWidth={2.5} className="text-white" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
       </>
     );
   }
@@ -5176,7 +6054,7 @@ Return ONLY valid JSON, no markdown, no explanation:
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white px-4 pt-5 pb-0 space-y-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-black text-gray-900 tracking-tight">curio</h1>
+          <SondrrLogo height={22} color="#0f172a" />
         </div>
 
         <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
@@ -5189,7 +6067,7 @@ Return ONLY valid JSON, no markdown, no explanation:
 
         {/* Tabs */}
         <div className="flex gap-6 border-b border-gray-100">
-          {([['Places', 'Saved'], ['Collections', 'Collections'], ['Subscribed', 'Subscribed'], ['Trips', 'My plans']] as [SavedTab, string][]).map(([tab, label]) => (
+          {([['Places', 'Saved'], ['Collections', 'Collections'], ['Guides', 'Guides'], ['Trips', 'My plans']] as [SavedTab, string][]).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -5238,10 +6116,7 @@ Return ONLY valid JSON, no markdown, no explanation:
           : dedupedPlaces;
         const byCountry: Record<string, SavedPlace[]> = {};
         filtered.forEach(p => { const c = p.country || 'Unknown'; if (!byCountry[c]) byCountry[c] = []; byCountry[c].push(p); });
-        const catEmoji = (cat: string) => {
-          const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
-          return m[cat?.toLowerCase()] ?? '📍';
-        };
+        const catEmoji = (cat: string) => CATEGORY_EMOJI[cat] ?? CATEGORY_EMOJI[cat?.toLowerCase()] ?? '📍';
         return (
         <div className="pb-10">
           {othersPlaces.length === 0 ? (
@@ -5289,10 +6164,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                   </div>
                   {/* Pin preview card */}
                   {savedMapPin && (() => {
-                    const catEmojiLocal = (cat: string) => {
-                      const m: Record<string, string> = { cafe: '☕', coffee: '☕', restaurant: '🍽️', bar: '🍸', hotel: '🏨', shop: '🛍️', shopping: '🛍️', attraction: '🏛️', museum: '🏛️', nature: '🌿', park: '🌿', experience: '✨', nightlife: '🌙' };
-                      return m[cat?.toLowerCase()] ?? '📍';
-                    };
+                    const catEmojiLocal = (cat: string) => CATEGORY_EMOJI[cat] ?? CATEGORY_EMOJI[cat?.toLowerCase()] ?? '📍';
                     return (
                       <div
                         className="absolute bottom-3 left-3 right-3 z-[500]"
@@ -5417,9 +6289,14 @@ Return ONLY valid JSON, no markdown, no explanation:
                               e.stopPropagation();
                               setAddToColPlace(pl);
                               setAddToColLoading(true);
+                              setAddToColPlanAdded(new Set());
+                              setAddToColPlanAdding(null);
+                              setAddToColShowNewTrip(false);
+                              setAddToColNewTripName('');
                               const ids = await getPlaceCollectionIds(pl.id);
                               setAddToColIds(ids);
                               setAddToColLoading(false);
+                              setAddToColPlans(plans.filter(p => !p.description?.includes('[event]')));
                             }}
                           >
                             <BookmarkPlus size={14} strokeWidth={1.8} className="text-gray-600" />
@@ -5517,7 +6394,10 @@ Return ONLY valid JSON, no markdown, no explanation:
                     >
                       <ArrowLeft size={17} strokeWidth={1.5} className="text-white" />
                     </button>
-                    <div className="flex items-center gap-1.5 bg-black/35 backdrop-blur-md rounded-full px-2 py-1.5 w-fit max-w-[65%] overflow-hidden">
+                    <button
+                      className="flex items-center gap-1.5 bg-black/35 backdrop-blur-md rounded-full px-2 py-1.5 w-fit max-w-[65%] overflow-hidden active:opacity-70"
+                      onClick={() => { if (selectedSavedPost.userId !== userId) setViewingUserId(selectedSavedPost.userId); }}
+                    >
                       {selectedSavedPost.profile.avatarUrl
                         ? <img src={selectedSavedPost.profile.avatarUrl} className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20 flex-shrink-0" alt="" />
                         : <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center ring-1 ring-white/20 flex-shrink-0"><span className="text-xs font-bold text-white">{selectedSavedPost.profile.name[0]?.toUpperCase()}</span></div>
@@ -5527,7 +6407,14 @@ Return ONLY valid JSON, no markdown, no explanation:
                           ? `${selectedSavedPost.profile.username || selectedSavedPost.profile.name} & ${selectedSavedPost.collaborators.map(c => c.username || c.name).join(', ')}`
                           : selectedSavedPost.profile.username || selectedSavedPost.profile.name}
                       </p>
-                    </div>
+                    </button>
+                    <div className="flex-1" />
+                    <button
+                      className="active:opacity-60 p-1"
+                      onClick={e => { e.stopPropagation(); setSavedPostOptionsStep('options'); setSavedPostOptionsReason(''); }}
+                    >
+                      <MoreHorizontal size={20} className="text-white" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -5554,6 +6441,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                 <button
                   onClick={async () => {
                     if (!userId) return;
+                    // Save all places if not already saved
                     for (const pl of selectedSavedPost.places) {
                       if (!realSavedPlaceIds.has(pl.id)) {
                         await savePlace(userId, pl.id);
@@ -5561,6 +6449,21 @@ Return ONLY valid JSON, no markdown, no explanation:
                         setRealSavedPlaces(prev => [...prev, { id: pl.id, postId: selectedSavedPost.id, name: pl.name, category: pl.category, neighborhood: pl.neighborhood ?? '', city: pl.city, country: pl.country ?? '', photoUrl: pl.photoUrl ?? '', lat: pl.lat ?? null, lng: pl.lng ?? null }]);
                       }
                     }
+                    // Load collections for the sheet (use first place's collection membership)
+                    const firstPlace = selectedSavedPost.places[0];
+                    const [cols, colIds] = await Promise.all([
+                      getUserCollections(userId),
+                      firstPlace ? getPlaceCollectionIds(firstPlace.id) : Promise.resolve(new Set<string>()),
+                    ]);
+                    setColSaveUserCollections(cols);
+                    setPostDetailSaveColIds(colIds);
+                    setPostDetailSaveColSaving(new Set());
+                    setPostDetailSavePlans(plans.filter(p => !p.description?.includes('[event]')));
+                    setPostDetailSavePlanAdded(new Set());
+                    setPostDetailSavePlanAdding(null);
+                    setPostDetailSaveShowNewTrip(false);
+                    setPostDetailSaveNewTripName('');
+                    setPostDetailSaveSheet(true);
                   }}
                 >
                   {selectedSavedPost.places.every(pl => realSavedPlaceIds.has(pl.id))
@@ -5568,6 +6471,113 @@ Return ONLY valid JSON, no markdown, no explanation:
                     : <Bookmark size={22} strokeWidth={1.5} className="text-gray-300" />}
                 </button>
               </div>
+
+              {/* ··· Options sheet for saved post */}
+              {savedPostOptionsStep && (
+                <div className="fixed inset-0 z-[120] flex flex-col justify-end" style={{ maxWidth: '390px', margin: '0 auto' }} onClick={() => setSavedPostOptionsStep(null)}>
+                  <div className="absolute inset-0 bg-black/40" />
+                  <div className="relative bg-white rounded-t-3xl pb-10" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-center pt-3 pb-2"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+
+                    {savedPostOptionsStep === 'options' && (
+                      <div className="px-2 pb-2">
+                        {selectedSavedPost.userId === userId ? (
+                          <>
+                            <button className="w-full flex items-center gap-3 py-4 px-5 rounded-xl active:bg-gray-50 text-left" onClick={() => setSavedPostOptionsStep('deleteConfirm')}>
+                              <Trash2 size={18} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                              <span className="text-sm text-gray-900">Delete post</span>
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="w-full flex items-center gap-3 py-4 px-5 rounded-xl active:bg-gray-50 text-left" onClick={() => setSavedPostOptionsStep('reason')}>
+                              <Flag size={18} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                              <span className="text-sm text-gray-900">Report</span>
+                              <ChevronRight size={16} strokeWidth={1.5} className="text-gray-400 ml-auto flex-shrink-0" />
+                            </button>
+                            <button className="w-full flex items-center gap-3 py-4 px-5 rounded-xl active:bg-gray-50 text-left" onClick={() => {
+                              const alreadyBlocked = savedBlockedUsers.has(selectedSavedPost.userId);
+                              setSavedPostOptionsStep(null);
+                              setSavedActionModal({
+                                avatarUrl: selectedSavedPost.profile.avatarUrl,
+                                title: alreadyBlocked ? `Unblock @${selectedSavedPost.profile.username || selectedSavedPost.profile.name}?` : `Block @${selectedSavedPost.profile.username || selectedSavedPost.profile.name}?`,
+                                subtitle: alreadyBlocked
+                                  ? 'They will be able to see your posts and find your profile again.'
+                                  : "They won't be able to find your profile or content.",
+                                confirmLabel: alreadyBlocked ? 'Unblock' : 'Block',
+                                confirmVariant: alreadyBlocked ? 'dark' : 'red',
+                                onConfirm: async () => {
+                                  if (!userId) return;
+                                  if (alreadyBlocked) {
+                                    await unblockUser(userId, selectedSavedPost.userId);
+                                    setSavedBlockedUsers(prev => { const s = new Set(prev); s.delete(selectedSavedPost.userId); return s; });
+                                  } else {
+                                    await blockUser(userId, selectedSavedPost.userId);
+                                    setSavedBlockedUsers(prev => new Set([...prev, selectedSavedPost.userId]));
+                                    setSelectedSavedPost(null);
+                                  }
+                                  setSavedActionModal(null);
+                                },
+                              });
+                            }}>
+                              <UserX size={18} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                              <span className="text-sm text-gray-900">{savedBlockedUsers.has(selectedSavedPost.userId) ? 'Unblock' : 'Block'} @{selectedSavedPost.profile.username || selectedSavedPost.profile.name}</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {savedPostOptionsStep === 'reason' && (
+                      <div className="px-2 pb-2">
+                        <div className="px-5 pb-3 border-b border-gray-100">
+                          <p className="text-base font-bold text-gray-900">Report</p>
+                          <p className="text-xs text-gray-400 mt-0.5">Why are you reporting this?</p>
+                        </div>
+                        <div className="py-1">
+                          {['Harassment or bullying', 'Hate speech', 'Nudity or sexual content', 'Violence or dangerous content', 'Spam', 'Misinformation', 'Intellectual property violation', "Doesn't belong here"].map(r => (
+                            <button key={r} className="w-full flex items-center justify-between px-5 py-4 active:bg-gray-50 text-left"
+                              onClick={async () => {
+                                if (!userId) return;
+                                await reportContent(userId, { postId: selectedSavedPost.id, userId: selectedSavedPost.userId, reason: r });
+                                setSavedPostOptionsStep(null);
+                                setSavedActionModal({
+                                  iconType: 'check',
+                                  title: 'Report submitted',
+                                  subtitle: "Thank you. We'll review this content and take action if it violates our guidelines.",
+                                });
+                              }}>
+                              <span className="text-sm text-gray-900">{r}</span>
+                              <ChevronRight size={16} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {savedPostOptionsStep === 'deleteConfirm' && (
+                      <div className="px-4 pb-2 flex flex-col items-center py-4">
+                        <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mb-4">
+                          <Trash2 size={28} className="text-red-500" />
+                        </div>
+                        <p className="font-semibold text-gray-900 text-lg mb-1">Delete this post?</p>
+                        <p className="text-sm text-gray-500 text-center mb-6">This can't be undone.</p>
+                        <button
+                          className="w-full py-3 rounded-xl bg-red-500 text-white font-semibold text-sm mb-2"
+                          onClick={async () => {
+                            if (!userId) return;
+                            await deletePost(selectedSavedPost.id);
+                            setSavedPostOptionsStep(null);
+                            setSelectedSavedPost(null);
+                          }}
+                        >Delete</button>
+                        <button className="w-full py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold text-sm" onClick={() => setSavedPostOptionsStep('options')}>Cancel</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Caption + hashtags */}
               {(selectedSavedPost.caption || selectedSavedPost.hashtags.length > 0) && (
                 <div className="px-5 pt-4 pb-4 border-b border-gray-100">
@@ -5651,7 +6661,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                   <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
                 )}
                 <div className="space-y-3 mb-4">
-                  {savedPostComments.map(c => (
+                  {savedPostComments.filter(c => !savedBlockedUsers.has(c.userId)).map(c => (
                     <div key={c.id} className="flex items-start gap-2.5">
                       {c.profile?.avatarUrl
                         ? <img src={c.profile.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
@@ -5761,7 +6771,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                                   const convId = await getOrCreateConversation(userId, person.id);
                                   if (convId) {
                                     const url = `${window.location.origin}/post/${selectedSavedPost.id}`;
-                                    await sendMessage(convId, userId, `Check this out on curio: ${url}`);
+                                    await sendMessage(convId, userId, `Check this out on sondrr: ${url}`);
                                     setSavedPostShareSentTo(prev => new Set(prev).add(person.id));
                                   }
                                 }}
@@ -5789,7 +6799,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                         onClick={async () => {
                           const url = `${window.location.origin}/post/${selectedSavedPost.id}`;
                           if (navigator.share) {
-                            try { await navigator.share({ url, title: 'Check this out on curio' }); } catch {}
+                            try { await navigator.share({ url, title: 'Check this out on sondrr' }); } catch {}
                           } else {
                             navigator.clipboard.writeText(url).catch(() => {});
                           }
@@ -5817,6 +6827,204 @@ Return ONLY valid JSON, no markdown, no explanation:
                   </div>
                 </div>
               )}
+              {/* Post detail bookmark / save sheet */}
+              {postDetailSaveSheet && userId && selectedSavedPost && (
+                <div className="fixed inset-0 z-[420] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }} onClick={() => { setPostDetailSaveSheet(false); setPostDetailSaveColIds(new Set()); setPostDetailSaveColSaving(new Set()); setPostDetailSaveShowNewTrip(false); setPostDetailSaveNewTripName(''); setPostDetailSavePlanAdded(new Set()); }}>
+                  <div className="absolute inset-0 bg-black/50" />
+                  <div className="relative bg-white rounded-t-3xl pb-8 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 bg-gray-200 rounded-full" /></div>
+                    <div className="px-4 pt-2 pb-3">
+                      <p className="text-sm font-bold text-gray-900">Saved to All Saved ✓</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Also add {selectedSavedPost.places.length > 0 ? selectedSavedPost.places[0].name.split(',')[0].trim() : 'these places'} to a collection?</p>
+                    </div>
+                    {/* Collections list — keyed to first place */}
+                    <div className="px-4 space-y-2 max-h-48 overflow-y-auto">
+                      {colSaveUserCollections.map(col => {
+                        const inCol = postDetailSaveColIds.has(col.id);
+                        const isSaving = postDetailSaveColSaving.has(col.id);
+                        const firstPlace = selectedSavedPost.places[0];
+                        return (
+                          <button
+                            key={col.id}
+                            disabled={isSaving}
+                            onClick={async () => {
+                              if (!firstPlace) return;
+                              setPostDetailSaveColSaving(prev => new Set(prev).add(col.id));
+                              if (inCol) {
+                                await removePlaceFromCollection(col.id, firstPlace.id);
+                                setPostDetailSaveColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                              } else {
+                                // Add all places in the post to this collection
+                                await Promise.all(selectedSavedPost.places.map(pl => addPlaceToCollection(col.id, pl.id, userId)));
+                                setPostDetailSaveColIds(prev => new Set(prev).add(col.id));
+                              }
+                              setPostDetailSaveColSaving(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-2xl active:bg-gray-100 text-left"
+                          >
+                            <div className="w-11 h-11 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                              {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                              <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                            </div>
+                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                              {isSaving ? <Loader2 size={10} className="animate-spin text-white" /> : inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="px-4 pt-3">
+                      <button
+                        onClick={() => { setNewColName(''); setNewColEmoji(''); setNewColDesc(''); setShowNewCollection(true); }}
+                        className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                          <Plus size={15} strokeWidth={2} className="text-gray-600" />
+                        </div>
+                        New collection
+                      </button>
+                    </div>
+                    {/* ── Trips section ── */}
+                    <div className="mx-4 border-t border-gray-100 mt-1" />
+                    <div className="px-4 pt-3 pb-1">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add to a trip</p>
+                      {postDetailSavePlans.length === 0 && !postDetailSaveShowNewTrip && (
+                        <p className="text-xs text-gray-400 mb-2">No trips yet.</p>
+                      )}
+                      {postDetailSavePlans.length > 0 && (
+                        <div className="space-y-2 max-h-44 overflow-y-auto mb-2">
+                          {postDetailSavePlans.map(plan => {
+                            const added = postDetailSavePlanAdded.has(plan.id);
+                            const adding = postDetailSavePlanAdding === plan.id;
+                            return (
+                              <button
+                                key={plan.id}
+                                disabled={added || adding}
+                                onClick={async () => {
+                                  setPostDetailSavePlanAdding(plan.id);
+                                  try {
+                                    const existingBrainstorm = plan.days.find(d => d.label === 'Brainstorm');
+                                    const day = existingBrainstorm ?? await createPlanDay(plan.id, 'Brainstorm', 0);
+                                    if (day) {
+                                      // Add all places in the post
+                                      for (const pl of selectedSavedPost.places) {
+                                        await createPlanItem(plan.id, day.id!, {
+                                          name: pl.name,
+                                          category: pl.category || '',
+                                          image_url: pl.photoUrl || '',
+                                          time_label: '',
+                                          address: [pl.neighborhood, pl.city, pl.country].filter(Boolean).join(', '),
+                                          neighborhood: pl.neighborhood || '',
+                                          position: day.items.length,
+                                          lat: pl.lat ?? null,
+                                          lng: pl.lng ?? null,
+                                        });
+                                      }
+                                      setPostDetailSavePlanAdded(prev => new Set(prev).add(plan.id));
+                                    }
+                                  } finally {
+                                    setPostDetailSavePlanAdding(null);
+                                  }
+                                }}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ${added ? 'bg-gray-900' : 'bg-gray-50 active:bg-gray-100'}`}
+                              >
+                                <div className="w-9 h-9 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
+                                  {plan.coverImage ? <img src={plan.coverImage} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full flex items-center justify-center text-lg">✈️</div>}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-sm font-semibold truncate ${added ? 'text-white' : 'text-gray-900'}`}>{plan.destination}</p>
+                                  {plan.country && <p className={`text-xs truncate ${added ? 'text-gray-300' : 'text-gray-400'}`}>{plan.country}</p>}
+                                </div>
+                                {adding && <Loader2 size={16} className="animate-spin text-gray-400 flex-shrink-0" />}
+                                {added && !adding && <svg width="16" height="16" viewBox="0 0 12 12" fill="none" className="flex-shrink-0"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                {!added && !adding && <Plus size={16} strokeWidth={2} className="text-gray-400 flex-shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {postDetailSaveShowNewTrip ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            value={postDetailSaveNewTripName}
+                            onChange={e => setPostDetailSaveNewTripName(e.target.value)}
+                            placeholder="Trip name…"
+                            className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none border border-gray-200 focus:border-gray-400"
+                            onKeyDown={async e => {
+                              if (e.key === 'Escape') { setPostDetailSaveShowNewTrip(false); setPostDetailSaveNewTripName(''); }
+                              if (e.key === 'Enter' && postDetailSaveNewTripName.trim() && userId) {
+                                setPostDetailSaveCreatingTrip(true);
+                                const newPlan = await dbCreatePlan(userId, { title: postDetailSaveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                                if (newPlan) {
+                                  const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                                  setPostDetailSavePlans(prev => [converted, ...prev]);
+                                  setPlans(prev => [converted, ...prev]);
+                                  setPostDetailSaveShowNewTrip(false);
+                                  setPostDetailSaveNewTripName('');
+                                }
+                                setPostDetailSaveCreatingTrip(false);
+                              }
+                            }}
+                          />
+                          <button
+                            disabled={!postDetailSaveNewTripName.trim() || postDetailSaveCreatingTrip}
+                            onClick={async () => {
+                              if (!postDetailSaveNewTripName.trim() || !userId) return;
+                              setPostDetailSaveCreatingTrip(true);
+                              const newPlan = await dbCreatePlan(userId, { title: postDetailSaveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                              if (newPlan) {
+                                const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                                setPostDetailSavePlans(prev => [converted, ...prev]);
+                                setPlans(prev => [converted, ...prev]);
+                                setPostDetailSaveShowNewTrip(false);
+                                setPostDetailSaveNewTripName('');
+                              }
+                              setPostDetailSaveCreatingTrip(false);
+                            }}
+                            className="px-3 py-2 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                          >
+                            {postDetailSaveCreatingTrip ? <Loader2 size={14} className="animate-spin" /> : 'Create'}
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setPostDetailSaveShowNewTrip(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                          New trip
+                        </button>
+                      )}
+                    </div>
+                    {/* ── Remove from Saved ── */}
+                    <div className="mx-4 border-t border-gray-100 mt-1" />
+                    <div className="px-4 pt-2 pb-2">
+                      <button
+                        onClick={async () => {
+                          if (!userId) return;
+                          for (const pl of selectedSavedPost.places) {
+                            await unsavePlace(userId, pl.id);
+                            setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(pl.id); return n; });
+                            setRealSavedPlaces(prev => prev.filter(p => p.id !== pl.id));
+                          }
+                          setPostDetailSaveSheet(false);
+                          setPostDetailSaveColIds(new Set());
+                          setPostDetailSavePlanAdded(new Set());
+                          setPostDetailSaveShowNewTrip(false);
+                          setPostDetailSaveNewTripName('');
+                        }}
+                        className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                          <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                        </div>
+                        Remove from Saved
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -5824,7 +7032,7 @@ Return ONLY valid JSON, no markdown, no explanation:
       })()}
       {activeTab === 'Places' && !userId && (
         <div className="pb-6">
-          {isNewUser && savedPlaces.length === 0 && (
+          {savedPlaces.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 px-6">
               <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
                 <span className="text-3xl">🔖</span>
@@ -5857,7 +7065,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             const filtered = placeCategory === 'all'
               ? savedPlaces
               : savedPlaces.filter(p => p.category === placeCategory);
-            return filtered.length === 0 && !(isNewUser && savedPlaces.length === 0) ? (
+            return filtered.length === 0 && savedPlaces.length > 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center px-8">
                 <p className="text-4xl mb-3">{placeCategories.find(c => c.id === placeCategory)?.emoji ?? '🔖'}</p>
                 <p className="text-base font-bold text-gray-900">{placeCategory === 'all' ? 'No saved places' : `No saved ${placeCategories.find(c => c.id === placeCategory)?.label.toLowerCase()}s`}</p>
@@ -5882,7 +7090,7 @@ Return ONLY valid JSON, no markdown, no explanation:
 
       {/* Collections Tab */}
       {activeTab === 'Collections' && (
-        isNewUser && myCollections.length === 0 && dbCollections.length === 0 && dbSubscribedCollections.length === 0 ? (
+        myCollections.length === 0 && dbCollections.length === 0 && dbSubscribedCollections.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
               <span className="text-3xl">🗂️</span>
@@ -5905,7 +7113,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-5">
               {dbCollections.map(col => (
-                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
+                <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setCollectionOwnerProfile(null); setRealCollectionPlaces([]); setRealCollectionGuides([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); getCollectionGuides(col.id).then(setRealCollectionGuides); supabase.from('profiles').select('name, username, avatar_url').eq('id', col.userId).single().then(({ data: op }) => { if (op) setCollectionOwnerProfile({ name: op.name ?? '', username: op.username ?? '', avatarUrl: op.avatar_url ?? null }); }); }}>
                   <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
                     {col.coverImageUrl ? (
                       <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
@@ -5925,66 +7133,101 @@ Return ONLY valid JSON, no markdown, no explanation:
       )}
 
       {/* Subscribed Tab */}
-      {activeTab === 'Subscribed' && (
-        <div className="px-4 pt-4 pb-6 space-y-6">
-          {dbSubscribedCollections.length === 0 && subscribedGuides.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6">
-              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-                <span className="text-3xl">🔭</span>
-              </div>
-              <p className="text-slate-800 font-semibold text-base mb-1.5">Nothing yet</p>
-              <p className="text-slate-400 text-sm text-center max-w-[220px]">Follow collections and guides from creators you love and they'll appear here</p>
-            </div>
-          ) : (
-            <>
-              {/* Collections */}
-              {dbSubscribedCollections.length > 0 && (
-                <div>
-                  <p className="text-sm font-bold text-gray-900 mb-3">Collections</p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-                    {dbSubscribedCollections.map(col => (
-                      <div key={col.id} className="cursor-pointer" onClick={() => { setSelectedRealCollection(col); setRealCollectionPlaces([]); setLoadingRealCollectionPlaces(true); setRealColCollaborators([]); getCollectionCollaborators(col.id).then(collabs => setRealColCollaborators(collabs)); getCollectionPlaces(col.id).then(async p => { const geocoded = await geocodeMissingPlaces(p, GOOGLE_PLACES_KEY); const seen = new Set<string>(); setRealCollectionPlaces(geocoded.filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })); setLoadingRealCollectionPlaces(false); }); }}>
-                        <div className="rounded-xl overflow-hidden aspect-square relative bg-gray-100">
-                          {col.coverImageUrl
-                            ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
-                            : <div className="w-full h-full flex items-center justify-center text-4xl">{col.emoji || '🗂️'}</div>
-                          }
-                        </div>
-                        <p className="text-sm font-semibold text-gray-900 mt-2">{col.name}</p>
-                        <p className="text-xs text-gray-400">{col.placesCount} places</p>
-                      </div>
-                    ))}
-                  </div>
+      {activeTab === 'Guides' && (() => {
+        const allFormats = Array.from(new Set(subscribedGuides.map(g => g.format === 'itinerary' ? 'Itinerary' : 'Guide')));
+        const allDestinations = Array.from(new Set(subscribedGuides.map(g => g.destination).filter(Boolean))) as string[];
+        const chips = ['All', ...allFormats, ...allDestinations];
+        const filtered = savedGuidesFilter === 'All' || !savedGuidesFilter
+          ? subscribedGuides
+          : subscribedGuides.filter(g =>
+              g.destination === savedGuidesFilter ||
+              (savedGuidesFilter === 'Itinerary' && g.format === 'itinerary') ||
+              (savedGuidesFilter === 'Guide' && g.format !== 'itinerary')
+            );
+        return (
+          <div className="pb-6">
+            {subscribedGuides.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6">
+                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                  <span className="text-3xl">📖</span>
                 </div>
-              )}
-
-              {/* Guides */}
-              {subscribedGuides.length > 0 && (
-                <div>
-                  <p className="text-sm font-bold text-gray-900 mb-3">Guides</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {subscribedGuides.map(guide => (
-                      <button key={guide.id} className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform aspect-square bg-gray-200">
-                        {guide.coverUrl
-                          ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
-                          : <div className="absolute inset-0 bg-gradient-to-br from-gray-300 to-gray-400" />
-                        }
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                        <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                          <p className="text-xs font-bold text-white leading-tight">{guide.title}</p>
-                          <p className="text-[10px] text-white/60 mt-0.5">
-                            {[guide.destination, `${guide.places?.length ?? 0} places`].filter(Boolean).join(' · ')}
-                          </p>
-                        </div>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">No saved guides yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[220px]">Tap the bookmark on any guide or itinerary to save it here</p>
+              </div>
+            ) : (
+              <>
+                {/* Destination / format chips */}
+                {chips.length > 1 && (
+                  <div className="flex gap-2 px-4 pt-4 pb-3 overflow-x-auto scrollbar-hide">
+                    {chips.map(chip => (
+                      <button
+                        key={chip}
+                        onClick={() => setSavedGuidesFilter(chip === savedGuidesFilter ? 'All' : chip)}
+                        className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                          (chip === 'All' && (!savedGuidesFilter || savedGuidesFilter === 'All')) || chip === savedGuidesFilter
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-600 border-gray-200'
+                        }`}
+                      >
+                        {chip}
                       </button>
                     ))}
                   </div>
+                )}
+                {/* Guide grid */}
+                <div className="px-4 grid grid-cols-2 gap-3">
+                  {filtered.map(guide => (
+                    <button
+                      key={guide.id}
+                      className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform bg-gray-200"
+                      style={{ aspectRatio: '3/4' }}
+                      onClick={() => setSelectedGuide(guide)}
+                    >
+                      {guide.coverUrl
+                        ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                        : <div className="absolute inset-0 bg-gradient-to-br from-gray-300 to-gray-400" />}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                      <div className="absolute top-2.5 left-2.5">
+                        <span className="text-[10px] font-semibold text-white bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full">
+                          {guide.format === 'itinerary' ? 'Itinerary' : 'Guide'}
+                        </span>
+                      </div>
+                      <button
+                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center active:scale-90 transition-transform z-10"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!userId) return;
+                          setSavedGuideColLoading(true);
+                          if (!savedSubscribedGuideIds.has(guide.id)) {
+                            subscribeToGuide(userId, guide.id);
+                            setSavedSubscribedGuideIds(prev => new Set(prev).add(guide.id));
+                          }
+                          const ids = await getGuideCollectionIds(guide.id, userId);
+                          setSavedGuideColIds(ids);
+                          setSavedGuideColSheet(guide);
+                          setSavedGuideColLoading(false);
+                        }}
+                      >
+                        {savedGuideColLoading && savedGuideColSheet?.id === guide.id
+                          ? <Loader2 size={14} strokeWidth={1.5} className="animate-spin text-white" />
+                          : savedSubscribedGuideIds.has(guide.id)
+                            ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                            : <Bookmark size={14} strokeWidth={1.5} className="text-white" />}
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 p-3">
+                        <p className="text-white font-bold text-sm leading-tight line-clamp-2">{guide.title}</p>
+                        <p className="text-white/65 text-[11px] mt-1 truncate">
+                          {[guide.destination, guide.places?.length ? `${guide.places.length} places` : null].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Trips Tab */}
       {activeTab === 'Trips' && (
@@ -5993,7 +7236,7 @@ Return ONLY valid JSON, no markdown, no explanation:
             {[1,2,3].map(i => <div key={i} className="h-24 rounded-2xl bg-gray-100 animate-pulse" />)}
           </div>
         ) :
-        isNewUser && plans.length === 0 ? (
+        plans.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-6">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
               <span className="text-3xl">✈️</span>
@@ -6161,57 +7404,58 @@ Return ONLY valid JSON, no markdown, no explanation:
 
       {/* New Collection Sheet */}
       {showNewCollection && (
-        <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+        <div className="fixed inset-0 z-[220] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewCollection(false)} />
-          <div className="relative bg-white rounded-t-3xl px-5 pt-4 pb-10">
-            <div className="flex justify-center mb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-            <button onClick={() => setShowNewCollection(false)} className="absolute top-4 right-5 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-              <X size={15} strokeWidth={2} className="text-gray-500" />
-            </button>
-            <p className="text-sm font-bold text-gray-900 mb-4">New Collection</p>
-            {/* Emoji + Name row */}
-            <div className="flex gap-3 mb-4">
-              <input
-                value={newColEmoji}
-                onChange={e => setNewColEmoji(e.target.value)}
-                placeholder="🗂️"
-                className="w-14 h-14 bg-gray-50 rounded-2xl text-2xl text-center outline-none"
-                maxLength={2}
-              />
-              <input
-                autoFocus
-                value={newColName}
-                onChange={e => setNewColName(e.target.value)}
-                placeholder="Collection name"
-                className="flex-1 bg-gray-50 rounded-2xl px-4 py-3 text-sm font-semibold text-gray-900 outline-none placeholder:text-gray-400 placeholder:font-normal"
-              />
+          <div className="relative bg-white rounded-t-3xl pb-10">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-3">
+              <h3 className="text-base font-bold text-gray-900">New Collection</h3>
+              <button
+                disabled={!newColName.trim() || newColSaving || newColCoverUploading}
+                onClick={async () => {
+                  if (!newColName.trim() || !userId) return;
+                  setNewColSaving(true);
+                  const { data } = await createCollection(userId, { name: newColName.trim(), emoji: newColEmoji || '', description: newColDesc.trim(), cover_image_url: newColCoverUrl });
+                  if (data) { setDbCollections(prev => [data, ...prev]); setColSaveUserCollections(prev => [data, ...prev]); }
+                  setNewColSaving(false);
+                  setNewColCoverUrl(null);
+                  setNewColEmoji('');
+                  setShowNewCollection(false);
+                }}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-40"
+              >
+                {newColSaving ? 'Saving…' : 'Create'}
+              </button>
             </div>
-            {/* Description */}
-            <textarea
-              value={newColDesc}
-              onChange={e => setNewColDesc(e.target.value)}
-              placeholder="Description (optional)"
-              rows={2}
-              className="w-full bg-gray-50 rounded-2xl px-4 py-3 text-sm text-gray-700 outline-none resize-none placeholder:text-gray-400 mb-5"
-            />
-            <button
-              disabled={!newColName.trim() || newColSaving}
-              onClick={async () => {
-                if (!newColName.trim() || !userId) return;
-                setNewColSaving(true);
-                const { data } = await createCollection(userId, {
-                  name: newColName.trim(),
-                  emoji: newColEmoji || '🗂️',
-                  description: newColDesc.trim(),
-                });
-                if (data) setDbCollections(prev => [data, ...prev]);
-                setNewColSaving(false);
-                setShowNewCollection(false);
-              }}
-              className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold disabled:opacity-40"
-            >
-              {newColSaving ? 'Creating…' : 'Create collection'}
-            </button>
+            <div className="px-4 space-y-3 pb-6">
+              {/* Cover image */}
+              <label className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center relative cursor-pointer overflow-hidden block">
+                <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                  const file = e.target.files?.[0]; if (!file || !userId) return;
+                  setNewColCoverUploading(true);
+                  const path = `collections/${userId}/${Date.now()}.${file.name.split('.').pop() ?? 'jpg'}`;
+                  const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                  if (!error) setNewColCoverUrl(getPublicUrl('avatars', path));
+                  setNewColCoverUploading(false);
+                  e.target.value = '';
+                }} />
+                {newColCoverUrl
+                  ? <img src={newColCoverUrl} className="w-full h-full object-cover" />
+                  : newColCoverUploading
+                    ? <Loader2 size={20} className="text-gray-400 animate-spin" />
+                    : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Add cover photo</span></div>
+                }
+                {newColCoverUrl && !newColCoverUploading && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">Change photo</span>
+                  </div>
+                )}
+              </label>
+              {/* Name */}
+              <input autoFocus value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="Collection name" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              {/* Description */}
+              <input value={newColDesc} onChange={e => setNewColDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+            </div>
           </div>
         </div>
       )}
@@ -6381,18 +7625,12 @@ Return ONLY valid JSON, no markdown, no explanation:
                   const query = val.trim();
                   coverImageTimerRef.current = setTimeout(async () => {
                     try {
-                      const acRes = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-                        body: JSON.stringify({ input: query, languageCode: 'en' }),
-                      });
-                      const acData = await acRes.json();
+                      const acData = await gAutocomplete({ input: query, languageCode: 'en', sessionToken: coverImageSessionTokenRef.current });
                       const placeId = acData?.suggestions?.[0]?.placePrediction?.placeId;
                       if (placeId) {
-                        const detRes = await fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=photos`, {
-                          headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'photos' },
-                        });
-                        const detData = await detRes.json();
+                        const coverToken = coverImageSessionTokenRef.current;
+                        coverImageSessionTokenRef.current = crypto.randomUUID();
+                        const detData = await gPlaceDetails(placeId, 'photos', coverToken, TTL.PHOTOS);
                         const photoName = detData?.photos?.[0]?.name;
                         if (photoName) {
                           setNewPlanCoverImage(`https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_PLACES_KEY}`);
@@ -6494,12 +7732,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                             setNewEventAddressLoading(true);
                             newEventAddressTimerRef.current = setTimeout(async () => {
                               try {
-                                const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_PLACES_KEY },
-                                  body: JSON.stringify({ input: val.trim(), languageCode: 'en' }),
-                                });
-                                const data = await res.json();
+                                const data = await gAutocomplete({ input: val.trim(), languageCode: 'en', sessionToken: newEventAddressSessionTokenRef.current });
                                 setNewEventAddressSuggestions((data.suggestions ?? []).slice(0, 4).map((s: { placePrediction: { placeId: string; text: { text: string } } }) => ({ placeId: s.placePrediction.placeId, label: s.placePrediction.text.text })));
                               } catch { setNewEventAddressSuggestions([]); }
                               setNewEventAddressLoading(false);
@@ -6519,11 +7752,10 @@ Return ONLY valid JSON, no markdown, no explanation:
                           <button key={s.placeId} onClick={async () => {
                             setNewEventAddress(s.label);
                             setNewEventAddressSuggestions([]);
+                            const eventToken = newEventAddressSessionTokenRef.current;
+                            newEventAddressSessionTokenRef.current = crypto.randomUUID();
                             try {
-                              const res = await fetch(`https://places.googleapis.com/v1/places/${s.placeId}`, {
-                                headers: { 'X-Goog-Api-Key': GOOGLE_PLACES_KEY, 'X-Goog-FieldMask': 'addressComponents,photos', 'X-Goog-LanguageCode': 'en' },
-                              });
-                              const data = await res.json();
+                              const data = await gPlaceDetails(s.placeId, 'addressComponents,photos', eventToken, TTL.PHOTOS);
                               const nbhdText = extractNeighborhood(data.addressComponents ?? [], data.formattedAddress);
                               if (nbhdText) setNewEventNeighborhood(nbhdText);
                               const photoName = data.photos?.[0]?.name;
@@ -6653,6 +7885,138 @@ Return ONLY valid JSON, no markdown, no explanation:
               </div>
             )}
 
+            {/* Import from collection — trips only, destination-matched */}
+            {(() => {
+              const dest = (newPlanName + ' ' + newPlanLocation).toLowerCase().trim();
+              const destWords = dest.split(/\s+/).filter(w => w.length > 2);
+              const matchedCols = destWords.length === 0 ? [] : dbCollections.filter(col => {
+                const colName = col.name.toLowerCase();
+                return destWords.some(w => colName.includes(w)) || destWords.some(w => col.name.toLowerCase().split(/\s+/).some(cw => cw.includes(w)));
+              });
+              if (newPlanType !== 'trip' || matchedCols.length === 0) return null;
+              return (
+              <div className="mb-5">
+                <p className="text-sm font-semibold text-gray-900 mb-1">Import inspiration from a collection?</p>
+                <p className="text-xs text-gray-400 mb-3">Places will be added to your plan as brainstorm items.</p>
+                <div className="space-y-2 max-h-44 overflow-y-auto">
+                  {matchedCols.map(col => {
+                    const selected = newPlanImportCollection?.id === col.id;
+                    return (
+                      <div key={col.id} className="contents">
+                      <button
+                        onClick={async () => {
+                          if (selected) {
+                            setNewPlanImportCollection(null);
+                            setNewPlanImportPlaces([]);
+                            setNewPlanImportSelectedIds(new Set());
+                          } else {
+                            setNewPlanImportCollection(col);
+                            setLoadingImportPlaces(true);
+                            const places = await getCollectionPlaces(col.id);
+                            setNewPlanImportPlaces(places);
+                            setNewPlanImportSelectedIds(new Set(places.map(p => p.id)));
+                            setLoadingImportPlaces(false);
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 bg-gray-50 rounded-2xl text-left active:bg-gray-100"
+                      >
+                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                          {col.coverImageUrl
+                            ? <img src={col.coverImageUrl} className="w-full h-full object-cover" alt="" />
+                            : <span className="text-lg">{col.emoji || '🗂️'}</span>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                          <p className="text-xs text-gray-400">{col.placesCount} places</p>
+                        </div>
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${selected ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                          {selected && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        </div>
+                      </button>
+
+                      {/* Place checklist — shown when this collection is selected */}
+                      {selected && (
+                        <div className="ml-3 mt-1 mb-2 bg-gray-50 rounded-2xl overflow-hidden border border-gray-100">
+                          {loadingImportPlaces ? (
+                            <div className="flex items-center justify-center py-5 gap-2">
+                              <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                              <span className="text-xs text-gray-400">Loading places…</span>
+                            </div>
+                          ) : newPlanImportPlaces.length === 0 ? (
+                            <p className="text-xs text-gray-400 px-4 py-3">No places in this collection yet.</p>
+                          ) : (
+                            <>
+                              {/* Select all / deselect all */}
+                              <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+                                <span className="text-xs text-gray-500 font-medium">{newPlanImportSelectedIds.size} of {newPlanImportPlaces.length} selected</span>
+                                <button
+                                  onClick={() => {
+                                    if (newPlanImportSelectedIds.size === newPlanImportPlaces.length) {
+                                      setNewPlanImportSelectedIds(new Set());
+                                    } else {
+                                      setNewPlanImportSelectedIds(new Set(newPlanImportPlaces.map(p => p.id)));
+                                    }
+                                  }}
+                                  className="text-xs font-semibold text-gray-900"
+                                >
+                                  {newPlanImportSelectedIds.size === newPlanImportPlaces.length ? 'Deselect all' : 'Select all'}
+                                </button>
+                              </div>
+                              {newPlanImportPlaces.map(place => {
+                                const checked = newPlanImportSelectedIds.has(place.id);
+                                return (
+                                  <button
+                                    key={place.id}
+                                    onClick={() => {
+                                      setNewPlanImportSelectedIds(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(place.id)) next.delete(place.id);
+                                        else next.add(place.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left border-b border-gray-100 last:border-0 active:bg-gray-100"
+                                  >
+                                    <div className="w-8 h-8 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
+                                      {place.photoUrl
+                                        ? <img src={place.photoUrl} className="w-full h-full object-cover" alt="" />
+                                        : <div className="w-full h-full flex items-center justify-center text-base">{place.category === 'restaurant' ? '🍽️' : place.category === 'cafe' ? '☕' : place.category === 'hotel' ? '🏨' : place.category === 'attraction' ? '🎡' : '📍'}</div>
+                                      }
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-semibold text-gray-900 truncate">{place.name}</p>
+                                      {(place.neighborhood || place.city) && (
+                                        <p className="text-xs text-gray-400 truncate">{[place.neighborhood, place.city].filter(Boolean).join(', ')}</p>
+                                      )}
+                                    </div>
+                                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                                      {checked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </>
+                          )}
+                        </div>
+                      )}
+                      </div>
+                    );
+                  })}
+                  <button
+                    onClick={() => {
+                      setNewPlanImportCollection(null);
+                      setNewPlanImportPlaces([]);
+                      setNewPlanImportSelectedIds(new Set());
+                    }}
+                    className={`w-full text-left px-3 py-2.5 rounded-2xl text-sm transition-colors ${!newPlanImportCollection ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-400'}`}
+                  >
+                    Skip — start fresh
+                  </button>
+                </div>
+              </div>
+              );
+            })()}
+
             <button
               onClick={async () => {
                 if (!newPlanName.trim()) return;
@@ -6684,11 +8048,45 @@ Return ONLY valid JSON, no markdown, no explanation:
                 } else {
                   newPlan = { id: `plan-${Date.now()}`, destination: newPlanName.trim(), country: location, dates, coverImage, status, days: [] };
                 }
+                // Import selected places from collection into a Brainstorm day
+                if (newPlanImportCollection && userId && newPlan.id && !newPlan.id.startsWith('plan-')) {
+                  // Use already-loaded places if available, otherwise fetch
+                  const colPlaces = newPlanImportPlaces.length > 0
+                    ? newPlanImportPlaces
+                    : await getCollectionPlaces(newPlanImportCollection.id);
+                  // Filter to only user-selected places
+                  const toImport = newPlanImportSelectedIds.size > 0
+                    ? colPlaces.filter(p => newPlanImportSelectedIds.has(p.id))
+                    : colPlaces;
+                  if (toImport.length > 0) {
+                    const brainstormDay = await createPlanDay(newPlan.id, 'Brainstorm', 0);
+                    if (brainstormDay) {
+                      for (let i = 0; i < toImport.length; i++) {
+                        const pl = toImport[i];
+                        await createPlanItem(newPlan.id, brainstormDay.id, {
+                          name: pl.name,
+                          category: pl.category || '',
+                          image_url: pl.photoUrl || '',
+                          time_label: '',
+                          address: [pl.neighborhood, pl.city, pl.country].filter(Boolean).join(', '),
+                          neighborhood: pl.neighborhood || '',
+                          position: i,
+                          lat: pl.lat ?? null,
+                          lng: pl.lng ?? null,
+                        });
+                      }
+                    }
+                  }
+                }
+
                 setPlans(prev => [newPlan, ...prev]);
                 setNewPlanName(''); setNewPlanDest(''); setNewPlanDates('');
                 setNewPlanDesc(''); setNewPlanLocation(''); setNewPlanCoverImage(''); setNewPlanCollabs([]); setNewPlanCollabInput('');
                 setDateRange(undefined); setEventSingleDate(undefined); setNewEventAddress(''); setNewEventNeighborhood(''); setNewEventCategory('');
                 setNewEventTimeStart(''); setNewEventTimeEnd(''); setNewEventNotes(''); setNewEventInviteLink(''); setNewEventCollabs([]); setNewEventCollabInput('');
+                setNewPlanImportCollection(null);
+                setNewPlanImportPlaces([]);
+                setNewPlanImportSelectedIds(new Set());
                 setShowNewPlan(false);
                 if (newPlanType === 'event') {
                   setSelectedEvent(newPlan);
@@ -6708,34 +8106,25 @@ Return ONLY valid JSON, no markdown, no explanation:
         </div>
       )}
 
-      {/* Add to Collection sheet */}
+      {/* Add to Collection / Trips / Remove sheet (All Saved place card) */}
       {addToColPlace && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setAddToColPlace(null)} />
-          <div className="relative bg-white rounded-t-3xl pb-10">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setAddToColPlace(null); setAddToColShowNewTrip(false); setAddToColNewTripName(''); setAddToColPlanAdded(new Set()); }} />
+          <div className="relative bg-white rounded-t-3xl pb-8 max-h-[85vh] overflow-y-auto">
             <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
             {/* Header */}
-            <div className="flex items-center gap-3 px-5 pt-2 pb-4 border-b border-gray-100">
-              {addToColPlace.photoUrl
-                ? <img src={addToColPlace.photoUrl} className="w-10 h-10 rounded-xl object-cover flex-shrink-0" alt="" />
-                : <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-lg">📍</div>
-              }
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-gray-900 truncate">{addToColPlace.name.split(',')[0].trim()}</p>
-                <p className="text-xs text-gray-400 mt-0.5">Add to collection</p>
-              </div>
-              <button onClick={() => setAddToColPlace(null)} className="ml-auto w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
-                <X size={14} strokeWidth={2} className="text-gray-600" />
-              </button>
+            <div className="px-4 pt-2 pb-3">
+              <p className="text-sm font-bold text-gray-900">Saved to All Saved ✓</p>
+              <p className="text-xs text-gray-400 mt-0.5">Also add {addToColPlace.name.split(',')[0].trim()} to a collection?</p>
             </div>
             {/* Collections list */}
-            <div className="px-4 pt-3 space-y-2 max-h-72 overflow-y-auto">
+            <div className="px-4 space-y-2 max-h-48 overflow-y-auto">
               {addToColLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 size={20} className="animate-spin text-gray-400" />
                 </div>
               ) : dbCollections.length === 0 ? (
-                <div className="text-center py-8">
+                <div className="text-center py-4">
                   <p className="text-sm text-gray-400">No collections yet</p>
                   <button
                     onClick={() => { setAddToColPlace(null); setShowNewCollection(true); }}
@@ -6761,9 +8150,9 @@ Return ONLY valid JSON, no markdown, no explanation:
                       }
                       setAddToColSaving(prev => { const n = new Set(prev); n.delete(col.id); return n; });
                     }}
-                    className="w-full flex items-center gap-3 p-2.5 rounded-2xl active:bg-gray-50 transition-colors"
+                    className="w-full flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors text-left"
                   >
-                    <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+                    <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
                       {col.coverImageUrl
                         ? <img src={col.coverImageUrl} alt={col.name} className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center text-2xl">{col.emoji || '🗂️'}</div>
@@ -6773,10 +8162,10 @@ Return ONLY valid JSON, no markdown, no explanation:
                       <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
                       <p className="text-xs text-gray-400">{col.placesCount} places</p>
                     </div>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isIn ? 'bg-gray-900' : 'border-2 border-gray-200'}`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors border-2 ${isIn ? 'bg-gray-900 border-gray-900' : 'border-gray-200'}`}>
                       {isSaving
                         ? <Loader2 size={12} className="animate-spin text-white" />
-                        : isIn && <Check size={12} strokeWidth={2.5} className="text-white" />
+                        : isIn && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                       }
                     </div>
                   </button>
@@ -6784,19 +8173,148 @@ Return ONLY valid JSON, no markdown, no explanation:
               })}
             </div>
             {/* New collection shortcut */}
-            {dbCollections.length > 0 && (
-              <div className="px-4 pt-3">
-                <button
-                  onClick={() => { setAddToColPlace(null); setShowNewCollection(true); }}
-                  className="w-full flex items-center gap-3 p-2.5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 active:bg-gray-50 transition-colors"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center flex-shrink-0">
-                    <Plus size={18} strokeWidth={2} className="text-gray-400" />
-                  </div>
-                  <p className="text-sm font-semibold">New collection</p>
+            <div className="px-4 pt-3">
+              <button
+                onClick={() => { setAddToColPlace(null); setShowNewCollection(true); }}
+                className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2"
+              >
+                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Plus size={15} strokeWidth={2} className="text-gray-600" />
+                </div>
+                New collection
+              </button>
+            </div>
+            {/* ── Trips section ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-3 pb-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add to a trip</p>
+              {addToColPlans.length === 0 && !addToColShowNewTrip && (
+                <p className="text-xs text-gray-400 mb-2">No trips yet.</p>
+              )}
+              {addToColPlans.length > 0 && (
+                <div className="space-y-2 max-h-44 overflow-y-auto mb-2">
+                  {addToColPlans.map(plan => {
+                    const added = addToColPlanAdded.has(plan.id);
+                    const adding = addToColPlanAdding === plan.id;
+                    const place = addToColPlace;
+                    return (
+                      <button
+                        key={plan.id}
+                        disabled={added || adding}
+                        onClick={async () => {
+                          setAddToColPlanAdding(plan.id);
+                          try {
+                            const existingBrainstorm = plan.days.find(d => d.label === 'Brainstorm');
+                            const day = existingBrainstorm ?? await createPlanDay(plan.id, 'Brainstorm', 0);
+                            if (day) {
+                              await createPlanItem(plan.id, day.id!, {
+                                name: place.name,
+                                category: place.category || '',
+                                image_url: place.photoUrl || '',
+                                time_label: '',
+                                address: [place.neighborhood, place.city, place.country].filter(Boolean).join(', '),
+                                neighborhood: place.neighborhood || '',
+                                position: day.items.length,
+                                lat: place.lat ?? null,
+                                lng: place.lng ?? null,
+                              });
+                              setAddToColPlanAdded(prev => new Set(prev).add(plan.id));
+                            }
+                          } finally {
+                            setAddToColPlanAdding(null);
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ${added ? 'bg-gray-900' : 'bg-gray-50 active:bg-gray-100'}`}
+                      >
+                        <div className="w-9 h-9 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
+                          {plan.coverImage ? <img src={plan.coverImage} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full flex items-center justify-center text-lg">✈️</div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${added ? 'text-white' : 'text-gray-900'}`}>{plan.destination}</p>
+                          {plan.country && <p className={`text-xs truncate ${added ? 'text-gray-300' : 'text-gray-400'}`}>{plan.country}</p>}
+                        </div>
+                        {adding && <Loader2 size={16} className="animate-spin text-gray-400 flex-shrink-0" />}
+                        {added && !adding && <svg width="16" height="16" viewBox="0 0 12 12" fill="none" className="flex-shrink-0"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        {!added && !adding && <Plus size={16} strokeWidth={2} className="text-gray-400 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {addToColShowNewTrip ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={addToColNewTripName}
+                    onChange={e => setAddToColNewTripName(e.target.value)}
+                    placeholder="Trip name…"
+                    className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none border border-gray-200 focus:border-gray-400"
+                    onKeyDown={async e => {
+                      if (e.key === 'Escape') { setAddToColShowNewTrip(false); setAddToColNewTripName(''); }
+                      if (e.key === 'Enter' && addToColNewTripName.trim() && userId) {
+                        setAddToColCreatingTrip(true);
+                        const newPlan = await dbCreatePlan(userId, { title: addToColNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                        if (newPlan) {
+                          const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                          setAddToColPlans(prev => [converted, ...prev]);
+                          setPlans(prev => [converted, ...prev]);
+                          setAddToColShowNewTrip(false);
+                          setAddToColNewTripName('');
+                        }
+                        setAddToColCreatingTrip(false);
+                      }
+                    }}
+                  />
+                  <button
+                    disabled={!addToColNewTripName.trim() || addToColCreatingTrip}
+                    onClick={async () => {
+                      if (!addToColNewTripName.trim() || !userId) return;
+                      setAddToColCreatingTrip(true);
+                      const newPlan = await dbCreatePlan(userId, { title: addToColNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                      if (newPlan) {
+                        const converted: Trip = { id: newPlan.id, destination: newPlan.title, country: newPlan.country, dates: newPlan.dates, coverImage: newPlan.coverImageUrl, status: newPlan.status as Trip['status'], days: [], description: newPlan.description };
+                        setAddToColPlans(prev => [converted, ...prev]);
+                        setPlans(prev => [converted, ...prev]);
+                        setAddToColShowNewTrip(false);
+                        setAddToColNewTripName('');
+                      }
+                      setAddToColCreatingTrip(false);
+                    }}
+                    className="px-3 py-2 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                  >
+                    {addToColCreatingTrip ? <Loader2 size={14} className="animate-spin" /> : 'Create'}
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setAddToColShowNewTrip(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                  New trip
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+            {/* ── Remove from Saved ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  if (!userId || !addToColPlace) return;
+                  await unsavePlace(userId, addToColPlace.id);
+                  setRealSavedPlaceIds(prev => { const n = new Set(prev); n.delete(addToColPlace.id); return n; });
+                  setRealSavedPlaces(prev => prev.filter(p => p.id !== addToColPlace.id));
+                  setAddToColPlace(null);
+                  setAddToColIds(new Set());
+                  setAddToColPlanAdded(new Set());
+                  setAddToColShowNewTrip(false);
+                  setAddToColNewTripName('');
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -6836,7 +8354,7 @@ Return ONLY valid JSON, no markdown, no explanation:
                     className="w-full text-sm text-gray-900 bg-gray-100 rounded-xl px-3 py-2.5 outline-none placeholder-gray-400 resize-none"
                   />
                 </div>
-                <p className="text-xs text-gray-400">Publishing makes this itinerary visible to everyone on Curio.</p>
+                <p className="text-xs text-gray-400">Publishing makes this itinerary visible to everyone on Sondrr.</p>
                 <button
                   disabled={!publishGuideTitle.trim() || publishingGuide || !userId}
                   onClick={async () => {
@@ -6867,6 +8385,96 @@ Return ONLY valid JSON, no markdown, no explanation:
           </div>
         );
       })()}
+
+      {/* Guide → Save to Collection sheet */}
+      {savedGuideColSheet && (
+        <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }} onClick={() => { setSavedGuideColSheet(null); setSavedGuideColIds(new Set()); }}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-white rounded-t-3xl pb-8" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="px-5 pt-3 pb-4">
+              <p className="text-base font-bold text-gray-900">Saved to All Saved ✓</p>
+              <p className="text-xs text-gray-400 mt-0.5">Also add to a collection?</p>
+            </div>
+            <div className="px-4 space-y-2 max-h-64 overflow-y-auto">
+              {dbCollections.length === 0 && (
+                <p className="text-sm text-gray-400 py-4 text-center">No collections yet — create one below</p>
+              )}
+              {dbCollections.map(col => {
+                const inCol = savedGuideColIds.has(col.id);
+                return (
+                  <button key={col.id} className="w-full flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-2xl text-left active:bg-gray-100"
+                    onClick={async () => {
+                      if (!userId) return;
+                      if (inCol) {
+                        setSavedGuideColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                        await removeGuideFromCollection(col.id, savedGuideColSheet.id);
+                        const remaining = new Set(savedGuideColIds); remaining.delete(col.id);
+                        if (remaining.size === 0) { unsubscribeFromGuide(userId, savedGuideColSheet.id); setSavedSubscribedGuideIds(prev => { const n = new Set(prev); n.delete(savedGuideColSheet.id); return n; }); setSubscribedGuides(prev => prev.filter(g => g.id !== savedGuideColSheet.id)); }
+                      } else {
+                        setSavedGuideColIds(prev => new Set(prev).add(col.id));
+                        await addGuideToCollection(col.id, savedGuideColSheet.id, userId);
+                        if (!savedSubscribedGuideIds.has(savedGuideColSheet.id)) {
+                          subscribeToGuide(userId, savedGuideColSheet.id);
+                          setSavedSubscribedGuideIds(prev => new Set(prev).add(savedGuideColSheet.id));
+                        }
+                      }
+                    }}
+                  >
+                    <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                      {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" alt="" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} items</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                      {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-4 pt-3">
+              <button onClick={() => setShowNewColSave(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                New collection
+              </button>
+            </div>
+            <div className="mx-4 border-t border-gray-100" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  if (!userId || !savedGuideColSheet) return;
+                  unsubscribeFromGuide(userId, savedGuideColSheet.id);
+                  setSavedSubscribedGuideIds(prev => { const n = new Set(prev); n.delete(savedGuideColSheet.id); return n; });
+                  setSubscribedGuides(prev => prev.filter(g => g.id !== savedGuideColSheet.id));
+                  setSavedGuideColSheet(null);
+                  setSavedGuideColIds(new Set());
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {savedActionModal && (
+        <ActionModal
+          avatarUrl={savedActionModal.avatarUrl}
+          iconType={savedActionModal.iconType}
+          title={savedActionModal.title}
+          subtitle={savedActionModal.subtitle}
+          confirmLabel={savedActionModal.confirmLabel}
+          confirmVariant={savedActionModal.confirmVariant}
+          onConfirm={savedActionModal.onConfirm}
+          onCancel={() => setSavedActionModal(null)}
+        />
+      )}
     </div>
   );
 }

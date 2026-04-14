@@ -3,48 +3,48 @@ import { createPortal } from 'react-dom';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { UserPlus, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical, Globe, Pin } from 'lucide-react';
+import { UserPlus, UserX, UserMinus, Flag, Menu, MapPin, BadgeCheck, ChevronRight, Bell, Mail, ArrowLeft, Heart, MessageCircle, Bookmark, BookmarkCheck, Map, Settings, LogOut, Edit3, Share2, Star, Plus, X, Check, Send, Search, GripVertical, Globe, Pin, Copy, Loader2 } from 'lucide-react';
+import ActionModal from '../components/ActionModal';
 import Notifications, { getUnreadCount, markAsSeen } from './Notifications';
-import { currentUser } from '../data/mockData';
+import type { AppNotification } from '../lib/supabase';
 import type { Place, AppUser } from '../types';
 import BookingSheet from '../components/BookingSheet';
 import ImageCarousel from '../components/ImageCarousel';
 import FindPeople from './FindPeople';
 import UserProfile from './UserProfile';
-import { supabase, getPublicUrl, getUserPosts, updateProfile, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, getLikedPostsFull, getSubscribedGuides, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide } from '../lib/supabase';
+import { supabase, getPublicUrl, getUserPosts, updateProfile, blockUser, reportContent, getBlockedUsers, getBlockersOfUser, getFollowerProfiles, getFollowingProfiles, getFollowCounts, getUserCollections, createCollection, updateCollection, deleteCollection, getLikedPosts, getSavedPosts, likePost, unlikePost, savePost, unsavePost, getPostLikeCounts, addPlaceToCollection, removePlaceFromCollection, getPlaceCollectionIds, getCollectionPlaces, geocodeMissingPlaces, getCollectionCollaborators, addCollaborator, removeCollaborator, getSharedCollections, getSubscribedCollections, searchProfiles, deletePostPlace, deletePost, updatePostCaption, reorderPostPlaces, updatePostOrder, savePlace, unsavePlace, getSavedPlaceIds, getNotifications, getPostComments, addComment, deleteComment, getPostCollaborators, addPostCollaborator, removePostCollaborator, updatePostPlace, getUserGuides, deleteGuide, getCollectionCoverPhotos, getLikedPostsFull, getLikedGuidesFull, getSubscribedGuides, updateProfilePrivacy, getConversations, getOrCreateConversation, sendMessage, unblockUser, getCollectionById, getPlans, createPlan, createPlanDay, createPlanItem, subscribeToGuide, unsubscribeFromGuide, getSubscribedGuideIds, addGuideToCollection, removeGuideFromCollection, getGuideCollectionIds, type RealPost, type RealPostPlace, type FollowProfile, type RealCollection, type CollectionCollaborator, type PostComment, type PostCollaborator, type Guide, type Conversation, type Plan } from '../lib/supabase';
 import { googleTypesToCategory, extractNeighborhood } from '../lib/placeUtils';
+import { US_STATES, CATEGORY_EMOJI, timeAgo } from '../lib/constants';
 import PlaceSearch from '../components/PlaceSearch';
 import PlacePage from '../components/PlacePage';
 import GuideDetail from '../components/GuideDetail';
 import CreateGuideSheet from '../components/CreateGuideSheet';
+import { gTextSearch, TTL } from '../lib/googlePlaces';
 
 const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
 
-const US_STATES: Record<string, string> = {
-  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
-  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
-  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
-  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
-  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
-  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
-  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
-  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
-  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
-  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
-  DC: 'Washington DC',
-};
 
 function fixAndDeduplicatePlaces(places: RealPostPlace[]): RealPostPlace[] {
-  // Fix US state abbreviations stored as city
+  // Fix US state abbreviations stored as city (display only — DB fix is separate)
   const fixed = places.map(pl => {
     const city = (pl.city ?? '').trim();
     if (/^[A-Z]{2}$/.test(city) && US_STATES[city]) {
-      const fullName = US_STATES[city];
-      supabase.from('post_places').update({ city: fullName }).eq('id', pl.id);
-      return { ...pl, city: fullName };
+      return { ...pl, city: US_STATES[city] };
     }
     return pl;
   });
+  // Persist corrections to DB (async, with error handling)
+  const toFix = places.filter(pl => {
+    const city = (pl.city ?? '').trim();
+    return /^[A-Z]{2}$/.test(city) && US_STATES[city];
+  });
+  if (toFix.length > 0) {
+    Promise.all(
+      toFix.map(pl =>
+        supabase.from('post_places').update({ city: US_STATES[(pl.city ?? '').trim()] }).eq('id', pl.id)
+      )
+    ).catch(err => console.error('Failed to fix city abbreviations:', err));
+  }
   // Deduplicate by name — keep first occurrence
   const seen = new Set<string>();
   return fixed.filter(pl => {
@@ -55,31 +55,12 @@ function fixAndDeduplicatePlaces(places: RealPostPlace[]): RealPostPlace[] {
   });
 }
 
-function timeAgo(iso: string): string {
-  if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d`;
-  const w = Math.floor(d / 7);
-  if (w < 5) return `${w}w`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 const MapView = lazy(() => import('../components/MapView'));
 
 type ProfileTab = 'Posts' | 'Map' | 'Collections' | 'Guides';
 
-const categoryEmoji: Record<string, string> = {
-  restaurant: '🍽️', cafe: '☕', bar: '🍸', food: '🍕',
-  hotel: '🏨', attraction: '🏛️', nature: '🌿', beach: '🏖️',
-  shop: '🛍️', experience: '🗺️', sports: '🎾', wellness: '💆',
-  street: '🏙️', event: '🎟️', flight: '✈️', transport: '🚗',
-};
+const categoryEmoji = CATEGORY_EMOJI;
 
 function SortablePostCell({ post, isDraggingAny, onClick, likeCount, isPinned }: { post: RealPost; isDraggingAny: boolean; onClick: () => void; likeCount?: number; isPinned?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: post.id });
@@ -110,26 +91,6 @@ function SortablePostCell({ post, isDraggingAny, onClick, likeCount, isPinned }:
             <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
             <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
           </div>
-        </div>
-      )}
-      {/* Bottom bar: like count + collab avatars */}
-      {((likeCount ?? 0) > 0 || collabs.length > 0) && (
-        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-1.5 py-1 bg-gradient-to-t from-black/50 to-transparent">
-          {(likeCount ?? 0) > 0 ? (
-            <span className="text-white text-[10px] font-semibold flex items-center gap-0.5">
-              <Heart size={9} className="fill-white text-white" />
-              {likeCount}
-            </span>
-          ) : <span />}
-          {collabs.length > 0 && (
-            <div className="flex -space-x-1">
-              {collabs.map(c => (
-                c.avatarUrl
-                  ? <img key={c.id} src={c.avatarUrl} className="w-4 h-4 rounded-full border border-white/60 object-cover" />
-                  : <div key={c.id} className="w-4 h-4 rounded-full border border-white/60 bg-gray-400 flex items-center justify-center text-[7px] font-bold text-white">{c.name[0]?.toUpperCase()}</div>
-              ))}
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -218,7 +179,7 @@ function SortableEditPlace({ place, i, total, isExpanded, onToggle, onRemove, on
   );
 }
 
-export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: (targetUserId?: string) => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string; website?: string }) => void; onFollowingCountChange?: (delta: number) => void }) {
+export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate, onProfileUpdate, onFollowingCountChange }: { onOpenMessages?: (targetUserId?: string) => void; appUser?: AppUser; onLogout?: () => void; onNavigate?: (tab: import('../types').Tab) => void; onProfileUpdate?: (updates: { name: string; username: string; avatar: string | null; bio: string; location: string; website?: string; coverUrl?: string | null; isPrivate?: boolean }) => void; onFollowingCountChange?: (delta: number) => void }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Posts');
   const [showMenu, setShowMenu] = useState(false);
   const [showFollowers, setShowFollowers] = useState<'followers' | 'following' | null>(null);
@@ -227,13 +188,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [unreadCount, setUnreadCount] = useState(0);
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
-  const [editBio, setEditBio] = useState('');
-  const [editLocation, setEditLocation] = useState('');
+  const [editBio, setEditBio] = useState(appUser?.bio ?? '');
+  const [editLocation, setEditLocation] = useState(appUser?.location ?? '');
   const [editWebsite, setEditWebsite] = useState('');
+  const [editIsPrivate, setEditIsPrivate] = useState(appUser?.isPrivate ?? false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [showCreatorOnboard, setShowCreatorOnboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [bookingPlace, setBookingPlace] = useState<Place | null>(null);
@@ -243,11 +207,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [followerProfiles, setFollowerProfiles] = useState<FollowProfile[]>([]);
   const [followingProfiles, setFollowingProfiles] = useState<FollowProfile[]>([]);
   const [loadingFollowList, setLoadingFollowList] = useState(false);
+  const [profileBlockedUsers, setProfileBlockedUsers] = useState<Set<string>>(new Set());
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [unfollowTarget, setUnfollowTarget] = useState<FollowProfile | null>(null);
   const [unfollowing, setUnfollowing] = useState(false);
+  const [unblockTarget, setUnblockTarget] = useState<{ id: string; name: string; username: string; avatarUrl: string | null } | null>(null);
+  const [followerReportOpen, setFollowerReportOpen] = useState(false);
+  const [followerActionModal, setFollowerActionModal] = useState<{ avatarUrl?: string | null; iconType?: 'check'; title: string; subtitle: string; confirmLabel?: string; confirmVariant?: 'red' | 'dark'; onConfirm?: () => void } | null>(null);
   const [listFollowingIds, setListFollowingIds] = useState<Set<string>>(new Set());
   const [listFollowPending, setListFollowPending] = useState<string | null>(null);
+  const [followerActionSheet, setFollowerActionSheet] = useState<{ user: any; listType: 'followers' | 'following' } | null>(null);
   const [selectedRealPost, setSelectedRealPost] = useState<RealPost | null>(null);
   const [postPlaceSavedIds, setPostPlaceSavedIds] = useState<Set<string>>(new Set());
   const [showPostMap, setShowPostMap] = useState(false);
@@ -258,6 +227,12 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const postCommentInputRef = useRef<HTMLInputElement>(null);
   const [showPostShareSheet, setShowPostShareSheet] = useState(false);
   const [postSentTo, setPostSentTo] = useState<Set<string>>(new Set());
+  const [profileShareConversations, setProfileShareConversations] = useState<Conversation[]>([]);
+  const [profileShareSearch, setProfileShareSearch] = useState('');
+  const [profileShareSearchResults, setProfileShareSearchResults] = useState<FollowProfile[]>([]);
+  const [searchingProfileShare, setSearchingProfileShare] = useState(false);
+  const [profileShareLinkCopied, setProfileShareLinkCopied] = useState(false);
+  const profileShareSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showEditPost, setShowEditPost] = useState(false);
   const [isDraggingPost, setIsDraggingPost] = useState(false);
   const dndSensors = useSensors(
@@ -308,6 +283,20 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [saveAllColIds, setSaveAllColIds] = useState<Set<string>>(new Set());
   const [inlineNewColName, setInlineNewColName] = useState('');
   const [savingInlineCol, setSavingInlineCol] = useState(false);
+  const [showNewColSheet, setShowNewColSheet] = useState(false);
+  const [newColSheetName, setNewColSheetName] = useState('');
+  const [newColSheetDesc, setNewColSheetDesc] = useState('');
+  const [newColSheetCoverUrl, setNewColSheetCoverUrl] = useState<string | null>(null);
+  const [newColSheetCoverUploading, setNewColSheetCoverUploading] = useState(false);
+  const [newColSheetSaving, setNewColSheetSaving] = useState(false);
+  const [newColSheetContext, setNewColSheetContext] = useState<'saveAll' | 'singlePlace' | null>(null);
+  // Trips state — shared between post and individual-place save sheets
+  const [savePlans, setSavePlans] = useState<Plan[]>([]);
+  const [savePlanAdded, setSavePlanAdded] = useState<Set<string>>(new Set());
+  const [savePlanAdding, setSavePlanAdding] = useState<string | null>(null);
+  const [saveShowNewTrip, setSaveShowNewTrip] = useState(false);
+  const [saveNewTripName, setSaveNewTripName] = useState('');
+  const [saveCreatingTrip, setSaveCreatingTrip] = useState(false);
   const [likedRealPosts, setLikedRealPosts] = useState<Set<string>>(new Set());
   const [savedRealPosts, setSavedRealPosts] = useState<Set<string>>(new Set());
   const [realPostLikeCounts, setRealPostLikeCounts] = useState<Record<string, number>>({});
@@ -320,17 +309,23 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [sharedCollections, setSharedCollections] = useState<RealCollection[]>([]);
   const [collectionCoverPhotos, setCollectionCoverPhotos] = useState<Record<string, string[]>>({});
   const [userGuides, setUserGuides] = useState<Guide[]>([]);
+  const [guideDestFilter, setGuideDestFilter] = useState<string>('all');
   const [showCreateGuide, setShowCreateGuide] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<Guide | null>(null);
   const [editingGuide, setEditingGuide] = useState<Guide | null>(null);
   const [guidePlacePage, setGuidePlacePage] = useState<RealPostPlace | null>(null);
   const [subscribedGuides, setSubscribedGuides] = useState<Guide[]>([]);
   const [guidesSubTab, setGuidesSubTab] = useState<'mine' | 'following'>('mine');
+  const [profSubscribedGuideIds, setProfSubscribedGuideIds] = useState<Set<string>>(new Set());
+  const [profGuideColSheet, setProfGuideColSheet] = useState<Guide | null>(null);
+  const [profGuideColIds, setProfGuideColIds] = useState<Set<string>>(new Set());
+  const [profGuideColLoading, setProfGuideColLoading] = useState(false);
   const [pinnedPostId, setPinnedPostId] = useState<string | null>(() =>
     appUser?.id ? localStorage.getItem(`pinned_post_${appUser.id}`) : null
   );
   const [showLikedPosts, setShowLikedPosts] = useState(false);
   const [likedPostsFull, setLikedPostsFull] = useState<RealPost[]>([]);
+  const [likedGuidesFull, setLikedGuidesFull] = useState<Guide[]>([]);
   const [loadingLikedPosts, setLoadingLikedPosts] = useState(false);
   const [collectionCollaborators, setCollectionCollaborators] = useState<CollectionCollaborator[]>([]);
   const [showInviteSheet, setShowInviteSheet] = useState(false);
@@ -344,25 +339,64 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   const [invitingPostCollab, setInvitingPostCollab] = useState<string | null>(null);
   const [profileLinkCopied, setProfileLinkCopied] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('curio_notifs') !== 'false');
+  // Collection share sheet
+  const [showCollShareSheet, setShowCollShareSheet] = useState(false);
+  const [collShareSearch, setCollShareSearch] = useState('');
+  const [collShareResults, setCollShareResults] = useState<FollowProfile[]>([]);
+  const [collShareSentTo, setCollShareSentTo] = useState<Set<string>>(new Set());
+  const [searchingCollShare, setSearchingCollShare] = useState(false);
+  const [collShareLinkCopied, setCollShareLinkCopied] = useState(false);
+  const collShareSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Profile share sheet
+  const [showProfileShareSheet, setShowProfileShareSheet] = useState(false);
+  const [profileShareSheetSearch, setProfileShareSheetSearch] = useState('');
+  const [profileShareSheetResults, setProfileShareSheetResults] = useState<FollowProfile[]>([]);
+  const [profileShareSheetSentTo, setProfileShareSheetSentTo] = useState<Set<string>>(new Set());
+  const [searchingProfileShareSheet, setSearchingProfileShareSheet] = useState(false);
+  const [profileShareSheetLinkCopied, setProfileShareSheetLinkCopied] = useState(false);
+  const profileShareSheetSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const collabSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('sondrr_notifs') !== 'false');
+  const [isPrivateAccount, setIsPrivateAccount] = useState(appUser?.isPrivate ?? false);
+  const [showBlockedUsers, setShowBlockedUsers] = useState(false);
+  const [blockedUsersList, setBlockedUsersList] = useState<{ id: string; name: string; username: string; avatarUrl: string | null }[]>([]);
+  const [loadingBlockedUsers, setLoadingBlockedUsers] = useState(false);
 
+  // Sync edit profile fields when the sheet opens (in case appUser loaded after initial render)
   useEffect(() => {
-    if (appUser && !appUser.isDemo) {
+    if (showEditProfile && appUser) {
+      setEditBio(appUser.bio ?? '');
+      setEditLocation(appUser.location ?? '');
+      setEditIsPrivate(appUser.isPrivate ?? false);
+    }
+  }, [showEditProfile]);
+
+  // Cleanup search timers on unmount
+  useEffect(() => {
+    return () => {
+      if (collShareSearchRef.current) clearTimeout(collShareSearchRef.current);
+      if (profileShareSheetSearchRef.current) clearTimeout(profileShareSheetSearchRef.current);
+      if (collabSearchRef.current) clearTimeout(collabSearchRef.current);
+    };
+  }, []);
+
+  const cachedNotifsRef = useRef<AppNotification[]>([]);
+  useEffect(() => {
+    if (appUser) {
       getNotifications(appUser.id).then(notifs => {
+        cachedNotifsRef.current = notifs;
         setUnreadCount(getUnreadCount(appUser.id, notifs));
       });
     }
   }, [appUser?.id]);
 
   useEffect(() => {
-    if (appUser && !appUser.isDemo) {
+    if (appUser) {
       getUserPosts(appUser.id).then(async posts => {
         setRealPosts(posts);
         if (posts.length > 0) {
           getPostLikeCounts(posts.map(p => p.id)).then(setRealPostLikeCounts);
         }
-        const GKEY = import.meta.env.VITE_GOOGLE_PLACES_KEY as string;
-
         // Auto-enrich any places missing neighbourhood, city, or category — or with a 2-letter state abbreviation stored as city
         const isAbbreviation = (s: string) => /^[A-Z]{2}$/.test((s ?? '').trim());
         const missingData = posts.flatMap(p => p.places.filter(pl => !pl.neighborhood || !pl.city || !pl.category || isAbbreviation(pl.city)));
@@ -370,12 +404,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           // Normalize city abbreviations that Google Places doesn't recognise
           const normalCity = (c: string) => ({ cdmx: 'Mexico City', 'ciudad de mexico': 'Mexico City', 'ciudad de méxico': 'Mexico City', nyc: 'New York City', la: 'Los Angeles', sf: 'San Francisco', dc: 'Washington DC' }[c?.toLowerCase()] ?? c);
           const searchPlace = async (textQuery: string) => {
-            const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GKEY, 'X-Goog-FieldMask': 'places.addressComponents,places.formattedAddress,places.types' },
-              body: JSON.stringify({ textQuery, languageCode: 'en' }),
-            });
-            const d = await r.json();
+            const d = await gTextSearch(
+              { textQuery, languageCode: 'en' },
+              'places.addressComponents,places.formattedAddress,places.types',
+              TTL.ENRICHMENT,
+            );
             return d.places?.[0] ?? null;
           };
           // Run all enrichments in parallel
@@ -407,7 +440,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           enrichResults.forEach(r => { if (r) locationFixes[r.id] = r.fix; });
           if (Object.keys(locationFixes).length > 0) {
             Object.entries(locationFixes).forEach(([id, fix]) =>
-              supabase.from('post_places').update(fix).eq('id', id)
+              void supabase.from('post_places').update(fix).eq('id', id)
             );
             const applyFixes = (p: RealPost) => ({ ...p, places: p.places.map(pl => locationFixes[pl.id] ? { ...pl, ...locationFixes[pl.id] } : pl) });
             setRealPosts(prev => prev.map(applyFixes));
@@ -419,7 +452,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         const allPlaces = posts.flatMap(p => p.places);
         const missingCoords = allPlaces.filter(pl => pl.lat == null || pl.lng == null);
         if (missingCoords.length > 0) {
-          const geocoded = await geocodeMissingPlaces(allPlaces, GKEY);
+          const geocoded = await geocodeMissingPlaces(allPlaces, GOOGLE_PLACES_KEY);
           const coordMap: Record<string, { lat: number; lng: number }> = {};
           geocoded.forEach(pl => { if (pl.lat != null) coordMap[pl.id] = { lat: pl.lat!, lng: pl.lng! }; });
           if (Object.keys(coordMap).length > 0) {
@@ -427,27 +460,40 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               ...post,
               places: post.places.map(pl => coordMap[pl.id] ? { ...pl, ...coordMap[pl.id] } : pl),
             })));
+            Object.entries(coordMap).forEach(([placeId, coords]) => {
+              supabase.from('post_places').update({ lat: coords.lat, lng: coords.lng }).eq('id', placeId).then(() => {});
+            });
           }
         }
       });
       getUserCollections(appUser.id).then(cols => {
         setRealCollections(cols);
-        getCollectionCoverPhotos(cols.map(c => c.id)).then(setCollectionCoverPhotos);
-      });
-      getSharedCollections(appUser.id).then(setSharedCollections);
-      getUserGuides(appUser.id).then(setUserGuides);
-      getSubscribedGuides(appUser.id).then(setSubscribedGuides);
-      getLikedPosts(appUser.id).then(setLikedRealPosts);
-      getSavedPosts(appUser.id).then(setSavedRealPosts);
-      getSavedPlaceIds(appUser.id).then(setPostPlaceSavedIds);
-      getFollowingProfiles(appUser.id).then(setFollowingProfiles);
+        getCollectionCoverPhotos(cols.map(c => c.id)).then(setCollectionCoverPhotos).catch(err => console.error('[getCollectionCoverPhotos]', err));
+      }).catch(err => console.error('[getUserCollections]', err));
+      getSharedCollections(appUser.id).then(setSharedCollections).catch(err => console.error('[getSharedCollections]', err));
+      getUserGuides(appUser.id).then(setUserGuides).catch(err => console.error('[getUserGuides]', err));
+      getSubscribedGuides(appUser.id).then(guides => {
+        setSubscribedGuides(guides);
+        setProfSubscribedGuideIds(new Set(guides.map((g: Guide) => g.id)));
+      }).catch(err => console.error('[getSubscribedGuides]', err));
+      getSubscribedGuideIds(appUser.id).then(ids => setProfSubscribedGuideIds(new Set(ids))).catch(() => {});
+      getLikedPosts(appUser.id).then(setLikedRealPosts).catch(err => console.error('[getLikedPosts]', err));
+      getSavedPosts(appUser.id).then(setSavedRealPosts).catch(err => console.error('[getSavedPosts]', err));
+      getSavedPlaceIds(appUser.id).then(setPostPlaceSavedIds).catch(err => console.error('[getSavedPlaceIds]', err));
+      getPlans(appUser.id).then(setSavePlans).catch(err => console.error('[getPlans]', err));
+      getFollowingProfiles(appUser.id).then(profiles => {
+        setFollowingProfiles(profiles);
+        setListFollowingIds(new Set(profiles.map(p => p.id)));
+      }).catch(err => console.error('[getFollowingProfiles]', err));
+      Promise.all([getBlockedUsers(appUser.id), getBlockersOfUser(appUser.id)])
+        .then(([blocked, blockers]) => setProfileBlockedUsers(new Set([...blocked, ...blockers])));
       getFollowCounts(appUser.id).then(({ followers, following }) => {
         setRealFollowerCount(followers);
         setRealFollowingCount(following);
       });
       // Real-time: refresh posts when a new one is added
       const channel = supabase
-        .channel('profile-posts')
+        .channel('profile-posts-' + appUser.id)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts', filter: `user_id=eq.${appUser.id}` }, () => {
           getUserPosts(appUser.id).then(setRealPosts);
         })
@@ -468,13 +514,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
   // Pre-load which places in the selected post are saved to any collection
   useEffect(() => {
-    if (!selectedRealPost || !appUser) { setPostPlaceSavedIds(new Set()); return; }
+    if (!selectedRealPost || !appUser) return;
     Promise.all(selectedRealPost.places.map(pl => getPlaceCollectionIds(pl.id))).then(results => {
-      const saved = new Set<string>();
-      selectedRealPost.places.forEach((pl, i) => { if (results[i].size > 0) saved.add(pl.id); });
-      setPostPlaceSavedIds(saved);
+      setPostPlaceSavedIds(prev => {
+        const next = new Set(prev);
+        selectedRealPost.places.forEach((pl, i) => { if (results[i].size > 0) next.add(pl.id); });
+        return next;
+      });
     });
-  }, [selectedRealPost, appUser]);
+  }, [selectedRealPost?.id, appUser?.id]);
 
   // When "Save all" picker opens, compute which collections already contain ALL places
   useEffect(() => {
@@ -483,31 +531,67 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       const intersection = sets.reduce<Set<string>>((acc, cur) => new Set([...acc].filter(id => cur.has(id))), sets[0] ?? new Set());
       setSaveAllColIds(intersection);
     });
-  }, [showSaveAllPicker]);
+  }, [showSaveAllPicker, selectedRealPost]);
 
   const visitedPlaces = realPosts.flatMap(p => p.places).filter(pl => pl.lat != null && pl.lng != null);
-  const user = currentUser;
 
   // Compute accurate stats from real posts
   const actualPlacesCount = new Set(realPosts.flatMap(p => p.places.map(pl => pl.id))).size;
   const actualCountriesCount = new Set(realPosts.flatMap(p => p.places.map(pl => pl.country)).filter(Boolean)).size;
 
-  const isNewUser = appUser?.isDemo === false;
-  const displayUser = isNewUser && appUser ? {
-    ...user,
+  const isOwnProfile = !!appUser;
+  const isNewUser = isOwnProfile; // alias used throughout this component to mean "viewing own profile"
+  const displayUser = appUser ? {
     id: appUser.id,
     name: appUser.name,
     username: appUser.username,
     avatar: appUser.avatar || null,
+    bio: appUser.bio ?? '',
+    location: appUser.location ?? '',
+    placesCount: actualPlacesCount,
     followersCount: 0,
     followingCount: appUser.followingCount,
-    bio: appUser?.bio ?? '',
-    location: appUser?.location ?? '',
-  } : { ...user, location: '' };
+    countriesCount: actualCountriesCount,
+    isCreator: false,
+    verified: false,
+  } : {
+    id: '',
+    name: '',
+    username: '',
+    avatar: null,
+    bio: '',
+    location: '',
+    placesCount: 0,
+    followersCount: 0,
+    followingCount: 0,
+    countriesCount: 0,
+    isCreator: false,
+    verified: false,
+  };
 
   // ── Notifications ────────────────────────────────────────────────
   if (showNotifications && appUser?.id) {
-    return <Notifications userId={appUser.id} onBack={() => setShowNotifications(false)} onViewProfile={(actorId) => { setShowNotifications(false); setViewingUserId(actorId); }} />;
+    return <Notifications
+      userId={appUser.id}
+      onBack={() => setShowNotifications(false)}
+      onViewProfile={(actorId) => { setShowNotifications(false); setViewingUserId(actorId); }}
+      onOpenCollection={async (collectionId: string) => {
+        const col = await getCollectionById(collectionId);
+        if (col) {
+          setShowNotifications(false);
+          setSelectedRealCollection(col);
+          setRealCollectionPlaces([]);
+          setLoadingCollectionPlaces(true);
+          getCollectionPlaces(collectionId).then(async places => {
+            const geocoded = await geocodeMissingPlaces(places, GOOGLE_PLACES_KEY);
+            setRealCollectionPlaces(fixAndDeduplicatePlaces(geocoded));
+            setLoadingCollectionPlaces(false);
+          });
+          getCollectionCollaborators(collectionId).then(setCollectionCollaborators);
+        }
+      }}
+      onOpenPlan={(_planId: string) => { setShowNotifications(false); /* plans tab not in Profile; navigate to explore or no-op */ }}
+    />;
   }
 
   // ── Find People ─────────────────────────────────────────────────
@@ -601,12 +685,16 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             <div className="flex items-center gap-5">
               <button
                 className="flex items-center gap-1.5"
-                onClick={() => {
+                onClick={async () => {
                   if (!appUser) return;
                   const isLiked = likedRealPosts.has(selectedRealPost.id);
                   setLikedRealPosts(prev => { const n = new Set(prev); isLiked ? n.delete(selectedRealPost.id) : n.add(selectedRealPost.id); return n; });
                   setRealPostLikeCounts(prev => ({ ...prev, [selectedRealPost.id]: (prev[selectedRealPost.id] ?? 0) + (isLiked ? -1 : 1) }));
-                  isLiked ? unlikePost(appUser.id, selectedRealPost.id) : likePost(appUser.id, selectedRealPost.id);
+                  const ok = await (isLiked ? unlikePost(appUser.id, selectedRealPost.id) : likePost(appUser.id, selectedRealPost.id));
+                  if (!ok) {
+                    setLikedRealPosts(prev => { const n = new Set(prev); isLiked ? n.add(selectedRealPost.id) : n.delete(selectedRealPost.id); return n; });
+                    setRealPostLikeCounts(prev => ({ ...prev, [selectedRealPost.id]: (prev[selectedRealPost.id] ?? 0) + (isLiked ? 1 : -1) }));
+                  }
                 }}
               >
                 <Heart size={22} strokeWidth={1.5} className={likedRealPosts.has(selectedRealPost.id) ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
@@ -619,21 +707,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <MessageCircle size={22} strokeWidth={1.5} className="text-gray-800" />
                 <span className="text-sm font-medium text-gray-500">{postComments.length}</span>
               </button>
-              <button onClick={() => { setPostSentTo(new Set()); setShowPostShareSheet(true); }}>
+              <button onClick={() => {
+                setPostSentTo(new Set());
+                setProfileShareSearch('');
+                setProfileShareSearchResults([]);
+                setProfileShareLinkCopied(false);
+                setShowPostShareSheet(true);
+                if (appUser) getConversations(appUser.id).then(setProfileShareConversations);
+              }}>
                 <Send size={21} strokeWidth={1.5} className="text-gray-800" />
-              </button>
-              <button
-                onClick={() => {
-                  const newId = pinnedPostId === selectedRealPost.id ? null : selectedRealPost.id;
-                  setPinnedPostId(newId);
-                  if (appUser?.id) {
-                    if (newId) localStorage.setItem(`pinned_post_${appUser.id}`, newId);
-                    else localStorage.removeItem(`pinned_post_${appUser.id}`);
-                  }
-                }}
-                title={pinnedPostId === selectedRealPost.id ? 'Unpin from profile' : 'Pin to profile'}
-              >
-                <Pin size={20} strokeWidth={1.5} className={pinnedPostId === selectedRealPost.id ? 'fill-gray-900 text-gray-900' : 'text-gray-800'} />
               </button>
             </div>
             {(() => {
@@ -667,7 +749,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 const uniqueCount = new Set(selectedRealPost.places.map(p => p.name.split(',')[0].trim().toLowerCase())).size;
                 return (
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                <p className="text-sm font-bold text-gray-900">
                   {uniqueCount} place{uniqueCount !== 1 ? 's' : ''}
                 </p>
                 <button
@@ -747,13 +829,13 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
           {/* Comments */}
           <div className="px-5 pt-4 border-t border-gray-100">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Comments</p>
+            <p className="text-sm font-bold text-gray-900 mb-3">Comments</p>
             {loadingComments && <p className="text-sm text-gray-400 text-center py-4">Loading…</p>}
-            {!loadingComments && postComments.length === 0 && (
+            {!loadingComments && postComments.filter(c => !profileBlockedUsers.has(c.userId)).length === 0 && (
               <p className="text-sm text-gray-400 text-center py-4">No comments yet — be the first</p>
             )}
             <div className="space-y-3 mb-4">
-              {postComments.map(c => (
+              {postComments.filter(c => !profileBlockedUsers.has(c.userId)).map(c => (
                 <div key={c.id} className="flex items-start gap-2.5">
                   {c.profile.avatarUrl
                     ? <img src={c.profile.avatarUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
@@ -818,53 +900,117 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Share sheet */}
       {showPostShareSheet && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPostShareSheet(false)} />
-          <div className="relative bg-white rounded-t-3xl pb-8">
-            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
-            <div className="flex items-center justify-between px-4 pb-4">
-              <h3 className="text-base font-bold text-gray-900">Share</h3>
-              <button onClick={() => setShowPostShareSheet(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100">
-                <X size={16} strokeWidth={1.5} className="text-gray-700" />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowPostShareSheet(false); setPostSentTo(new Set()); setProfileShareSearch(''); setProfileShareSearchResults([]); }} />
+          <div className="relative bg-white rounded-t-3xl">
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-2 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Send to</h3>
+              <button onClick={() => { setShowPostShareSheet(false); setPostSentTo(new Set()); setProfileShareSearch(''); setProfileShareSearchResults([]); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={14} strokeWidth={2} className="text-gray-500" />
               </button>
             </div>
-            {/* Preview */}
-            <div className="px-4 pb-4">
-              <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-3 py-2.5">
-                {selectedRealPost.places[0]?.photoUrl && (
-                  <img src={selectedRealPost.places[0].photoUrl} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
-                )}
-                <p className="text-sm font-semibold text-gray-900 truncate">{selectedRealPost.caption}</p>
+            {/* Search bar */}
+            <div className="px-5 pb-3">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3">
+                <Search size={14} className="text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={profileShareSearch}
+                  onChange={e => {
+                    const q = e.target.value;
+                    setProfileShareSearch(q);
+                    if (profileShareSearchRef.current) clearTimeout(profileShareSearchRef.current);
+                    if (!q.trim()) { setProfileShareSearchResults([]); setSearchingProfileShare(false); return; }
+                    setSearchingProfileShare(true);
+                    profileShareSearchRef.current = setTimeout(async () => {
+                      if (!appUser) return;
+                      const results = await searchProfiles(q, appUser.id);
+                      setProfileShareSearchResults(results);
+                      setSearchingProfileShare(false);
+                    }, 300);
+                  }}
+                  placeholder="Search people..."
+                  className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder-gray-400"
+                />
+                {searchingProfileShare && <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin flex-shrink-0" />}
               </div>
             </div>
-            {/* Send to following */}
-            <div className="px-4 max-h-64 overflow-y-auto space-y-3">
-              {followingProfiles.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">Follow people to send them posts</p>
-              ) : followingProfiles.map(friend => {
-                const sent = postSentTo.has(friend.id);
-                return (
-                  <div key={friend.id} className="flex items-center gap-3">
-                    {friend.avatarUrl
-                      ? <img src={friend.avatarUrl} alt={friend.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                      : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-500 flex-shrink-0">{friend.name[0]}</div>}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">{friend.name}</p>
-                      <p className="text-xs text-gray-400">@{friend.username}</p>
-                    </div>
-                    <button
-                      onClick={() => setPostSentTo(prev => { const n = new Set(prev); n.add(friend.id); return n; })}
-                      className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${sent ? 'bg-gray-900 border-gray-900 text-white' : 'border-gray-300 text-gray-700'}`}
-                    >{sent ? 'Sent' : 'Send'}</button>
-                  </div>
-                );
-              })}
-            </div>
-            {/* Also share externally */}
-            <div className="px-4 pt-4">
+            {/* People list */}
+            {(() => {
+              const showSearch = profileShareSearch.trim().length > 0;
+              const list = showSearch ? profileShareSearchResults : profileShareConversations.map(c => ({ id: c.otherUser.id, name: c.otherUser.name, username: c.otherUser.username, avatarUrl: c.otherUser.avatarUrl }));
+              if (showSearch && profileShareSearchResults.length === 0 && !searchingProfileShare) {
+                return <p className="text-sm text-gray-400 text-center py-4 px-5">No users found</p>;
+              }
+              if (!showSearch && profileShareConversations.length === 0) return null;
+              return (
+                <div className="px-3 max-h-44 overflow-y-auto">
+                  {list.map(person => {
+                    const sent = postSentTo.has(person.id);
+                    const initials = person.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <button
+                        key={person.id}
+                        onClick={async () => {
+                          if (sent || !appUser) return;
+                          const convId = await getOrCreateConversation(appUser.id, person.id);
+                          if (convId) {
+                            const url = `${window.location.origin}/post/${selectedRealPost.id}`;
+                            await sendMessage(convId, appUser.id, `Check this out on sondrr: ${url}`);
+                            setPostSentTo(prev => new Set(prev).add(person.id));
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 py-2.5 px-2 rounded-2xl active:bg-gray-50 text-left"
+                      >
+                        {person.avatarUrl
+                          ? <img src={person.avatarUrl} className="w-11 h-11 rounded-full object-cover object-top flex-shrink-0" />
+                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-500">{initials}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{person.name}</p>
+                          <p className="text-xs text-gray-400 truncate">@{person.username}</p>
+                        </div>
+                        <div className={`px-5 py-2 rounded-full text-xs font-bold flex-shrink-0 transition-colors ${sent ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}>
+                          {sent ? 'Sent ✓' : 'Send'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            {/* Divider + external options */}
+            <div className="mt-2 border-t border-gray-100 px-3 pb-10">
               <button
-                onClick={() => navigator.share({ title: selectedRealPost.caption, text: selectedRealPost.caption }).catch(() => {})}
-                className="w-full py-2.5 bg-gray-100 rounded-2xl text-sm font-semibold text-gray-700"
-              >Share externally…</button>
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={async () => {
+                  const url = `${window.location.origin}/post/${selectedRealPost.id}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ url, title: 'Check this out on sondrr' }); } catch {}
+                  } else {
+                    navigator.clipboard.writeText(url).catch(() => {});
+                  }
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Send size={16} strokeWidth={1.5} className="text-gray-700" />
+                </div>
+                <span className="text-sm font-semibold text-gray-900">Share externally</span>
+              </button>
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/post/${selectedRealPost.id}`).catch(() => {});
+                  setProfileShareLinkCopied(true);
+                  setTimeout(() => setProfileShareLinkCopied(false), 1500);
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  {profileShareLinkCopied ? <Check size={16} strokeWidth={2} className="text-green-500" /> : <Copy size={16} strokeWidth={1.5} className="text-gray-700" />}
+                </div>
+                <span className="text-sm font-semibold text-gray-900">{profileShareLinkCopied ? 'Link copied!' : 'Copy link'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -890,28 +1036,33 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 disabled={savingEditPost}
                 onClick={async () => {
                   setSavingEditPost(true);
-                  const first = editPostPlaces[0];
-                  const locationLabel = !first ? '' : editPostPlaces.length === 1
-                    ? `${first.name.split(',')[0].trim()} · ${first.city}`
-                    : `${first.name.split(',')[0].trim()} +${editPostPlaces.length - 1} · ${first.city}`;
-                  await updatePostCaption(selectedRealPost.id, editPostCaption, editPostHashtags, locationLabel);
-                  await Promise.all(editPostPlaces.map(ep =>
-                    updatePostPlace(ep.id, {
-                      name: ep.name,
-                      neighborhood: ep.neighborhood,
-                      city: ep.city,
-                      country: ep.country,
-                      category: ep.category,
-                    })
-                  ));
-                  const removedIds = selectedRealPost.places.filter(p => !editPostPlaces.find(ep => ep.id === p.id)).map(p => p.id);
-                  for (const id of removedIds) await deletePostPlace(id);
-                  if (editPostPlaces.length > 0) await reorderPostPlaces(editPostPlaces.map(p => p.id));
-                  const updated = { ...selectedRealPost, caption: editPostCaption, hashtags: editPostHashtags, locationLabel, places: editPostPlaces };
-                  setSelectedRealPost(updated);
-                  setRealPosts(prev => prev.map(p => p.id === selectedRealPost.id ? updated : p));
-                  setSavingEditPost(false);
-                  setShowEditPost(false);
+                  try {
+                    const first = editPostPlaces[0];
+                    const locationLabel = !first ? '' : editPostPlaces.length === 1
+                      ? `${first.name.split(',')[0].trim()} · ${first.city}`
+                      : `${first.name.split(',')[0].trim()} +${editPostPlaces.length - 1} · ${first.city}`;
+                    await updatePostCaption(selectedRealPost.id, editPostCaption, editPostHashtags, locationLabel);
+                    await Promise.all(editPostPlaces.map(ep =>
+                      updatePostPlace(ep.id, {
+                        name: ep.name,
+                        neighborhood: ep.neighborhood,
+                        city: ep.city,
+                        country: ep.country,
+                        category: ep.category,
+                      })
+                    ));
+                    const removedIds = selectedRealPost.places.filter(p => !editPostPlaces.find(ep => ep.id === p.id)).map(p => p.id);
+                    for (const id of removedIds) await deletePostPlace(id);
+                    if (editPostPlaces.length > 0) await reorderPostPlaces(editPostPlaces.map(p => p.id));
+                    const updated = { ...selectedRealPost, caption: editPostCaption, hashtags: editPostHashtags, locationLabel, places: editPostPlaces };
+                    setSelectedRealPost(updated);
+                    setRealPosts(prev => prev.map(p => p.id === selectedRealPost.id ? updated : p));
+                    setShowEditPost(false);
+                  } catch (err) {
+                    console.error('Failed to save post edits:', err);
+                  } finally {
+                    setSavingEditPost(false);
+                  }
                 }}
                 className="text-sm font-bold text-orange-500 disabled:opacity-40 active:opacity-70 transition-opacity"
               >{savingEditPost ? 'Saving…' : 'Done'}</button>
@@ -996,7 +1147,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
 
               {/* Collaborators */}
               <div className="px-5 pt-4 pb-4 border-b border-gray-100">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">With</p>
+                <p className="text-sm font-bold text-gray-900 mb-3">With</p>
                 {postCollaborators.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-3">
                     {postCollaborators.map(c => (
@@ -1015,12 +1166,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   <Search size={13} strokeWidth={1.5} className="text-gray-400 flex-shrink-0" />
                   <input
                     value={postCollabSearch}
-                    onChange={async e => {
-                      setPostCollabSearch(e.target.value);
-                      if (e.target.value.trim().length > 0) {
-                        const results = await searchProfiles(e.target.value, appUser?.id ?? '');
+                    onChange={e => {
+                      const q = e.target.value;
+                      setPostCollabSearch(q);
+                      if (collabSearchRef.current) clearTimeout(collabSearchRef.current);
+                      if (!q.trim()) { setPostCollabResults([]); return; }
+                      collabSearchRef.current = setTimeout(async () => {
+                        const results = await searchProfiles(q, appUser?.id ?? '');
                         setPostCollabResults(results.filter(r => !postCollaborators.find(c => c.userId === r.id)));
-                      } else { setPostCollabResults([]); }
+                      }, 300);
                     }}
                     placeholder="Add a collaborator…"
                     className="flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder-gray-400"
@@ -1061,10 +1215,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <button
                   onClick={async () => {
                     if (!confirm('Delete this post?')) return;
-                    await deletePost(selectedRealPost.id);
+                    const prevPosts = realPosts;
                     setRealPosts(prev => prev.filter(p => p.id !== selectedRealPost.id));
-                    setShowEditPost(false);
-                    setSelectedRealPost(null);
+                    const ok = await deletePost(selectedRealPost.id);
+                    if (!ok) {
+                      setRealPosts(prevPosts);
+                    } else {
+                      setShowEditPost(false);
+                      setSelectedRealPost(null);
+                    }
                   }}
                   className="w-full py-3 text-sm font-semibold text-red-500 active:opacity-70 transition-opacity"
                 >Delete post</button>
@@ -1078,7 +1237,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Save ALL places to collection picker */}
       {showSaveAllPicker && selectedRealPost && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowSaveAllPicker(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowSaveAllPicker(false); setSavePlanAdded(new Set()); setSaveShowNewTrip(false); setSaveNewTripName(''); }} />
           <div className="relative bg-white rounded-t-3xl pb-8">
             <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
             <div className="px-4 pb-4">
@@ -1126,47 +1285,141 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             )}
             {/* New collection */}
             <div className="px-4 pt-3 pb-2">
-              {showInlineNewCol ? (
+              <button
+                onClick={() => { setNewColSheetContext('saveAll'); setShowNewColSheet(true); }}
+                className="w-full flex items-center gap-3 py-3 text-left"
+              >
+                <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Plus size={18} strokeWidth={2} className="text-gray-500" />
+                </div>
+                <p className="text-sm font-semibold text-gray-700">New collection</p>
+              </button>
+            </div>
+
+            {/* ── Trips section ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-3 pb-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add to a trip</p>
+              {savePlans.length === 0 && !saveShowNewTrip && (
+                <p className="text-xs text-gray-400 mb-2">No trips yet.</p>
+              )}
+              {savePlans.length > 0 && (
+                <div className="space-y-2 max-h-44 overflow-y-auto mb-2">
+                  {savePlans.map(plan => {
+                    const added = savePlanAdded.has(plan.id);
+                    const adding = savePlanAdding === plan.id;
+                    return (
+                      <button
+                        key={plan.id}
+                        disabled={added || adding}
+                        onClick={async () => {
+                          if (!appUser || !selectedRealPost) return;
+                          setSavePlanAdding(plan.id);
+                          try {
+                            const existingBrainstorm = plan.days.find(d => d.label === 'Brainstorm');
+                            const day = existingBrainstorm ?? await createPlanDay(plan.id, 'Brainstorm', 0);
+                            if (day) {
+                              const startPos = day.items.length;
+                              for (let i = 0; i < selectedRealPost.places.length; i++) {
+                                const pl = selectedRealPost.places[i];
+                                await createPlanItem(plan.id, day.id, {
+                                  name: pl.name,
+                                  category: pl.category || '',
+                                  image_url: pl.photoUrl || '',
+                                  time_label: '',
+                                  address: [pl.neighborhood, pl.city, pl.country].filter(Boolean).join(', '),
+                                  neighborhood: pl.neighborhood || '',
+                                  position: startPos + i,
+                                  lat: pl.lat ?? null,
+                                  lng: pl.lng ?? null,
+                                });
+                              }
+                              setSavePlanAdded(prev => new Set(prev).add(plan.id));
+                            }
+                          } finally {
+                            setSavePlanAdding(null);
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ${added ? 'bg-gray-900' : 'bg-gray-50 active:bg-gray-100'}`}
+                      >
+                        <div className="w-9 h-9 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
+                          {plan.coverImageUrl
+                            ? <img src={plan.coverImageUrl} className="w-full h-full object-cover" alt="" />
+                            : <div className="w-full h-full flex items-center justify-center text-lg">✈️</div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${added ? 'text-white' : 'text-gray-900'}`}>{plan.title}</p>
+                          {plan.country && <p className={`text-xs truncate ${added ? 'text-gray-300' : 'text-gray-400'}`}>{plan.country}</p>}
+                        </div>
+                        {adding && <Loader2 size={16} className="animate-spin text-gray-400 flex-shrink-0" />}
+                        {added && !adding && <svg width="16" height="16" viewBox="0 0 12 12" fill="none" className="flex-shrink-0"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        {!added && !adding && <Plus size={16} strokeWidth={2} className="text-gray-400 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {saveShowNewTrip ? (
                 <div className="flex items-center gap-2">
                   <input
                     autoFocus
-                    value={inlineNewColName}
-                    onChange={e => setInlineNewColName(e.target.value)}
+                    value={saveNewTripName}
+                    onChange={e => setSaveNewTripName(e.target.value)}
+                    placeholder="Trip name…"
+                    className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none border border-gray-200 focus:border-gray-400"
                     onKeyDown={async e => {
-                      if (e.key === 'Enter' && inlineNewColName.trim() && appUser) {
-                        setSavingInlineCol(true);
-                        const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
-                        setSavingInlineCol(false);
-                        if (!error && data) { setRealCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                      if (e.key === 'Escape') { setSaveShowNewTrip(false); setSaveNewTripName(''); }
+                      if (e.key === 'Enter' && saveNewTripName.trim() && appUser) {
+                        setSaveCreatingTrip(true);
+                        const newPlan = await createPlan(appUser.id, { title: saveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                        if (newPlan) { setSavePlans(prev => [newPlan, ...prev]); setSaveShowNewTrip(false); setSaveNewTripName(''); }
+                        setSaveCreatingTrip(false);
                       }
-                      if (e.key === 'Escape') { setShowInlineNewCol(false); setInlineNewColName(''); }
                     }}
-                    placeholder="Collection name…"
-                    className="flex-1 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none text-gray-900 placeholder-gray-400"
                   />
                   <button
-                    disabled={!inlineNewColName.trim() || savingInlineCol}
+                    disabled={!saveNewTripName.trim() || saveCreatingTrip}
                     onClick={async () => {
-                      if (!inlineNewColName.trim() || !appUser) return;
-                      setSavingInlineCol(true);
-                      const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
-                      setSavingInlineCol(false);
-                      if (!error && data) { setRealCollections(prev => [data, ...prev]); setInlineNewColName(''); setShowInlineNewCol(false); }
+                      if (!saveNewTripName.trim() || !appUser) return;
+                      setSaveCreatingTrip(true);
+                      const newPlan = await createPlan(appUser.id, { title: saveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                      if (newPlan) { setSavePlans(prev => [newPlan, ...prev]); setSaveShowNewTrip(false); setSaveNewTripName(''); }
+                      setSaveCreatingTrip(false);
                     }}
-                    className="px-4 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40"
-                  >{savingInlineCol ? '…' : 'Create'}</button>
+                    className="px-3 py-2 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
+                  >
+                    {saveCreatingTrip ? <Loader2 size={14} className="animate-spin" /> : 'Create'}
+                  </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => { setShowInlineNewCol(true); setInlineNewColName(''); }}
-                  className="w-full flex items-center gap-3 py-3 text-left"
-                >
-                  <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
-                    <Plus size={18} strokeWidth={2} className="text-gray-500" />
-                  </div>
-                  <p className="text-sm font-semibold text-gray-700">New collection</p>
+                <button onClick={() => setSaveShowNewTrip(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                  New trip
                 </button>
               )}
+            </div>
+
+            {/* Remove from Saved */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  if (!appUser || !selectedRealPost) return;
+                  setPostPlaceSavedIds(prev => { const n = new Set(prev); selectedRealPost.places.forEach(p => n.delete(p.id)); return n; });
+                  for (const p of selectedRealPost.places) {
+                    await unsavePlace(appUser.id, p.id);
+                  }
+                  setShowSaveAllPicker(false);
+                  setSavePlanAdded(new Set());
+                  setSaveShowNewTrip(false);
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
             </div>
           </div>
         </div>
@@ -1175,7 +1428,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {/* Collection picker sheet */}
       {addToColPlace && (
         <div className="fixed inset-0 z-[200] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setAddToColPlace(null); setShowInlineNewCol(false); setInlineNewColName(''); }} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setAddToColPlace(null); setShowInlineNewCol(false); setInlineNewColName(''); setSavePlanAdded(new Set()); setSaveShowNewTrip(false); setSaveNewTripName(''); }} />
           <div className="relative bg-white rounded-t-3xl pb-8">
             <div className="flex justify-center pt-3 pb-2">
               <div className="w-10 h-1 rounded-full bg-gray-200" />
@@ -1233,57 +1486,209 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             )}
             {/* New collection */}
             <div className="px-4 pt-3 pb-2">
-              {showInlineNewCol ? (
+              <button
+                onClick={() => { setNewColSheetContext('singlePlace'); setShowNewColSheet(true); }}
+                className="w-full flex items-center gap-3 py-3 text-left"
+              >
+                <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Plus size={18} strokeWidth={2} className="text-gray-500" />
+                </div>
+                <p className="text-sm font-semibold text-gray-700">New collection</p>
+              </button>
+            </div>
+
+            {/* ── Trips section ── */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-3 pb-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add to a trip</p>
+              {savePlans.length === 0 && !saveShowNewTrip && (
+                <p className="text-xs text-gray-400 mb-2">No trips yet.</p>
+              )}
+              {savePlans.length > 0 && (
+                <div className="space-y-2 max-h-44 overflow-y-auto mb-2">
+                  {savePlans.map(plan => {
+                    const added = savePlanAdded.has(plan.id);
+                    const adding = savePlanAdding === plan.id;
+                    return (
+                      <button
+                        key={plan.id}
+                        disabled={added || adding}
+                        onClick={async () => {
+                          if (!appUser || !addToColPlace) return;
+                          setSavePlanAdding(plan.id);
+                          try {
+                            const existingBrainstorm = plan.days.find(d => d.label === 'Brainstorm');
+                            const day = existingBrainstorm ?? await createPlanDay(plan.id, 'Brainstorm', 0);
+                            if (day) {
+                              await createPlanItem(plan.id, day.id, {
+                                name: addToColPlace.name,
+                                category: '',
+                                image_url: '',
+                                time_label: '',
+                                address: '',
+                                neighborhood: '',
+                                position: day.items.length,
+                                lat: null,
+                                lng: null,
+                              });
+                              setSavePlanAdded(prev => new Set(prev).add(plan.id));
+                            }
+                          } finally {
+                            setSavePlanAdding(null);
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ${added ? 'bg-gray-900' : 'bg-gray-50 active:bg-gray-100'}`}
+                      >
+                        <div className="w-9 h-9 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0">
+                          {plan.coverImageUrl
+                            ? <img src={plan.coverImageUrl} className="w-full h-full object-cover" alt="" />
+                            : <div className="w-full h-full flex items-center justify-center text-lg">✈️</div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${added ? 'text-white' : 'text-gray-900'}`}>{plan.title}</p>
+                          {plan.country && <p className={`text-xs truncate ${added ? 'text-gray-300' : 'text-gray-400'}`}>{plan.country}</p>}
+                        </div>
+                        {adding && <Loader2 size={16} className="animate-spin text-gray-400 flex-shrink-0" />}
+                        {added && !adding && <svg width="16" height="16" viewBox="0 0 12 12" fill="none" className="flex-shrink-0"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        {!added && !adding && <Plus size={16} strokeWidth={2} className="text-gray-400 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {saveShowNewTrip ? (
                 <div className="flex items-center gap-2">
                   <input
                     autoFocus
-                    value={inlineNewColName}
-                    onChange={e => setInlineNewColName(e.target.value)}
+                    value={saveNewTripName}
+                    onChange={e => setSaveNewTripName(e.target.value)}
+                    placeholder="Trip name…"
+                    className="flex-1 text-sm bg-gray-50 rounded-xl px-3 py-2 outline-none border border-gray-200 focus:border-gray-400"
                     onKeyDown={async e => {
-                      if (e.key === 'Enter' && inlineNewColName.trim() && appUser) {
-                        setSavingInlineCol(true);
-                        const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
-                        setSavingInlineCol(false);
-                        if (!error && data) {
-                          setRealCollections(prev => [data, ...prev]);
-                          setInlineNewColName('');
-                          setShowInlineNewCol(false);
-                        }
+                      if (e.key === 'Escape') { setSaveShowNewTrip(false); setSaveNewTripName(''); }
+                      if (e.key === 'Enter' && saveNewTripName.trim() && appUser) {
+                        setSaveCreatingTrip(true);
+                        const newPlan = await createPlan(appUser.id, { title: saveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                        if (newPlan) { setSavePlans(prev => [newPlan, ...prev]); setSaveShowNewTrip(false); setSaveNewTripName(''); }
+                        setSaveCreatingTrip(false);
                       }
-                      if (e.key === 'Escape') { setShowInlineNewCol(false); setInlineNewColName(''); }
                     }}
-                    placeholder="Collection name…"
-                    className="flex-1 bg-gray-50 rounded-xl px-4 py-2.5 text-sm outline-none text-gray-900 placeholder-gray-400"
                   />
                   <button
-                    disabled={!inlineNewColName.trim() || savingInlineCol}
+                    disabled={!saveNewTripName.trim() || saveCreatingTrip}
                     onClick={async () => {
-                      if (!inlineNewColName.trim() || !appUser) return;
-                      setSavingInlineCol(true);
-                      const { data, error } = await createCollection(appUser.id, { name: inlineNewColName.trim(), emoji: '', description: '', cover_image_url: null });
-                      setSavingInlineCol(false);
-                      if (!error && data) {
-                        setRealCollections(prev => [data, ...prev]);
-                        setInlineNewColName('');
-                        setShowInlineNewCol(false);
-                      }
+                      if (!saveNewTripName.trim() || !appUser) return;
+                      setSaveCreatingTrip(true);
+                      const newPlan = await createPlan(appUser.id, { title: saveNewTripName.trim(), country: '', dates: '', description: '', cover_image_url: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&q=80', status: 'dreaming' });
+                      if (newPlan) { setSavePlans(prev => [newPlan, ...prev]); setSaveShowNewTrip(false); setSaveNewTripName(''); }
+                      setSaveCreatingTrip(false);
                     }}
-                    className="px-4 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40"
+                    className="px-3 py-2 bg-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-40"
                   >
-                    {savingInlineCol ? '…' : 'Create'}
+                    {saveCreatingTrip ? <Loader2 size={14} className="animate-spin" /> : 'Create'}
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => { setShowInlineNewCol(true); setInlineNewColName(''); }}
-                  className="w-full flex items-center gap-3 py-3 text-left"
-                >
-                  <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
-                    <Plus size={18} strokeWidth={2} className="text-gray-500" />
-                  </div>
-                  <p className="text-sm font-semibold text-gray-700">New collection</p>
+                <button onClick={() => setSaveShowNewTrip(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                  New trip
                 </button>
               )}
+            </div>
+
+            {/* Remove from Saved */}
+            <div className="mx-4 border-t border-gray-100 mt-1" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  if (!appUser || !addToColPlace) return;
+                  setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(addToColPlace.id); return n; });
+                  await unsavePlace(appUser.id, addToColPlace.id);
+                  setAddToColPlace(null);
+                  setSavePlanAdded(new Set());
+                  setSaveShowNewTrip(false);
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Collection full modal sheet */}
+      {showNewColSheet && (
+        <div className="fixed inset-0 z-[220] flex flex-col justify-end" style={{ maxWidth: 384, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowNewColSheet(false); setNewColSheetName(''); setNewColSheetDesc(''); setNewColSheetCoverUrl(null); }} />
+          <div className="relative bg-white rounded-t-3xl pb-10">
+            <div className="flex justify-center pt-3 pb-2"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-4 pb-3">
+              <h3 className="text-base font-bold text-gray-900">New Collection</h3>
+              <button
+                disabled={!newColSheetName.trim() || newColSheetSaving || newColSheetCoverUploading}
+                onClick={async () => {
+                  if (!newColSheetName.trim() || !appUser) return;
+                  setNewColSheetSaving(true);
+                  try {
+                    const { data, error } = await createCollection(appUser.id, { name: newColSheetName.trim(), emoji: '', description: newColSheetDesc.trim(), cover_image_url: newColSheetCoverUrl });
+                    if (!error && data) {
+                      if (newColSheetContext === 'singlePlace' && addToColPlace) {
+                        await addPlaceToCollection(data.id, addToColPlace.id);
+                        setPlaceInCollections(prev => new Set(prev).add(data.id));
+                        setRealCollections(prev => [{ ...data, placesCount: 1 }, ...prev]);
+                        setPostPlaceSavedIds(prev => new Set(prev).add(addToColPlace.id));
+                      } else if (newColSheetContext === 'saveAll' && selectedRealPost) {
+                        for (const place of selectedRealPost.places) {
+                          await addPlaceToCollection(data.id, place.id);
+                        }
+                        setSaveAllColIds(prev => new Set(prev).add(data.id));
+                        setRealCollections(prev => [{ ...data, placesCount: selectedRealPost.places.length }, ...prev]);
+                      } else {
+                        setRealCollections(prev => [{ ...data, placesCount: 0 }, ...prev]);
+                      }
+                    }
+                  } finally {
+                    setNewColSheetSaving(false);
+                    setShowNewColSheet(false);
+                    setNewColSheetName('');
+                    setNewColSheetDesc('');
+                    setNewColSheetCoverUrl(null);
+                  }
+                }}
+                className="text-sm font-bold text-gray-900 px-4 py-1.5 bg-gray-100 rounded-full disabled:opacity-40"
+              >
+                {newColSheetSaving ? 'Saving…' : 'Create'}
+              </button>
+            </div>
+            <div className="px-4 space-y-3 pb-6">
+              <label className="w-full h-32 rounded-2xl bg-gray-100 flex items-center justify-center relative cursor-pointer overflow-hidden block">
+                <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                  const file = e.target.files?.[0]; if (!file || !appUser) return;
+                  setNewColSheetCoverUploading(true);
+                  const path = `collections/${appUser.id}/${Date.now()}.${file.name.split('.').pop() ?? 'jpg'}`;
+                  const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+                  if (!error) setNewColSheetCoverUrl(getPublicUrl('avatars', path));
+                  setNewColSheetCoverUploading(false);
+                  e.target.value = '';
+                }} />
+                {newColSheetCoverUrl
+                  ? <img src={newColSheetCoverUrl} className="w-full h-full object-cover" />
+                  : newColSheetCoverUploading
+                    ? <Loader2 size={20} className="text-gray-400 animate-spin" />
+                    : <div className="flex flex-col items-center gap-1.5 text-gray-400"><Plus size={20} /><span className="text-xs font-medium">Add cover photo</span></div>
+                }
+                {newColSheetCoverUrl && !newColSheetCoverUploading && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">Change photo</span>
+                  </div>
+                )}
+              </label>
+              <input autoFocus value={newColSheetName} onChange={e => setNewColSheetName(e.target.value)} placeholder="Collection name" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
+              <input value={newColSheetDesc} onChange={e => setNewColSheetDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors" />
             </div>
           </div>
         </div>
@@ -1297,8 +1702,17 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
     const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
       setAvatarFile(file);
       setAvatarPreview(URL.createObjectURL(file));
+    };
+
+    const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (coverPreview) URL.revokeObjectURL(coverPreview);
+      setCoverFile(file);
+      setCoverPreview(URL.createObjectURL(file));
     };
 
     const handleSave = async () => {
@@ -1321,13 +1735,27 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         finalAvatarUrl = `${getPublicUrl('avatars', path)}?t=${Date.now()}`;
       }
 
-      const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string; website_url?: string } = {
+      let finalCoverUrl: string | null | undefined = appUser.coverUrl;
+      if (coverFile) {
+        const ext = coverFile.name.split('.').pop() ?? 'jpg';
+        const path = `${appUser.id}/cover.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(path, coverFile, { upsert: true, contentType: coverFile.type });
+        if (!uploadError) {
+          finalCoverUrl = `${getPublicUrl('avatars', path)}?t=${Date.now()}`;
+        }
+      }
+
+      const updates: { name?: string; username?: string; bio?: string; location?: string; avatar_url?: string; website_url?: string; cover_url?: string; is_private?: boolean } = {
         name: editName.trim() || displayUser.name,
         username: editUsername.trim().replace('@', '') || displayUser.username,
         bio: editBio.trim(),
         location: editLocation.trim(),
         avatar_url: finalAvatarUrl ?? undefined,
         website_url: editWebsite.trim() || undefined,
+        cover_url: finalCoverUrl ?? undefined,
+        is_private: editIsPrivate,
       };
 
       const error = await updateProfile(appUser.id, updates);
@@ -1342,14 +1770,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           bio: updates.bio ?? '',
           location: updates.location ?? '',
           website: updates.website_url ?? '',
+          coverUrl: finalCoverUrl ?? null,
+          isPrivate: editIsPrivate,
         });
         setAvatarFile(null);
         setAvatarPreview(null);
+        setCoverFile(null);
+        setCoverPreview(null);
         setShowEditProfile(false);
       }
     };
 
     const currentAvatar = avatarPreview ?? (appUser?.avatar || null);
+    const currentCover = coverPreview ?? (appUser?.coverUrl || null);
 
     return (
       <div className="bg-white min-h-screen">
@@ -1366,6 +1799,25 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
+        {/* Cover banner picker */}
+        {createPortal(
+          <input id="profile-cover-input" type="file" accept="image/*" onChange={handleCoverChange} style={{ position: 'fixed', top: 0, left: 0, width: '1px', height: '1px', opacity: 0.001, zIndex: -1 }} />,
+          document.body
+        )}
+        <label htmlFor="profile-cover-input" className="block relative cursor-pointer" style={{ height: 130 }}>
+          {currentCover
+            ? <img src={currentCover} alt="Cover" className="w-full h-full object-cover" />
+            : <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+                <p className="text-xs text-gray-400 font-medium">Tap to add cover photo</p>
+              </div>
+          }
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+            <div className="w-8 h-8 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center">
+              <Edit3 size={14} strokeWidth={1.5} className="text-white" />
+            </div>
+          </div>
+        </label>
+
         <div className="px-4 pt-6 space-y-5">
           {/* Avatar */}
           {createPortal(
@@ -1391,7 +1843,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           </div>
           {/* Fields */}
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Name</p>
+            <p className="text-sm font-bold text-gray-900 mb-1.5">Name</p>
             <input
               value={editName}
               onChange={e => setEditName(e.target.value)}
@@ -1400,7 +1852,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             />
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Username</p>
+            <p className="text-sm font-bold text-gray-900 mb-1.5">Username</p>
             <input
               value={editUsername}
               onChange={e => setEditUsername(e.target.value)}
@@ -1410,7 +1862,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             />
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Bio</p>
+            <p className="text-sm font-bold text-gray-900 mb-1.5">Bio</p>
             <textarea
               value={editBio}
               onChange={e => setEditBio(e.target.value)}
@@ -1420,16 +1872,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             />
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Location</p>
-            <input
-              value={editLocation}
-              onChange={e => setEditLocation(e.target.value)}
-              placeholder={displayUser.location || 'City, Country'}
-              className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
-            />
-          </div>
-          <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Link</p>
+            <p className="text-sm font-bold text-gray-900 mb-1.5">Link</p>
             <input
               value={editWebsite}
               onChange={e => setEditWebsite(e.target.value)}
@@ -1438,6 +1881,27 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               inputMode="url"
               className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
             />
+          </div>
+          <div className="mb-4">
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Account visibility</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setEditIsPrivate(false)}
+                className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl border-2 transition-all ${!editIsPrivate ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-slate-50 text-slate-700'}`}>
+                <span className="text-lg">🌍</span>
+                <div className="text-left">
+                  <p className="text-xs font-semibold leading-tight">Public</p>
+                  <p className={`text-xs leading-tight ${!editIsPrivate ? 'text-slate-300' : 'text-slate-400'}`}>Anyone can see you</p>
+                </div>
+              </button>
+              <button type="button" onClick={() => setEditIsPrivate(true)}
+                className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl border-2 transition-all ${editIsPrivate ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-slate-50 text-slate-700'}`}>
+                <span className="text-lg">🔒</span>
+                <div className="text-left">
+                  <p className="text-xs font-semibold leading-tight">Private</p>
+                  <p className={`text-xs leading-tight ${editIsPrivate ? 'text-slate-300' : 'text-slate-400'}`}>Approved followers only</p>
+                </div>
+              </button>
+            </div>
           </div>
           {saveError && (
             <p className="text-xs text-red-400 bg-red-50 rounded-xl px-4 py-3">{saveError}</p>
@@ -1450,10 +1914,113 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   // ── Followers / Following Modal ─────────────────────────────────
   if (showFollowers) {
     const title = showFollowers === 'followers' ? 'Followers' : 'Following';
-    const list = showFollowers === 'followers' ? followerProfiles : followingProfiles;
+    const list = (showFollowers === 'followers' ? followerProfiles : followingProfiles)
+      .filter(u => !profileBlockedUsers.has(u.id));
+
+    const actionSheetActions = followerActionSheet ? (
+      followerActionSheet.listType === 'followers'
+        ? [
+            { label: 'Remove follower', destructive: true, action: async () => {
+              await supabase.from('follows').delete().eq('follower_id', followerActionSheet.user.id).eq('following_id', appUser!.id);
+              setFollowerProfiles(prev => prev.filter(p => p.id !== followerActionSheet.user.id));
+              setRealFollowerCount(c => c - 1);
+              setFollowerActionSheet(null);
+            }},
+            { label: 'Report', destructive: false, action: () => { setFollowerActionSheet(null); } },
+            { label: 'Block', destructive: true, action: () => { setFollowerActionSheet(null); } },
+          ]
+        : [
+            { label: 'Unfollow', destructive: true, action: () => { setUnfollowTarget(followerActionSheet.user); setFollowerActionSheet(null); } },
+            { label: 'Report', destructive: false, action: () => { setFollowerActionSheet(null); } },
+            { label: 'Block', destructive: true, action: () => { setFollowerActionSheet(null); } },
+          ]
+    ) : [];
 
     return (
-      <div className="bg-white min-h-screen">
+      <div className="bg-white min-h-screen relative">
+        {/* Follower action sheet */}
+        {followerActionSheet && !followerReportOpen && (
+          <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: '390px', margin: '0 auto' }} onClick={() => setFollowerActionSheet(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative bg-white rounded-t-3xl pb-10" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-center pt-3 pb-2"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+              <div className="py-1">
+                <button className="w-full flex items-center gap-3 px-5 py-4 active:bg-gray-50"
+                  onClick={() => setFollowerReportOpen(true)}>
+                  <Flag size={18} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                  <span className="text-sm text-gray-900">Report</span>
+                  <ChevronRight size={16} strokeWidth={1.5} className="text-gray-400 ml-auto flex-shrink-0" />
+                </button>
+                <button className="w-full flex items-center gap-3 px-5 py-4 active:bg-gray-50"
+                  onClick={() => {
+                    const u = followerActionSheet.user;
+                    setFollowerActionSheet(null);
+                    setFollowerActionModal({
+                      avatarUrl: u.avatarUrl,
+                      title: `Block @${u.username || u.name}?`,
+                      subtitle: "They won't be able to see your profile or posts, and you won't see theirs.",
+                      confirmLabel: 'Block',
+                      confirmVariant: 'red',
+                      onConfirm: async () => {
+                        if (!appUser?.id) return;
+                        await blockUser(appUser.id, u.id);
+                        setFollowerProfiles(prev => prev.filter(p => p.id !== u.id));
+                        setFollowingProfiles(prev => prev.filter(p => p.id !== u.id));
+                        setFollowerActionModal(null);
+                      },
+                    });
+                  }}>
+                  <UserX size={18} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                  <span className="text-sm text-gray-900">Block @{followerActionSheet.user.username || followerActionSheet.user.name}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Follower report reason sheet */}
+        {followerActionSheet && followerReportOpen && (
+          <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: '390px', margin: '0 auto' }} onClick={() => { setFollowerActionSheet(null); setFollowerReportOpen(false); }}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative bg-white rounded-t-3xl pb-10" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+              <div className="px-5 pt-3 pb-3 border-b border-gray-100">
+                <p className="text-base font-bold text-gray-900">Report</p>
+                <p className="text-xs text-gray-400 mt-0.5">Why are you reporting this?</p>
+              </div>
+              <div className="py-1">
+                {['Harassment or bullying', 'Hate speech', 'Nudity or sexual content', 'Violence or dangerous content', 'Spam', 'Misinformation', 'Intellectual property violation', "Doesn't belong here"].map(reason => (
+                  <button key={reason} className="w-full flex items-center justify-between px-5 py-4 active:bg-gray-50"
+                    onClick={async () => {
+                      if (!appUser?.id) return;
+                      await reportContent(appUser.id, { userId: followerActionSheet.user.id, reason });
+                      setFollowerActionSheet(null);
+                      setFollowerReportOpen(false);
+                      setFollowerActionModal({
+                        iconType: 'check',
+                        title: 'Report submitted',
+                        subtitle: "Thank you. We'll review this and take action if it violates our guidelines.",
+                      });
+                    }}>
+                    <span className="text-sm text-gray-900">{reason}</span>
+                    <ChevronRight size={16} strokeWidth={1.5} className="text-gray-400" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {followerActionModal && (
+          <ActionModal
+            avatarUrl={followerActionModal.avatarUrl}
+            iconType={followerActionModal.iconType}
+            title={followerActionModal.title}
+            subtitle={followerActionModal.subtitle}
+            confirmLabel={followerActionModal.confirmLabel}
+            confirmVariant={followerActionModal.confirmVariant}
+            onConfirm={followerActionModal.onConfirm}
+            onCancel={() => setFollowerActionModal(null)}
+          />
+        )}
         <div className="flex items-center gap-3 px-4 pt-5 pb-4 border-b border-gray-100">
           <button onClick={() => setShowFollowers(null)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
             <ArrowLeft size={18} strokeWidth={1.5} className="text-gray-700" />
@@ -1490,6 +2057,14 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                     <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
                     <p className="text-xs text-gray-400">@{u.username}</p>
                   </div>
+                  {!isMe && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setFollowerActionSheet({ user: u, listType: showFollowers! }); }}
+                      className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 active:bg-gray-100 flex-shrink-0"
+                    >
+                      <span style={{ fontSize: 18, letterSpacing: 1 }}>···</span>
+                    </button>
+                  )}
                   {!isMe && (() => {
                     const isFollowing = showFollowers === 'following' || listFollowingIds.has(u.id);
                     const isPending = listFollowPending === u.id;
@@ -1672,12 +2247,18 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </button>
             <button
               onClick={() => {
-                const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
-                navigator.share({ title: selectedRealCollection.name, url });
+                setCollShareSearch('');
+                setCollShareResults([]);
+                setCollShareSentTo(new Set());
+                setCollShareLinkCopied(false);
+                setShowCollShareSheet(true);
+                if (profileShareConversations.length === 0 && appUser) {
+                  getConversations(appUser.id).then(setProfileShareConversations);
+                }
               }}
               className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center"
             >
-              <Share2 size={14} strokeWidth={1.5} className="text-gray-700" />
+              <Send size={14} strokeWidth={1.5} className="text-gray-700" />
             </button>
             <button
               onClick={() => { setEditColName(selectedRealCollection.name); setEditColDesc(selectedRealCollection.description); setEditColCoverFile(null); setEditColCoverPreview(null); setShowEditCollection(true); }}
@@ -1709,9 +2290,11 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             </div>
             <p className="text-xs text-gray-400">
               {collectionCollaborators.length === 1
-                ? `@${collectionCollaborators[0].profile.username} invited`
-                : `${collectionCollaborators.length} invited`}
-              <span className="text-amber-500 ml-1">· pending</span>
+                ? `@${collectionCollaborators[0].profile.username} ${collectionCollaborators[0].status === 'accepted' ? 'collaborating' : 'invited'}`
+                : `${collectionCollaborators.length} collaborators`}
+              {collectionCollaborators.some(c => c.status === 'pending') && (
+                <span className="text-amber-500 ml-1">· pending</span>
+              )}
             </p>
           </button>
         )}
@@ -1837,7 +2420,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   if (Object.keys(byArea).length === 0) return <p className="text-center text-sm text-gray-400 py-8">No places match this filter</p>;
                   return Object.entries(byArea).map(([area, areaPlaces]) => (
                     <div key={area}>
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{area}</p>
+                      <p className="text-sm font-bold text-gray-900 mb-2">{area}</p>
                       <div className="space-y-3">{areaPlaces.map(place => <PlaceCard key={place.id} place={place} />)}</div>
                     </div>
                   ));
@@ -2051,7 +2634,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             {/* All invited collaborators — shown as Pending until acceptance flow exists */}
             {collectionCollaborators.length > 0 && !inviteSearch && (
               <div className="px-3 flex-shrink-0">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Pending</p>
+                <p className="text-sm font-bold text-gray-900 px-2 mb-1">Pending</p>
                 {collectionCollaborators.map(c => (
                   <div key={c.id} className="flex items-center gap-3 py-2.5 px-2">
                     {c.profile.avatarUrl
@@ -2098,7 +2681,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                           setInvitingUserId(user.id);
                           const err = await addCollaborator(selectedRealCollection.id, user.id, appUser.id);
                           if (!err) {
-                            const newCollab: CollectionCollaborator = { id: `${Date.now()}`, collectionId: selectedRealCollection.id, userId: user.id, invitedBy: appUser.id, createdAt: new Date().toISOString(), profile: { name: user.name, username: user.username, avatarUrl: user.avatarUrl } };
+                            const newCollab: CollectionCollaborator = { id: `${Date.now()}`, collectionId: selectedRealCollection.id, userId: user.id, invitedBy: appUser.id, createdAt: new Date().toISOString(), status: 'pending', profile: { name: user.name, username: user.username, avatarUrl: user.avatarUrl } };
                             setCollectionCollaborators(prev => [...prev, newCollab]);
                             setPendingCollabIds(prev => new Set(prev).add(user.id));
                           }
@@ -2111,7 +2694,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 );
               })}
               {inviteSearch && inviteResults.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-4">No users found on curio</p>
+                <p className="text-sm text-gray-400 text-center py-4">No users found on sondrr</p>
               )}
             </div>
 
@@ -2120,9 +2703,9 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <button
                 onClick={async () => {
                   const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
-                  const msg = `Join me on curio and collaborate on my collection! ${url}`;
+                  const msg = `Join me on sondrr and collaborate on my collection! ${url}`;
                   if (navigator.share) {
-                    try { await navigator.share({ url, title: 'Join my curio collection', text: msg }); } catch {}
+                    try { await navigator.share({ url, title: 'Join my sondrr collection', text: msg }); } catch {}
                   } else {
                     navigator.clipboard.writeText(msg).catch(() => {});
                   }
@@ -2134,8 +2717,122 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-semibold text-gray-900">Invite externally</p>
-                  <p className="text-xs text-gray-400">They'll need to create a curio account</p>
+                  <p className="text-xs text-gray-400">They'll need to create a sondrr account</p>
                 </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Collection Share Sheet */}
+      {showCollShareSheet && (
+        <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowCollShareSheet(false); setCollShareSearch(''); setCollShareResults([]); setCollShareSentTo(new Set()); }} />
+          <div className="relative bg-white rounded-t-3xl">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Send to</h3>
+              <button onClick={() => { setShowCollShareSheet(false); setCollShareSearch(''); setCollShareResults([]); setCollShareSentTo(new Set()); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={14} strokeWidth={2} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="px-5 pb-3">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3">
+                <Search size={14} className="text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={collShareSearch}
+                  onChange={e => {
+                    const q = e.target.value;
+                    setCollShareSearch(q);
+                    if (collShareSearchRef.current) clearTimeout(collShareSearchRef.current);
+                    if (!q.trim()) { setCollShareResults([]); setSearchingCollShare(false); return; }
+                    setSearchingCollShare(true);
+                    collShareSearchRef.current = setTimeout(async () => {
+                      if (!appUser) return;
+                      const results = await searchProfiles(q, appUser.id);
+                      setCollShareResults(results);
+                      setSearchingCollShare(false);
+                    }, 300);
+                  }}
+                  placeholder="Search people..."
+                  className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder-gray-400"
+                />
+                {searchingCollShare && <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin flex-shrink-0" />}
+              </div>
+            </div>
+            {(() => {
+              const showSearch = collShareSearch.trim().length > 0;
+              const list = showSearch ? collShareResults : profileShareConversations.map(c => ({ id: c.otherUser.id, name: c.otherUser.name, username: c.otherUser.username, avatarUrl: c.otherUser.avatarUrl }));
+              if (showSearch && collShareResults.length === 0 && !searchingCollShare) {
+                return <p className="text-sm text-gray-400 text-center py-4 px-5">No users found</p>;
+              }
+              if (!showSearch && profileShareConversations.length === 0) return null;
+              return (
+                <div className="px-3 max-h-44 overflow-y-auto">
+                  {list.map(person => {
+                    const sent = collShareSentTo.has(person.id);
+                    const initials = person.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <button
+                        key={person.id}
+                        onClick={async () => {
+                          if (sent || !appUser) return;
+                          const convId = await getOrCreateConversation(appUser.id, person.id);
+                          if (convId) {
+                            const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                            await sendMessage(convId, appUser.id, `Check out my collection "${selectedRealCollection.name}" on sondrr: ${url}`);
+                            setCollShareSentTo(prev => new Set(prev).add(person.id));
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 py-2.5 px-2 rounded-2xl active:bg-gray-50 text-left"
+                      >
+                        {person.avatarUrl
+                          ? <img src={person.avatarUrl} className="w-11 h-11 rounded-full object-cover object-top flex-shrink-0" />
+                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-500">{initials}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{person.name}</p>
+                          <p className="text-xs text-gray-400 truncate">@{person.username}</p>
+                        </div>
+                        <div className={`px-5 py-2 rounded-full text-xs font-bold flex-shrink-0 transition-colors ${sent ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}>
+                          {sent ? 'Sent ✓' : 'Send'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            <div className="mt-2 border-t border-gray-100 px-3 pb-10">
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={async () => {
+                  const url = `${window.location.origin}/collection/${selectedRealCollection.id}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ url, title: selectedRealCollection.name }); } catch {}
+                  } else {
+                    navigator.clipboard.writeText(url).catch(() => {});
+                  }
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Send size={16} strokeWidth={1.5} className="text-gray-700" />
+                </div>
+                <span className="text-sm font-semibold text-gray-900">Share externally</span>
+              </button>
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/collection/${selectedRealCollection.id}`).catch(() => {});
+                  setCollShareLinkCopied(true);
+                  setTimeout(() => setCollShareLinkCopied(false), 1500);
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  {collShareLinkCopied ? <Check size={16} strokeWidth={2} className="text-green-500" /> : <Copy size={16} strokeWidth={1.5} className="text-gray-700" />}
+                </div>
+                <span className="text-sm font-semibold text-gray-900">{collShareLinkCopied ? 'Link copied!' : 'Copy link'}</span>
               </button>
             </div>
           </div>
@@ -2148,101 +2845,103 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
   // ── Main Profile View ───────────────────────────────────────────
   return (
     <div className="bg-white min-h-screen">
-      {/* Top Nav */}
-      <div className="flex items-center justify-between px-4 pt-5 pb-3">
-        <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center">
-          <UserPlus size={22} strokeWidth={1.5} className="text-gray-700" />
-        </button>
-        <div className="flex items-center gap-1">
-          <button onClick={() => { setShowNotifications(true); markAsSeen(appUser?.id ?? ''); setUnreadCount(0); }} className="w-9 h-9 flex items-center justify-center relative">
-            <Bell size={20} strokeWidth={1.5} className="text-gray-700" />
-            {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-orange-500" />
-            )}
+      {/* Hero cover — post-card style */}
+      <div className="relative" style={{ height: 200 }}>
+        {/* Cover photo */}
+        <div className="absolute inset-0">
+          {(coverPreview ?? appUser?.coverUrl)
+            ? <img src={coverPreview ?? appUser!.coverUrl!} alt="Cover" className="w-full h-full object-cover" />
+            : <div className="w-full h-full bg-gradient-to-br from-gray-200 to-gray-300" />
+          }
+        </div>
+
+        {/* Gradient overlay — bottom fade like post cards */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+
+        {/* Top Nav — floating over cover */}
+        <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-4 pb-3">
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => { setShowNotifications(true); markAsSeen(appUser?.id ?? ''); setUnreadCount(0); }} className="w-9 h-9 flex items-center justify-center rounded-full bg-black/25 backdrop-blur-sm relative">
+              <Bell size={18} strokeWidth={1.5} className="text-white" />
+              {unreadCount > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-orange-500" />}
+            </button>
+            <button onClick={() => setShowFindPeople(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-black/25 backdrop-blur-sm">
+              <UserPlus size={18} strokeWidth={1.5} className="text-white" />
+            </button>
+          </div>
+          <button onClick={() => setShowMenu(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-black/25 backdrop-blur-sm">
+            <Menu size={18} strokeWidth={1.5} className="text-white" />
           </button>
-          <button onClick={() => setShowMenu(true)} className="w-9 h-9 flex items-center justify-center">
-            <Menu size={22} strokeWidth={1.5} className="text-gray-700" />
-          </button>
+        </div>
+
+        {/* Bottom-left: name + @username */}
+        <div className="absolute bottom-10 right-28" style={{ left: 24 }}>
+          <p className="text-base font-semibold text-white leading-tight drop-shadow flex items-center gap-1.5">
+            {displayUser.name}
+            {displayUser.verified && <BadgeCheck size={16} className="text-blue-400 fill-blue-400 flex-shrink-0" strokeWidth={1.5} />}
+          </p>
+          <p className="text-sm font-light text-white/70 mt-0.5">@{displayUser.username}</p>
         </div>
       </div>
 
-      {/* Profile Header */}
-      <div className="px-4 pb-4">
-        <div className="flex items-start gap-4">
-          <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); }} className="relative flex-shrink-0">
-            {(avatarPreview ?? displayUser.avatar)
-              ? <img src={avatarPreview ?? displayUser.avatar!} alt={displayUser.name} className="w-16 h-16 rounded-full object-cover object-top" />
-              : <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-gray-400">{displayUser.name[0]?.toUpperCase()}</div>
-            }
-            <div className="absolute bottom-0 right-0 w-5 h-5 bg-gray-900 rounded-full flex items-center justify-center">
-              <Plus size={11} strokeWidth={2.5} className="text-white" />
-            </div>
-          </button>
-          <div className="flex-1 min-w-0 space-y-0.5">
-            <p className="text-base font-bold text-gray-900 leading-tight truncate flex items-center gap-1.5">
-              {displayUser.name}
-              {displayUser.verified && <BadgeCheck size={15} className="text-blue-500 fill-blue-500 flex-shrink-0" strokeWidth={1.5} />}
-            </p>
-            <p className="text-xs text-gray-400 truncate">@{displayUser.username}</p>
-            {displayUser.bio ? (
-              <div className="pt-0.5">
-                <p className="text-xs text-gray-500 leading-snug">{displayUser.bio}</p>
-              </div>
-            ) : (
-              <button onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); }} className="text-xs text-gray-400 italic pt-0.5">Add a bio…</button>
-            )}
-            {appUser?.website && (
-              <a
-                href={appUser.website.startsWith('http') ? appUser.website : `https://${appUser.website}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs text-blue-500 font-medium pt-0.5"
-              >
-                <Globe size={10} strokeWidth={1.5} />
-                {appUser.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
-              </a>
-            )}
+      {/* White card — overlaps cover, avatar straddles the junction */}
+      <div className="relative bg-white rounded-t-3xl -mt-6" style={{ zIndex: 10 }}>
+        {/* Avatar — top-right, overlapping cover */}
+        <button
+          onClick={() => { setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); }}
+          className="absolute rounded-full overflow-hidden"
+          style={{ top: -44, right: 24, width: 88, height: 88, boxShadow: '0 0 0 4px white', zIndex: 20 }}
+        >
+          {(avatarPreview ?? displayUser.avatar)
+            ? <img src={avatarPreview ?? displayUser.avatar!} alt={displayUser.name} className="w-full h-full object-cover object-top" />
+            : <div className="w-full h-full bg-gray-300 flex items-center justify-center text-2xl font-bold text-white">{displayUser.name[0]?.toUpperCase()}</div>
+          }
+        </button>
+
+        {/* Bio + followers */}
+        <div className="pr-4 pt-4 pb-3" style={{ minHeight: 64, paddingLeft: 24 }}>
+          {displayUser.bio && (
+            <p className="text-sm text-gray-700 leading-snug mb-1.5">{displayUser.bio}</p>
+          )}
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <button
+              onClick={() => {
+                if (isNewUser && appUser) {
+                  setLoadingFollowList(true);
+                  getFollowerProfiles(appUser.id).then(p => { setFollowerProfiles(p); setLoadingFollowList(false); });
+                }
+                setListFollowingIds(new Set(followingProfiles.map(p => p.id)));
+                setShowFollowers('followers');
+              }}
+              className="font-medium text-gray-800"
+            >
+              {isNewUser ? realFollowerCount : displayUser.followersCount} {(isNewUser ? realFollowerCount : displayUser.followersCount) === 1 ? 'follower' : 'followers'}
+            </button>
+            <span className="text-gray-400">·</span>
+            <button
+              onClick={() => {
+                if (isNewUser && appUser) {
+                  setLoadingFollowList(true);
+                  getFollowingProfiles(appUser.id).then(p => { setFollowingProfiles(p); setLoadingFollowList(false); });
+                }
+                setShowFollowers('following');
+              }}
+              className="font-medium text-gray-800"
+            >
+              {isNewUser ? realFollowingCount : displayUser.followingCount} following
+            </button>
           </div>
         </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-2 mt-4">
-          {[
-            { value: realPosts.length, label: 'Posts', action: null },
-            { value: isNewUser ? (() => { const seen = new Set<string>(); return realPosts.flatMap(p => p.places).filter(pl => { const k = pl.name.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).length; })() : actualPlacesCount, label: 'Places', action: null },
-            { value: isNewUser ? realFollowerCount : displayUser.followersCount, label: 'Followers', action: () => {
-              if (isNewUser && appUser) {
-                setLoadingFollowList(true);
-                getFollowerProfiles(appUser.id).then(p => { setFollowerProfiles(p); setLoadingFollowList(false); });
-              }
-              setListFollowingIds(new Set(followingProfiles.map(p => p.id)));
-              setShowFollowers('followers');
-            }},
-            { value: isNewUser ? realFollowingCount : displayUser.followingCount, label: 'Following', action: () => {
-              if (isNewUser && appUser) {
-                setLoadingFollowList(true);
-                getFollowingProfiles(appUser.id).then(p => { setFollowingProfiles(p); setLoadingFollowList(false); });
-              }
-              setShowFollowers('following');
-            }},
-          ].map(stat => (
-            <button key={stat.label} onClick={stat.action ?? undefined} className="text-center">
-              <p className="text-base font-black text-gray-900">{stat.value}</p>
-              <p className="text-xs text-gray-400">{stat.label}</p>
-            </button>
-          ))}
-        </div>
-
       </div>
 
-      {/* Tabs */}
-      <div className="grid grid-cols-4 border-b border-gray-100 border-t">
+      {/* Pill Tabs */}
+      <div className="flex items-center gap-2 px-4 py-3 bg-white overflow-x-auto">
         {(['Posts', 'Map', 'Collections', 'Guides'] as ProfileTab[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`py-3 text-sm font-medium transition-colors ${
-              activeTab === tab ? 'text-gray-900 font-bold border-b-2 border-gray-900 -mb-px' : 'text-gray-400'
+            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              activeTab === tab ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'
             }`}
           >
             {tab}
@@ -2254,28 +2953,34 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
       {activeTab === 'Posts' && (
         isNewUser ? (
           realPosts.length > 0 ? (
-            <DndContext
-              sensors={dndSensors}
-              collisionDetection={closestCenter}
-              onDragStart={() => setIsDraggingPost(true)}
-              onDragEnd={handlePostDragEnd}
-              onDragCancel={() => setIsDraggingPost(false)}
-            >
-              <SortableContext items={realPosts.map(p => p.id)} strategy={rectSortingStrategy}>
-                <div className="grid grid-cols-3 gap-px bg-white border-t border-gray-100">
-                  {[...realPosts].sort((a, b) => a.id === pinnedPostId ? -1 : b.id === pinnedPostId ? 1 : 0).map(post => (
-                    <SortablePostCell
-                      key={post.id}
-                      post={post}
-                      isDraggingAny={isDraggingPost}
-                      likeCount={realPostLikeCounts[post.id] ?? 0}
-                      isPinned={post.id === pinnedPostId}
-                      onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }}
-                    />
-                  )).filter(Boolean)}
-                </div>
-              </SortableContext>
-            </DndContext>
+            <div className="px-1.5 pt-4 pb-4" style={{ columns: 3, columnGap: 5 }}>
+              {realPosts.map(post => {
+                const firstImage = post.places.map(p => p.photoUrl).find(url => url?.trim());
+                if (!firstImage) return null;
+                const likes = realPostLikeCounts[post.id] ?? 0;
+                const collabs = (post.collaborators ?? []).slice(0, 2);
+                return (
+                  <div
+                    key={post.id}
+                    className="break-inside-avoid mb-1.5 relative rounded-xl overflow-hidden cursor-pointer active:opacity-90 transition-opacity"
+                    onClick={() => { setSelectedRealPost(post); setShowPostMap(false); setPostComments([]); setPostCommentText(''); }}
+                  >
+                    <div className="w-full" style={{ aspectRatio: '4/5' }}>
+                      <img src={firstImage} alt="" className="w-full h-full object-cover block" draggable={false} />
+                    </div>
+                    {/* Multi-place indicator */}
+                    {post.places.length > 1 && (
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center">
+                        <div className="grid grid-cols-2 gap-px w-2.5 h-2.5">
+                          <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                          <div className="bg-white rounded-[1px]" /><div className="bg-white rounded-[1px]" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 px-6">
               <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
@@ -2425,7 +3130,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 ) : Object.entries(byCountry).map(([country, cPlaces]) => (
                   <div key={country}>
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{country}</p>
+                      <p className="text-sm font-bold text-gray-900">{country}</p>
                       <p className="text-xs text-gray-400">{cPlaces.length} place{cPlaces.length !== 1 ? 's' : ''}</p>
                     </div>
                     <div className="space-y-2">
@@ -2446,7 +3151,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                             </p>
                             {pl.category && <p className="text-xs text-gray-400 mt-0.5">{catEmoji(pl.category)} {pl.category.charAt(0).toUpperCase() + pl.category.slice(1)}</p>}
                           </div>
-                          {appUser && !appUser.isDemo && (
+                          {appUser && (
                             <button
                               onClick={() => {
                                 if (!isSaved) {
@@ -2530,13 +3235,19 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
               <span className="text-4xl mb-3">🗂️</span>
               <p className="text-slate-800 font-semibold text-base mb-1.5">No collections yet</p>
               <p className="text-slate-400 text-sm text-center max-w-[200px]">Curate your favourite places into shareable collections</p>
+              <button
+                onClick={() => { setNewColSheetContext(null); setShowNewColSheet(true); }}
+                className="mt-4 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-full"
+              >
+                Create your first collection
+              </button>
             </div>
           )}
 
           {/* Shared with me */}
           {sharedCollections.length > 0 && (
             <div className="mt-6">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Shared with me</p>
+              <p className="text-sm font-bold text-gray-900 mb-3">Shared with me</p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-5">
                 {sharedCollections.map(col => (
                   <button key={col.id} className="text-left" onClick={() => {
@@ -2564,104 +3275,86 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         </div>
       )}
 
+
       {/* Guides Tab */}
       {activeTab === 'Guides' && (
         <div className="px-4 pt-4 pb-6">
-          {/* Sub-tab toggle + create button */}
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center bg-gray-100 rounded-xl p-0.5 gap-0.5">
+            {/* Sub-tab toggle: My Guides / Following */}
+            <div className="flex items-center bg-gray-100 rounded-full p-0.5">
               <button
                 onClick={() => setGuidesSubTab('mine')}
-                className={`text-xs font-semibold px-3 py-1.5 rounded-[10px] transition-colors ${guidesSubTab === 'mine' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                className={`text-xs font-semibold px-3.5 py-1.5 rounded-full transition-colors ${guidesSubTab === 'mine' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
               >
-                Mine {userGuides.length > 0 && `(${userGuides.length})`}
+                My Guides
               </button>
               <button
                 onClick={() => setGuidesSubTab('following')}
-                className={`text-xs font-semibold px-3 py-1.5 rounded-[10px] transition-colors ${guidesSubTab === 'following' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}
+                className={`text-xs font-semibold px-3.5 py-1.5 rounded-full transition-colors ${guidesSubTab === 'following' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
               >
-                Following {subscribedGuides.length > 0 && `(${subscribedGuides.length})`}
+                Following
               </button>
             </div>
             {appUser && guidesSubTab === 'mine' && (
               <button
                 onClick={() => setShowCreateGuide(true)}
-                className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 active:bg-gray-200"
+                className="flex items-center gap-1.5 text-xs font-semibold bg-gray-900 text-white px-3 py-1.5 rounded-full"
               >
-                <Plus size={14} strokeWidth={2} className="text-gray-700" />
+                <Plus size={12} strokeWidth={2.5} /> New
               </button>
             )}
           </div>
 
-          {guidesSubTab === 'mine' ? (
-            userGuides.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 px-6">
-                <span className="text-4xl mb-3">📖</span>
-                <p className="text-slate-800 font-semibold text-base mb-1.5">No guides yet</p>
-                <p className="text-slate-400 text-sm text-center max-w-[200px]">Publish a trip from your plans to create a public travel guide</p>
-                {appUser && (
-                  <button onClick={() => setShowCreateGuide(true)} className="mt-4 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-full">
-                    Create your first guide
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {userGuides.map(guide => (
-                  <button key={guide.id} onClick={() => setSelectedGuide(guide)} className="w-full text-left rounded-2xl overflow-hidden active:scale-[0.98] transition-transform shadow-sm">
-                    <div className="relative w-full" style={{ aspectRatio: '5/3' }}>
-                      {guide.coverUrl
-                        ? <img src={guide.coverUrl} alt={guide.title} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full bg-gradient-to-br from-orange-50 to-amber-100 flex items-center justify-center text-5xl">📖</div>
-                      }
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                      <div className="absolute bottom-0 left-0 right-0 px-3 pb-3">
-                        <p className="text-white font-bold text-base leading-tight">{guide.title}</p>
-                        {guide.destination && <p className="text-white/70 text-xs mt-0.5 flex items-center gap-0.5"><MapPin size={9} strokeWidth={1.5} />{guide.destination}</p>}
-                      </div>
-                    </div>
-                    <div className="bg-white px-3 py-2.5 flex items-center justify-between gap-3">
-                      {guide.description
-                        ? <p className="text-xs text-gray-500 flex-1 line-clamp-1 italic">{guide.description}</p>
-                        : <span />
-                      }
-                      <span className="text-xs text-gray-400 flex-shrink-0">{guide.places?.length ?? 0} places</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )
-          ) : (
+          {/* Following sub-tab */}
+          {guidesSubTab === 'following' && (
             subscribedGuides.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 px-6">
-                <span className="text-4xl mb-3">🔖</span>
-                <p className="text-slate-800 font-semibold text-base mb-1.5">No followed guides yet</p>
-                <p className="text-slate-400 text-sm text-center max-w-[220px]">Follow guides from other travellers to keep them here</p>
+                <span className="text-4xl mb-3">📖</span>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">Not following any guides yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[220px]">When you follow a guide, it'll appear here</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
                 {subscribedGuides.map(guide => (
-                  <button key={guide.id} onClick={() => setSelectedGuide(guide)} className="w-full text-left rounded-2xl overflow-hidden active:scale-[0.98] transition-transform shadow-sm">
-                    <div className="relative w-full" style={{ aspectRatio: '5/3' }}>
-                      {guide.coverUrl
-                        ? <img src={guide.coverUrl} alt={guide.title} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full bg-gradient-to-br from-orange-50 to-amber-100 flex items-center justify-center text-5xl">📖</div>
-                      }
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                      <div className="absolute bottom-0 left-0 right-0 px-3 pb-3">
-                        <p className="text-white font-bold text-base leading-tight">{guide.title}</p>
-                        {guide.destination && <p className="text-white/70 text-xs mt-0.5 flex items-center gap-0.5"><MapPin size={9} strokeWidth={1.5} />{guide.destination}</p>}
-                      </div>
-                    </div>
-                    <div className="bg-white px-3 py-2.5 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {guide.profile.avatarUrl
-                          ? <img src={guide.profile.avatarUrl} className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
-                          : <div className="w-4 h-4 rounded-full bg-gray-200 flex-shrink-0" />
+                  <button key={guide.id} onClick={() => setSelectedGuide(guide)} className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform aspect-square bg-gray-200">
+                    {guide.coverUrl
+                      ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                      : <div className="absolute inset-0 flex items-center justify-center text-4xl">📖</div>
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                    <button
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center active:scale-90 transition-transform z-10"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const uid = appUser?.id; if (!uid) return;
+                        setProfGuideColLoading(true);
+                        if (!profSubscribedGuideIds.has(guide.id)) {
+                          subscribeToGuide(uid, guide.id);
+                          setProfSubscribedGuideIds(prev => new Set(prev).add(guide.id));
                         }
-                        <p className="text-xs text-gray-400 truncate">{guide.profile.name}</p>
+                        const ids = await getGuideCollectionIds(guide.id, uid);
+                        setProfGuideColIds(ids);
+                        setProfGuideColSheet(guide);
+                        setProfGuideColLoading(false);
+                      }}
+                    >
+                      {profGuideColLoading && profGuideColSheet?.id === guide.id
+                        ? <Loader2 size={14} strokeWidth={1.5} className="animate-spin text-white" />
+                        : profSubscribedGuideIds.has(guide.id)
+                          ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                          : <Bookmark size={14} strokeWidth={1.5} className="text-white" />}
+                    </button>
+                    <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                      <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full border border-white/20 inline-block mb-1.5">{guide.format === 'itinerary' ? 'Itinerary' : 'Guide'}</span>
+                      <div className="flex items-end justify-between gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-white leading-tight">{guide.title}</p>
+                          <p className="text-[10px] text-white/60 mt-0.5">
+                            {[guide.destination, `${guide.places?.length ?? 0} places`].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+                        <span className="flex-shrink-0 bg-white/20 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-1 rounded-full border border-white/20">Read →</span>
                       </div>
-                      <span className="text-xs text-gray-400 flex-shrink-0">{guide.places?.length ?? 0} places</span>
                     </div>
                   </button>
                 ))}
@@ -2669,15 +3362,94 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             )
           )}
 
-          {/* Create Guide Sheet */}
+          {/* My Guides sub-tab */}
+          {guidesSubTab === 'mine' && (userGuides.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-6">
+              <span className="text-4xl mb-3">📖</span>
+              <p className="text-slate-800 font-semibold text-base mb-1.5">No guides yet</p>
+              <p className="text-slate-400 text-sm text-center max-w-[200px]">Create a guide to share your favourite spots</p>
+              {appUser && (
+                <button onClick={() => setShowCreateGuide(true)} className="mt-4 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-full">
+                  Create your first guide
+                </button>
+              )}
+            </div>
+          ) : (() => {
+            const destinations = ['all', ...Array.from(new Set(userGuides.map(g => g.destination).filter(Boolean))) as string[]];
+            const visibleGuides = guideDestFilter === 'all' ? userGuides : userGuides.filter(g => g.destination === guideDestFilter);
+            return (
+              <>
+                {/* Destination filter chips — only show if there are multiple destinations */}
+                {destinations.length > 2 && (
+                  <div className="flex gap-2 overflow-x-auto -mx-4 px-4 mb-4" style={{ scrollbarWidth: 'none' }}>
+                    {destinations.map(dest => (
+                      <button
+                        key={dest}
+                        onClick={() => setGuideDestFilter(dest)}
+                        className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                          guideDestFilter === dest
+                            ? 'bg-gray-900 text-white'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {dest === 'all' ? 'All' : dest}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {visibleGuides.map(guide => (
+                    <button key={guide.id} onClick={() => setSelectedGuide(guide)} className="relative rounded-2xl overflow-hidden text-left active:scale-[0.98] transition-transform aspect-square bg-gray-200">
+                      {guide.coverUrl
+                        ? <img src={guide.coverUrl} alt={guide.title} className="absolute inset-0 w-full h-full object-cover" />
+                        : <div className="absolute inset-0 flex items-center justify-center text-4xl">📖</div>
+                      }
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                      <button
+                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center active:scale-90 transition-transform z-10"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const uid = appUser?.id; if (!uid) return;
+                          setProfGuideColLoading(true);
+                          if (!profSubscribedGuideIds.has(guide.id)) {
+                            subscribeToGuide(uid, guide.id);
+                            setProfSubscribedGuideIds(prev => new Set(prev).add(guide.id));
+                          }
+                          const ids = await getGuideCollectionIds(guide.id, uid);
+                          setProfGuideColIds(ids);
+                          setProfGuideColSheet(guide);
+                          setProfGuideColLoading(false);
+                        }}
+                      >
+                        {profGuideColLoading && profGuideColSheet?.id === guide.id
+                          ? <Loader2 size={14} strokeWidth={1.5} className="animate-spin text-white" />
+                          : profSubscribedGuideIds.has(guide.id)
+                            ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                            : <Bookmark size={14} strokeWidth={1.5} className="text-white" />}
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                        <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full border border-white/20 inline-block mb-1.5">{guide.format === 'itinerary' ? 'Itinerary' : 'Guide'}</span>
+                        <div className="flex items-end justify-between gap-1.5">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-white leading-tight">{guide.title}</p>
+                            <p className="text-[10px] text-white/60 mt-0.5">
+                              {[guide.destination, `${guide.places?.length ?? 0} places`].filter(Boolean).join(' · ')}
+                            </p>
+                          </div>
+                          <span className="flex-shrink-0 bg-white/20 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-1 rounded-full border border-white/20">Read →</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            );
+          })())}
           {showCreateGuide && appUser && (
             <CreateGuideSheet
               userId={appUser.id}
               onClose={() => setShowCreateGuide(false)}
-              onCreated={(guide) => {
-                setUserGuides(prev => [guide, ...prev]);
-                setShowCreateGuide(false);
-              }}
+              onCreated={(guide) => { setUserGuides(prev => [guide, ...prev]); setShowCreateGuide(false); }}
             />
           )}
         </div>
@@ -2696,6 +3468,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             setUserGuides(prev => prev.filter(g => g.id !== id));
             setSelectedGuide(null);
           }}
+          onViewUser={(uid) => { setSelectedGuide(null); setViewingUserId(uid); }}
         />
       )}
 
@@ -2721,11 +3494,24 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
           onToggleSave={async () => {
             if (!appUser?.id || !guidePlacePage) return;
             if (postPlaceSavedIds.has(guidePlacePage.id)) {
+              // Unsave: optimistic remove
               setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(guidePlacePage.id); return n; });
-              await unsavePlace(appUser.id, guidePlacePage.id);
+              const ok = await unsavePlace(appUser.id, guidePlacePage.id);
+              if (!ok) setPostPlaceSavedIds(prev => new Set(prev).add(guidePlacePage.id));
             } else {
+              // Save: optimistic add, then open the collection sheet
               setPostPlaceSavedIds(prev => new Set(prev).add(guidePlacePage.id));
-              await savePlace(appUser.id, guidePlacePage.id);
+              const ok = await savePlace(appUser.id, guidePlacePage.id);
+              if (!ok) {
+                setPostPlaceSavedIds(prev => { const n = new Set(prev); n.delete(guidePlacePage.id); return n; });
+              } else {
+                setAddToColPlace({ id: guidePlacePage.id, name: guidePlacePage.name });
+                setLoadingPlaceCollections(true);
+                setSavePlanAdded(new Set());
+                setSaveShowNewTrip(false);
+                setSaveNewTripName('');
+                getPlaceCollectionIds(guidePlacePage.id).then(ids => { setPlaceInCollections(ids); setLoadingPlaceCollections(false); });
+              }
             }
           }}
           onSelectPlace={(p) => setGuidePlacePage(p)}
@@ -2794,7 +3580,7 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 className="w-full bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-900 outline-none focus:bg-gray-100 transition-colors"
               />
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Description (optional)</p>
+                <p className="text-sm font-bold text-gray-900 mb-1.5">Description (optional)</p>
                 <input
                   value={newColDesc}
                   onChange={e => setNewColDesc(e.target.value)}
@@ -2818,13 +3604,15 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
             <div className="px-4 pt-2 space-y-1">
               {[
                 { icon: Edit3, label: 'Edit Profile', action: () => { setShowMenu(false); setEditName(displayUser.name); setEditUsername(displayUser.username); setEditBio(displayUser.bio ?? ''); setEditLocation(displayUser.location ?? ''); setEditWebsite(appUser?.website ?? ''); setShowEditProfile(true); } },
-                { icon: Share2, label: 'Share Profile', action: async () => {
+                { icon: Share2, label: 'Share Profile', action: () => {
                   setShowMenu(false);
-                  const url = `${window.location.origin}/?u=${displayUser.username}`;
-                  if (navigator.share) {
-                    try { await navigator.share({ title: displayUser.name, text: `Check out ${displayUser.name} on Curio`, url }); } catch {}
-                  } else {
-                    try { await navigator.clipboard.writeText(url); setProfileLinkCopied(true); setTimeout(() => setProfileLinkCopied(false), 2000); } catch {}
+                  setProfileShareSheetSearch('');
+                  setProfileShareSheetResults([]);
+                  setProfileShareSheetSentTo(new Set());
+                  setProfileShareSheetLinkCopied(false);
+                  setShowProfileShareSheet(true);
+                  if (profileShareConversations.length === 0 && appUser) {
+                    getConversations(appUser.id).then(setProfileShareConversations);
                   }
                 }},
                 { icon: Settings, label: 'Settings', action: () => { setShowMenu(false); setShowSettings(true); } },
@@ -2878,8 +3666,8 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                 <span className="flex-1 text-sm text-gray-900">Notifications</span>
                 <button
                   onClick={() => {
-                    const current = localStorage.getItem('curio_notifs') !== 'false';
-                    localStorage.setItem('curio_notifs', String(!current));
+                    const current = localStorage.getItem('sondrr_notifs') !== 'false';
+                    localStorage.setItem('sondrr_notifs', String(!current));
                     setNotificationsEnabled(!current);
                   }}
                   className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${notificationsEnabled ? 'bg-gray-900' : 'bg-gray-200'}`}
@@ -2887,19 +3675,71 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
                   <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${notificationsEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
                 </button>
               </div>
+              <div className="flex items-center gap-3 py-3.5 border-b border-gray-50">
+                <Globe size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-gray-900">Private Account</span>
+                  <p className="text-xs text-gray-400 mt-0.5">Only followers can see your posts</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const next = !isPrivateAccount;
+                    setIsPrivateAccount(next);
+                    if (appUser?.id) await updateProfilePrivacy(appUser.id, next);
+                    onProfileUpdate?.({
+                      name: appUser?.name ?? '',
+                      username: appUser?.username ?? '',
+                      avatar: appUser?.avatar ?? null,
+                      bio: appUser?.bio ?? '',
+                      location: appUser?.location ?? '',
+                      website: appUser?.website,
+                      coverUrl: appUser?.coverUrl,
+                      isPrivate: next,
+                    });
+                  }}
+                  className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 flex-shrink-0 ${isPrivateAccount ? 'bg-gray-900' : 'bg-gray-200'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${isPrivateAccount ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </div>
               <button
                 onClick={() => {
                   setShowSettings(false);
-                  if (appUser?.id && likedPostsFull.length === 0) {
+                  if (appUser?.id && likedPostsFull.length === 0 && likedGuidesFull.length === 0) {
                     setLoadingLikedPosts(true);
-                    getLikedPostsFull(appUser.id).then(posts => { setLikedPostsFull(posts); setLoadingLikedPosts(false); });
+                    Promise.all([
+                      getLikedPostsFull(appUser.id),
+                      getLikedGuidesFull(appUser.id),
+                    ]).then(([posts, guides]) => {
+                      setLikedPostsFull(posts);
+                      setLikedGuidesFull(guides);
+                      setLoadingLikedPosts(false);
+                    });
                   }
                   setShowLikedPosts(true);
                 }}
                 className="w-full flex items-center gap-3 py-3.5 border-b border-gray-50"
               >
                 <Heart size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
-                <span className="flex-1 text-left text-sm text-gray-900">Posts you've liked</span>
+                <span className="flex-1 text-left text-sm text-gray-900">Content you've liked</span>
+                <ChevronRight size={14} strokeWidth={1.5} className="text-gray-300" />
+              </button>
+              <button
+                onClick={async () => {
+                  setShowSettings(false);
+                  setShowBlockedUsers(true);
+                  if (!appUser?.id) return;
+                  setLoadingBlockedUsers(true);
+                  const blockedIds = await import('../lib/supabase').then(m => m.getBlockedUsers(appUser.id));
+                  if (blockedIds.size === 0) { setBlockedUsersList([]); setLoadingBlockedUsers(false); return; }
+                  const { data } = await supabase.from('profiles').select('id, name, username, avatar_url').in('id', [...blockedIds]);
+                  setBlockedUsersList((data ?? []).map((p: any) => ({ id: p.id, name: p.name ?? '', username: p.username ?? '', avatarUrl: p.avatar_url ?? null })));
+                  setLoadingBlockedUsers(false);
+                }}
+                className="w-full flex items-center gap-3 py-3.5 border-b border-gray-50"
+              >
+                <UserX size={16} strokeWidth={1.5} className="text-gray-500 flex-shrink-0" />
+                <span className="flex-1 text-left text-sm text-gray-900">Blocked accounts</span>
                 <ChevronRight size={14} strokeWidth={1.5} className="text-gray-300" />
               </button>
               <button
@@ -2914,34 +3754,164 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         </div>
       )}
 
-      {/* Liked Posts Sheet */}
+      {/* ── Blocked accounts sheet ── */}
+      {showBlockedUsers && (
+        <div className="fixed inset-0 z-[210] bg-white flex flex-col" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
+            <button onClick={() => setShowBlockedUsers(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
+              <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
+            </button>
+            <p className="text-base font-bold text-gray-900">Blocked accounts</p>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {loadingBlockedUsers ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-700 rounded-full animate-spin" />
+              </div>
+            ) : blockedUsersList.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 px-8 text-center gap-3">
+                <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center">
+                  <UserX size={22} strokeWidth={1.5} className="text-gray-400" />
+                </div>
+                <p className="text-sm font-semibold text-gray-700">No blocked accounts</p>
+                <p className="text-xs text-gray-400">Users you block won't be able to see your posts or find your profile.</p>
+              </div>
+            ) : (
+              <div className="px-4 py-3 space-y-1">
+                {blockedUsersList.map(u => (
+                  <div key={u.id} className="flex items-center gap-3 py-3">
+                    {u.avatarUrl
+                      ? <img src={u.avatarUrl} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+                      : <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-400">{u.name?.[0]}</div>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                      <p className="text-xs text-gray-400 truncate">@{u.username}</p>
+                    </div>
+                    <button onClick={() => setUnblockTarget(u)}
+                      className="px-4 py-2 border border-gray-300 rounded-full text-xs font-semibold text-gray-700 active:bg-gray-50 flex-shrink-0">
+                      Unblock
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Unblock confirmation sheet */}
+      {unblockTarget && (
+        <div className="fixed inset-0 z-[250] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setUnblockTarget(null)} />
+          <div className="relative bg-white rounded-t-3xl pb-8">
+            <div className="flex justify-center pt-3 pb-4"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex flex-col items-center px-6 pb-2">
+              {unblockTarget.avatarUrl
+                ? <img src={unblockTarget.avatarUrl} alt={unblockTarget.name} className="w-16 h-16 rounded-full object-cover mb-3" />
+                : <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <span className="text-xl font-bold text-gray-400">{unblockTarget.name[0]?.toUpperCase()}</span>
+                  </div>
+              }
+              <p className="text-base font-bold text-gray-900 mb-1">Unblock @{unblockTarget.username || unblockTarget.name}?</p>
+              <p className="text-sm text-gray-400 text-center mb-6">They'll be able to see your profile and content again.</p>
+              <button
+                className="w-full py-3.5 bg-gray-900 text-white rounded-2xl text-sm font-bold mb-3"
+                onClick={async () => {
+                  if (!appUser?.id) return;
+                  await unblockUser(appUser.id, unblockTarget.id);
+                  setBlockedUsersList(prev => prev.filter(x => x.id !== unblockTarget.id));
+                  setUnblockTarget(null);
+                }}>
+                Unblock
+              </button>
+              <button className="w-full py-3.5 bg-gray-100 text-gray-700 rounded-2xl text-sm font-semibold"
+                onClick={() => setUnblockTarget(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Liked Content Sheet */}
       {showLikedPosts && (
         <div className="fixed inset-0 z-[210] bg-white flex flex-col" style={{ maxWidth: '384px', margin: '0 auto' }}>
           <div className="flex items-center gap-3 px-4 pt-5 pb-3 border-b border-gray-100">
             <button onClick={() => setShowLikedPosts(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100">
               <ArrowLeft size={16} strokeWidth={1.5} className="text-gray-700" />
             </button>
-            <h2 className="text-base font-bold text-gray-900">Posts you've liked</h2>
+            <h2 className="text-base font-bold text-gray-900">Content you've liked</h2>
           </div>
           <div className="flex-1 overflow-y-auto pb-8">
             {loadingLikedPosts ? (
               <div className="grid grid-cols-2 gap-2 p-4">
                 {[...Array(6)].map((_, i) => <div key={i} className="aspect-square bg-gray-100 rounded-2xl animate-pulse" />)}
               </div>
-            ) : likedPostsFull.length === 0 ? (
+            ) : likedPostsFull.length === 0 && likedGuidesFull.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 px-6">
                 <span className="text-4xl mb-3">🤍</span>
-                <p className="text-slate-800 font-semibold text-base mb-1.5">No liked posts yet</p>
-                <p className="text-slate-400 text-sm text-center max-w-[200px]">Posts you like will appear here</p>
+                <p className="text-slate-800 font-semibold text-base mb-1.5">Nothing liked yet</p>
+                <p className="text-slate-400 text-sm text-center max-w-[200px]">Posts and guides you like will appear here</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-2 p-4">
+                {/* Liked guides */}
+                {likedGuidesFull.map(guide => (
+                  <button
+                    key={`guide-${guide.id}`}
+                    onClick={() => setSelectedGuide(guide)}
+                    className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100 text-left"
+                  >
+                    {guide.coverUrl
+                      ? <img src={guide.coverUrl} alt={guide.title} className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center text-4xl">📖</div>
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                      <span className="bg-white/20 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full border border-white/20 inline-block mb-1">
+                        {guide.format === 'itinerary' ? 'Itinerary' : 'Guide'}
+                      </span>
+                      <p className="text-white text-xs font-semibold leading-tight truncate">{guide.title}</p>
+                      {guide.destination && <p className="text-white/70 text-xs truncate">{guide.destination}</p>}
+                    </div>
+                    <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/40 rounded-full px-1.5 py-0.5">
+                      {guide.profile.avatarUrl
+                        ? <img src={guide.profile.avatarUrl} className="w-4 h-4 rounded-full object-cover" alt={guide.profile.name} />
+                        : <div className="w-4 h-4 rounded-full bg-white/30 flex items-center justify-center text-white text-[8px] font-bold">{guide.profile.name[0]?.toUpperCase()}</div>
+                      }
+                      <span className="text-white text-[10px] font-medium">{guide.profile.username || guide.profile.name}</span>
+                    </div>
+                    <button
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center active:scale-90 transition-transform z-10"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const uid = appUser?.id; if (!uid) return;
+                        setProfGuideColLoading(true);
+                        if (!profSubscribedGuideIds.has(guide.id)) {
+                          subscribeToGuide(uid, guide.id);
+                          setProfSubscribedGuideIds(prev => new Set(prev).add(guide.id));
+                        }
+                        const ids = await getGuideCollectionIds(guide.id, uid);
+                        setProfGuideColIds(ids);
+                        setProfGuideColSheet(guide);
+                        setProfGuideColLoading(false);
+                      }}
+                    >
+                      {profGuideColLoading && profGuideColSheet?.id === guide.id
+                        ? <Loader2 size={14} strokeWidth={1.5} className="animate-spin text-white" />
+                        : profSubscribedGuideIds.has(guide.id)
+                          ? <BookmarkCheck size={14} strokeWidth={1.5} className="text-white" />
+                          : <Bookmark size={14} strokeWidth={1.5} className="text-white" />}
+                    </button>
+                  </button>
+                ))}
+                {/* Liked posts */}
                 {likedPostsFull.map(post => {
                   const photo = post.places.find(p => p.photoUrl)?.photoUrl;
                   const title = post.locationLabel || post.places[0]?.name || 'Post';
                   const city = post.places[0]?.city || post.places[0]?.country || '';
                   return (
-                    <div key={post.id} className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100">
+                    <div key={`post-${post.id}`} className="relative rounded-2xl overflow-hidden aspect-square bg-gray-100">
                       {photo
                         ? <img src={photo} alt={title} className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center text-4xl">🗺️</div>
@@ -2973,7 +3943,199 @@ export default function Profile({ onOpenMessages, appUser, onLogout, onNavigate,
         </div>
       )}
 
+      {/* Profile Share Sheet */}
+      {showProfileShareSheet && (
+        <div className="fixed inset-0 z-[400] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowProfileShareSheet(false); setProfileShareSheetSearch(''); setProfileShareSheetResults([]); setProfileShareSheetSentTo(new Set()); }} />
+          <div className="relative bg-white rounded-t-3xl">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-9 h-1 rounded-full bg-gray-200" /></div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Send to</h3>
+              <button onClick={() => { setShowProfileShareSheet(false); setProfileShareSheetSearch(''); setProfileShareSheetResults([]); setProfileShareSheetSentTo(new Set()); }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100">
+                <X size={14} strokeWidth={2} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="px-5 pb-3">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-3">
+                <Search size={14} className="text-gray-400 flex-shrink-0" />
+                <input
+                  autoFocus
+                  value={profileShareSheetSearch}
+                  onChange={e => {
+                    const q = e.target.value;
+                    setProfileShareSheetSearch(q);
+                    if (profileShareSheetSearchRef.current) clearTimeout(profileShareSheetSearchRef.current);
+                    if (!q.trim()) { setProfileShareSheetResults([]); setSearchingProfileShareSheet(false); return; }
+                    setSearchingProfileShareSheet(true);
+                    profileShareSheetSearchRef.current = setTimeout(async () => {
+                      if (!appUser) return;
+                      const results = await searchProfiles(q, appUser.id);
+                      setProfileShareSheetResults(results);
+                      setSearchingProfileShareSheet(false);
+                    }, 300);
+                  }}
+                  placeholder="Search people..."
+                  className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder-gray-400"
+                />
+                {searchingProfileShareSheet && <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin flex-shrink-0" />}
+              </div>
+            </div>
+            {(() => {
+              const showSearch = profileShareSheetSearch.trim().length > 0;
+              const list = showSearch ? profileShareSheetResults : profileShareConversations.map(c => ({ id: c.otherUser.id, name: c.otherUser.name, username: c.otherUser.username, avatarUrl: c.otherUser.avatarUrl }));
+              if (showSearch && profileShareSheetResults.length === 0 && !searchingProfileShareSheet) {
+                return <p className="text-sm text-gray-400 text-center py-4 px-5">No users found</p>;
+              }
+              if (!showSearch && profileShareConversations.length === 0) return null;
+              return (
+                <div className="px-3 max-h-44 overflow-y-auto">
+                  {list.map(person => {
+                    const sent = profileShareSheetSentTo.has(person.id);
+                    const initials = person.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <button
+                        key={person.id}
+                        onClick={async () => {
+                          if (sent || !appUser) return;
+                          const convId = await getOrCreateConversation(appUser.id, person.id);
+                          if (convId) {
+                            const url = `${window.location.origin}/?u=${displayUser.username}`;
+                            await sendMessage(convId, appUser.id, `Check out ${displayUser.name} on sondrr: ${url}`);
+                            setProfileShareSheetSentTo(prev => new Set(prev).add(person.id));
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 py-2.5 px-2 rounded-2xl active:bg-gray-50 text-left"
+                      >
+                        {person.avatarUrl
+                          ? <img src={person.avatarUrl} className="w-11 h-11 rounded-full object-cover object-top flex-shrink-0" />
+                          : <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 text-sm font-bold text-gray-500">{initials}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{person.name}</p>
+                          <p className="text-xs text-gray-400 truncate">@{person.username}</p>
+                        </div>
+                        <div className={`px-5 py-2 rounded-full text-xs font-bold flex-shrink-0 transition-colors ${sent ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}>
+                          {sent ? 'Sent ✓' : 'Send'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            <div className="mt-2 border-t border-gray-100 px-3 pb-10">
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={async () => {
+                  const url = `${window.location.origin}/?u=${displayUser.username}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ url, title: displayUser.name }); } catch {}
+                  } else {
+                    navigator.clipboard.writeText(url).catch(() => {});
+                  }
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <Send size={16} strokeWidth={1.5} className="text-gray-700" />
+                </div>
+                <span className="text-sm font-semibold text-gray-900">Share externally</span>
+              </button>
+              <button
+                className="w-full flex items-center gap-3 py-3 px-2 rounded-2xl active:bg-gray-50"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/?u=${displayUser.username}`).catch(() => {});
+                  setProfileShareSheetLinkCopied(true);
+                  setTimeout(() => setProfileShareSheetLinkCopied(false), 1500);
+                }}
+              >
+                <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  {profileShareSheetLinkCopied ? <Check size={16} strokeWidth={2} className="text-green-500" /> : <Copy size={16} strokeWidth={1.5} className="text-gray-700" />}
+                </div>
+                <span className="text-sm font-semibold text-gray-900">{profileShareSheetLinkCopied ? 'Link copied!' : 'Copy link'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <BookingSheet place={bookingPlace} onClose={() => setBookingPlace(null)} />
+
+      {/* Guide → Save to Collection sheet */}
+      {profGuideColSheet && (
+        <div className="fixed inset-0 z-[300] flex flex-col justify-end" style={{ maxWidth: '384px', margin: '0 auto' }} onClick={() => { setProfGuideColSheet(null); setProfGuideColIds(new Set()); }}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-white rounded-t-3xl pb-8" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 rounded-full bg-gray-200" /></div>
+            <div className="px-5 pt-3 pb-4">
+              <p className="text-base font-bold text-gray-900">Saved to All Saved ✓</p>
+              <p className="text-xs text-gray-400 mt-0.5">Also add to a collection?</p>
+            </div>
+            <div className="px-4 space-y-2 max-h-64 overflow-y-auto">
+              {realCollections.length === 0 && (
+                <p className="text-sm text-gray-400 py-4 text-center">No collections yet — create one below</p>
+              )}
+              {realCollections.map(col => {
+                const inCol = profGuideColIds.has(col.id);
+                return (
+                  <button key={col.id} className="w-full flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-2xl text-left active:bg-gray-100"
+                    onClick={async () => {
+                      const uid = appUser?.id; if (!uid) return;
+                      if (inCol) {
+                        setProfGuideColIds(prev => { const n = new Set(prev); n.delete(col.id); return n; });
+                        await removeGuideFromCollection(col.id, profGuideColSheet.id);
+                        const remaining = new Set(profGuideColIds); remaining.delete(col.id);
+                        if (remaining.size === 0) { unsubscribeFromGuide(uid, profGuideColSheet.id); setProfSubscribedGuideIds(prev => { const n = new Set(prev); n.delete(profGuideColSheet.id); return n; }); }
+                      } else {
+                        setProfGuideColIds(prev => new Set(prev).add(col.id));
+                        await addGuideToCollection(col.id, profGuideColSheet.id, uid);
+                        if (!profSubscribedGuideIds.has(profGuideColSheet.id)) {
+                          subscribeToGuide(uid, profGuideColSheet.id);
+                          setProfSubscribedGuideIds(prev => new Set(prev).add(profGuideColSheet.id));
+                        }
+                      }
+                    }}
+                  >
+                    <div className="w-11 h-11 rounded-xl overflow-hidden bg-gray-200 flex-shrink-0 flex items-center justify-center">
+                      {col.coverImageUrl ? <img src={col.coverImageUrl} className="w-full h-full object-cover" alt="" /> : <span className="text-xl">{col.emoji || '🗂️'}</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{col.name}</p>
+                      <p className="text-xs text-gray-400">{col.placesCount} items</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${inCol ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                      {inCol && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-4 pt-3">
+              <button onClick={() => setShowNewColSheet(true)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 py-2">
+                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"><Plus size={15} strokeWidth={2} className="text-gray-600" /></div>
+                New collection
+              </button>
+            </div>
+            <div className="mx-4 border-t border-gray-100" />
+            <div className="px-4 pt-2 pb-2">
+              <button
+                onClick={async () => {
+                  const uid = appUser?.id;
+                  if (!uid || !profGuideColSheet) return;
+                  unsubscribeFromGuide(uid, profGuideColSheet.id);
+                  setProfSubscribedGuideIds(prev => { const n = new Set(prev); n.delete(profGuideColSheet.id); return n; });
+                  setProfGuideColSheet(null);
+                  setProfGuideColIds(new Set());
+                }}
+                className="flex items-center gap-2 text-sm font-semibold text-red-500 py-2 w-full"
+              >
+                <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <Bookmark size={15} strokeWidth={2} className="text-red-400" />
+                </div>
+                Remove from Saved
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
